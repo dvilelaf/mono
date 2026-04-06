@@ -6,6 +6,7 @@ import { healthRouter } from "./domains/health/health.routes.js";
 import { genomicsRouter } from "./domains/genomics/genomics.routes.js";
 import { financeRouter } from "./domains/finance/finance.routes.js";
 import { businessRouter } from "./domains/business/business.routes.js";
+import { documentsRouter } from "./domains/documents/documents.routes.js";
 
 export const app = express();
 
@@ -25,5 +26,6 @@ app.use("/api/health", healthRouter);
 app.use("/api/genomics", genomicsRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/business", businessRouter);
+app.use("/api/documents", documentsRouter);
 
 app.use(errorHandler);
