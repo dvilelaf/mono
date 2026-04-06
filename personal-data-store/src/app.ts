@@ -3,6 +3,7 @@ import { apiKeyAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { systemRouter } from "./system/system.routes.js";
 import { healthRouter } from "./domains/health/health.routes.js";
+import { genomicsRouter } from "./domains/genomics/genomics.routes.js";
 
 export const app = express();
 
@@ -19,5 +20,6 @@ app.use("/api", apiKeyAuth);
 // Domain routers
 app.use("/api/system", systemRouter);
 app.use("/api/health", healthRouter);
+app.use("/api/genomics", genomicsRouter);
 
 app.use(errorHandler);
