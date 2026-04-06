@@ -3,3 +3,4 @@
 export * from "../system/system.schema.js";
 export * from "../domains/health/health.schema.js";
 export * from "../domains/genomics/genomics.schema.js";
+export * from "../domains/finance/finance.schema.js";
