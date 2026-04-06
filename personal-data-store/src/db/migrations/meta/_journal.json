@@ -22,6 +22,20 @@
       "when": 1775475314087,
       "tag": "0002_clever_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1775475522275,
+      "tag": "0003_narrow_mongu",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775475847718,
+      "tag": "0004_boring_killer_shrike",
+      "breakpoints": true
     }
   ]
 }
