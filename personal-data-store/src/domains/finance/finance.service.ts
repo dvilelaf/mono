@@ -8,6 +8,9 @@ import {
   accountBalanceHistory,
 } from "./finance.schema.js";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { parseRevolutCsv } from "./csv-parsers/revolut.js";
+import { parseRobinhoodCsv } from "./csv-parsers/robinhood.js";
+import { parseFidelityCsv } from "./csv-parsers/fidelity.js";
 
 // --- Wallets ---
 
@@ -135,4 +138,56 @@ export async function queryBalances(filters: {
     .from(accountBalanceHistory)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(accountBalanceHistory.snapshotAt));
+}
+
+// --- CSV Import ---
+
+export function detectInstitution(csv: string): string | null {
+  const firstLine = csv.split("\n")[0]?.toLowerCase() || "";
+  if (firstLine.includes("product") && firstLine.includes("started date")) return "revolut";
+  if (firstLine.includes("activity date") && firstLine.includes("trans code")) return "robinhood";
+  if (firstLine.includes("transaction") && firstLine.includes("memo")) return "fidelity";
+  return null;
+}
+
+export async function importCsv(
+  accountId: string,
+  csvContent: string,
+  institution?: string
+): Promise<{ imported: number; total: number }> {
+  const detected = institution ?? detectInstitution(csvContent);
+
+  let parsed;
+  if (detected === "revolut") {
+    parsed = parseRevolutCsv(csvContent);
+  } else if (detected === "robinhood") {
+    parsed = parseRobinhoodCsv(csvContent);
+  } else if (detected === "fidelity") {
+    parsed = parseFidelityCsv(csvContent);
+  } else {
+    throw new Error("Unknown or undetectable institution");
+  }
+
+  const total = parsed.length;
+  if (total === 0) return { imported: 0, total: 0 };
+
+  const rows = parsed.map((tx) => ({
+    accountId,
+    date: tx.date,
+    description: tx.description,
+    amount: tx.amount,
+    currency: tx.currency,
+    balanceAfter: tx.balanceAfter ?? undefined,
+    source: "csv_import" as const,
+    sourceRef: tx.sourceRef ?? undefined,
+    metadata: tx.metadata,
+  }));
+
+  const result = await db
+    .insert(transactions)
+    .values(rows)
+    .onConflictDoNothing()
+    .returning({ id: transactions.id });
+
+  return { imported: result.length, total };
 }

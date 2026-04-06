@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import {
   createWallet,
   listWallets,
@@ -8,7 +9,10 @@ import {
   queryTransactions,
   queryHoldings,
   queryBalances,
+  importCsv,
 } from "./finance.service.js";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 export const financeRouter = Router();
 
@@ -106,6 +110,28 @@ financeRouter.get("/balances", async (req, res, next) => {
       to: req.query.to as string | undefined,
     });
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- CSV Import ---
+
+financeRouter.post("/import/csv", upload.single("file"), async (req, res, next) => {
+  try {
+    const accountId = req.body.account_id as string | undefined;
+    if (!accountId) {
+      res.status(400).json({ error: "account_id is required" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "file is required" });
+      return;
+    }
+    const csvContent = req.file.buffer.toString("utf-8");
+    const institution = req.body.institution as string | undefined;
+    const result = await importCsv(accountId, csvContent, institution);
+    res.status(200).json(result);
   } catch (err) {
     next(err);
   }
