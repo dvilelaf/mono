@@ -1,12 +1,19 @@
 import { pgTable, uuid, text, numeric, date, timestamp, jsonb, index, unique } from "drizzle-orm/pg-core";
 
-export const wallets = pgTable("wallets", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  address: text("address").notNull(),
-  chain: text("chain").notNull(),
-  label: text("label"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const wallets = pgTable(
+  "wallets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    address: text("address").notNull(),
+    chain: text("chain").notNull(),
+    walletType: text("wallet_type").notNull().default("onchain"),
+    label: text("label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("wallets_address_chain_uniq").on(table.address, table.chain),
+  ]
+);
 
 export const portfolioSnapshots = pgTable(
   "portfolio_snapshots",

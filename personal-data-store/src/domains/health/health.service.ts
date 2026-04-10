@@ -1,5 +1,5 @@
 import { db } from "../../db/index.js";
-import { healthMetrics, supplements, nutritionEntries } from "./health.schema.js";
+import { healthMetrics, supplements, nutritionEntries, workouts } from "./health.schema.js";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 
 interface CreateMetricInput {
@@ -31,6 +31,7 @@ export async function queryMetrics(filters: {
   source?: string;
   from?: string;
   to?: string;
+  limit?: number;
 }) {
   const conditions = [];
   if (filters.type) conditions.push(eq(healthMetrics.metricType, filters.type));
@@ -42,7 +43,8 @@ export async function queryMetrics(filters: {
     .select()
     .from(healthMetrics)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(healthMetrics.recordedAt));
+    .orderBy(desc(healthMetrics.recordedAt))
+    .limit(filters.limit ?? 1000);
 }
 
 export async function latestMetric(type: string) {
@@ -101,4 +103,33 @@ export async function queryNutrition(filters: { from?: string; to?: string }) {
     .from(nutritionEntries)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(nutritionEntries.recordedAt));
+}
+
+export async function queryWorkouts(filters: { name?: string; from?: string; to?: string; limit?: number }) {
+  const conditions = [];
+  if (filters.name) conditions.push(eq(workouts.name, filters.name));
+  if (filters.from) conditions.push(gte(workouts.startedAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(workouts.startedAt, new Date(filters.to)));
+
+  return db
+    .select({
+      id: workouts.id,
+      name: workouts.name,
+      source: workouts.source,
+      startedAt: workouts.startedAt,
+      endedAt: workouts.endedAt,
+      duration: workouts.duration,
+      distance: workouts.distance,
+      distanceUnit: workouts.distanceUnit,
+      activeEnergy: workouts.activeEnergy,
+      avgHeartRate: workouts.avgHeartRate,
+      maxHeartRate: workouts.maxHeartRate,
+      location: workouts.location,
+      isIndoor: workouts.isIndoor,
+      metadata: workouts.metadata,
+    })
+    .from(workouts)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(workouts.startedAt))
+    .limit(filters.limit ?? 100);
 }

@@ -3,8 +3,13 @@ export interface SyncResult {
   errors?: string[];
 }
 
+export interface SyncOptions {
+  startDate?: string;
+  endDate?: string;
+}
+
 export interface Connector {
   name: string;
   schedule: string | null;
-  sync(): Promise<SyncResult>;
+  sync(options?: SyncOptions): Promise<SyncResult>;
 }

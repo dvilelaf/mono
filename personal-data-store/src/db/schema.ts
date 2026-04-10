@@ -6,3 +6,7 @@ export * from "../domains/genomics/genomics.schema.js";
 export * from "../domains/finance/finance.schema.js";
 export * from "../domains/business/business.schema.js";
 export * from "../domains/documents/documents.schema.js";
+export * from "../domains/finance/income.schema.js";
+export * from "../domains/finance/yield-positions.schema.js";
+export * from "../domains/media/media.schema.js";
+export * from "../domains/analyses/analyses.schema.js";

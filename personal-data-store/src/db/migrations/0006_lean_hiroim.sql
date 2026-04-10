@@ -1,0 +1,1 @@
+ALTER TABLE "health_metrics" ADD CONSTRAINT "health_metrics_source_type_recorded_uniq" UNIQUE("source","metric_type","recorded_at");

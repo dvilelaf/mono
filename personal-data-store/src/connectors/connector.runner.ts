@@ -1,16 +1,16 @@
 import { db } from "../db/index.js";
 import { connectorRuns } from "../system/system.schema.js";
 import { eq } from "drizzle-orm";
-import type { Connector, SyncResult } from "./connector.interface.js";
+import type { Connector, SyncResult, SyncOptions } from "./connector.interface.js";
 
-export async function runConnector(connector: Connector): Promise<SyncResult> {
+export async function runConnector(connector: Connector, options?: SyncOptions): Promise<SyncResult> {
   const [run] = await db
     .insert(connectorRuns)
     .values({ connector: connector.name, status: "running", startedAt: new Date() })
     .returning();
 
   try {
-    const result = await connector.sync();
+    const result = await connector.sync(options);
     await db.update(connectorRuns).set({
       status: "success", finishedAt: new Date(), recordsSynced: result.recordsSynced,
     }).where(eq(connectorRuns.id, run.id));

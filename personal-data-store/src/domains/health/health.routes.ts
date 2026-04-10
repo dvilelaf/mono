@@ -6,6 +6,7 @@ import {
   createSupplement,
   querySupplements,
   queryNutrition,
+  queryWorkouts,
 } from "./health.service.js";
 
 export const healthRouter = Router();
@@ -17,6 +18,7 @@ healthRouter.get("/metrics", async (req, res, next) => {
       source: req.query.source as string | undefined,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
     });
     res.json(metrics);
   } catch (err) {
@@ -79,6 +81,20 @@ healthRouter.get("/nutrition", async (req, res, next) => {
       to: req.query.to as string | undefined,
     });
     res.json(entries);
+  } catch (err) {
+    next(err);
+  }
+});
+
+healthRouter.get("/workouts", async (req, res, next) => {
+  try {
+    const workouts = await queryWorkouts({
+      name: req.query.name as string | undefined,
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    });
+    res.json(workouts);
   } catch (err) {
     next(err);
   }

@@ -11,6 +11,8 @@ import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { parseRevolutCsv } from "./csv-parsers/revolut.js";
 import { parseRobinhoodCsv } from "./csv-parsers/robinhood.js";
 import { parseFidelityCsv } from "./csv-parsers/fidelity.js";
+import { parseRevolutSavingsCsv } from "./csv-parsers/revolut-savings.js";
+import { parseWiseCsv } from "./csv-parsers/wise.js";
 
 // --- Wallets ---
 
@@ -89,6 +91,7 @@ export async function queryTransactions(filters: {
   from?: string;
   to?: string;
   category?: string;
+  limit?: number;
 }) {
   const conditions = [];
   if (filters.accountId) conditions.push(eq(transactions.accountId, filters.accountId));
@@ -100,7 +103,8 @@ export async function queryTransactions(filters: {
     .select()
     .from(transactions)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(transactions.date));
+    .orderBy(desc(transactions.date))
+    .limit(filters.limit ?? 1000);
 }
 
 // --- Holdings ---
@@ -145,6 +149,8 @@ export async function queryBalances(filters: {
 export function detectInstitution(csv: string): string | null {
   const firstLine = csv.split("\n")[0]?.toLowerCase() || "";
   if (firstLine.includes("product") && firstLine.includes("started date")) return "revolut";
+  if (firstLine.includes("transferwise id") || firstLine.includes("wise id")) return "wise";
+  if (firstLine.includes("money out") && firstLine.includes("money in")) return "revolut-savings";
   if (firstLine.includes("activity date") && firstLine.includes("trans code")) return "robinhood";
   if (firstLine.includes("transaction") && firstLine.includes("memo")) return "fidelity";
   return null;
@@ -162,6 +168,10 @@ export async function importCsv(
     parsed = parseRevolutCsv(csvContent);
   } else if (detected === "robinhood") {
     parsed = parseRobinhoodCsv(csvContent);
+  } else if (detected === "wise") {
+    parsed = parseWiseCsv(csvContent);
+  } else if (detected === "revolut-savings") {
+    parsed = parseRevolutSavingsCsv(csvContent);
   } else if (detected === "fidelity") {
     parsed = parseFidelityCsv(csvContent);
   } else {
@@ -183,11 +193,17 @@ export async function importCsv(
     metadata: tx.metadata,
   }));
 
-  const result = await db
-    .insert(transactions)
-    .values(rows)
-    .onConflictDoNothing()
-    .returning({ id: transactions.id });
+  let imported = 0;
+  const batchSize = 500;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const result = await db
+      .insert(transactions)
+      .values(batch)
+      .onConflictDoNothing()
+      .returning({ id: transactions.id });
+    imported += result.length;
+  }
 
-  return { imported: result.length, total };
+  return { imported, total };
 }

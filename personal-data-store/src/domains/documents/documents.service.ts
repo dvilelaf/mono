@@ -70,5 +70,5 @@ export async function semanticSearch(query: string, limit: number = 10) {
     LIMIT ${limit}
   `);
 
-  return results.rows;
+  return results;
 }

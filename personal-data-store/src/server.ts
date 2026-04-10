@@ -6,15 +6,17 @@ import { cryptoConnector } from "./connectors/crypto.connector.js";
 import { gmailConnector } from "./connectors/gmail.connector.js";
 import { myfitnesspalConnector } from "./connectors/myfitnesspal.connector.js";
 import { revolutConnector } from "./connectors/revolut.connector.js";
+import { coinbaseConnector } from "./connectors/coinbase.connector.js";
 
 registerConnector(auraConnector);
 registerConnector(cryptoConnector);
 registerConnector(gmailConnector);
 registerConnector(myfitnesspalConnector);
 registerConnector(revolutConnector);
+registerConnector(coinbaseConnector);
 
-const server = app.listen(config.port, "127.0.0.1", () => {
-  console.log(`Personal Data Store running at http://127.0.0.1:${config.port}`);
+const server = app.listen(config.port, "0.0.0.0", () => {
+  console.log(`Personal Data Store running at http://0.0.0.0:${config.port}`);
   startScheduler();
 });
 

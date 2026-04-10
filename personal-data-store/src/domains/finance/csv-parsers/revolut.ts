@@ -64,18 +64,23 @@ export function parseRevolutCsv(csv: string): ParsedTransaction[] {
     const completedDate = fields[idx.completedDate]?.trim() ?? "";
     const date = completedDate.slice(0, 10);
 
+    const amount = fields[idx.amount]?.trim() ?? "";
+    const description = fields[idx.description]?.trim() ?? "";
+    const startedDate = fields[idx.startedDate]?.trim() ?? "";
+    const sourceRef = `rev:${startedDate}:${amount}:${description}`.slice(0, 200);
+
     results.push({
       date,
-      description: fields[idx.description]?.trim() ?? "",
-      amount: fields[idx.amount]?.trim() ?? "",
+      description,
+      amount,
       currency: fields[idx.currency]?.trim() ?? "",
       balanceAfter: fields[idx.balance]?.trim() || null,
-      sourceRef: null,
+      sourceRef,
       metadata: {
         type: fields[idx.type]?.trim() ?? "",
         product: fields[idx.product]?.trim() ?? "",
         fee: fields[idx.fee]?.trim() ?? "",
-        startedDate: fields[idx.startedDate]?.trim() ?? "",
+        startedDate,
       },
     });
   }
