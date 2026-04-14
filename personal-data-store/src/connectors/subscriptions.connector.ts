@@ -29,26 +29,12 @@ interface MergedCandidate {
 
 const CARD_PREFIX_RE = /^Card transaction of [\d.,]+ [A-Z]+ issued by /i;
 
-// Categories that are never subscriptions — regular purchases or transfers
+// Categories that are never recurring payments — one-off purchases and ad-hoc spend
 const EXCLUDED_CATEGORIES = new Set([
-  "family", "childcare", "dining", "food", "groceries",
+  "dining", "food", "groceries",
   "shopping", "travel", "transport", "self_transfer", "income",
-  "property", "tax", "investment", "vehicle", "transfer_out",
+  "property", "tax", "investment", "vehicle",
 ]);
-
-// "To [Name]" patterns are person-to-person transfers, not subscriptions.
-// Allow "To [Business]" by checking against known utility/service prefixes.
-const TRANSFER_TO_PERSON_RE = /^To [A-Z][a-z]+ [A-Z]/;
-const KNOWN_SERVICE_PREFIXES = [
-  "To British Gas", "To OVO Energy", "To H3g", "To Virgin Media",
-  "To Southern Water", "To BT ", "To L B Camden",
-  "To GBP Savings", "To American Express",
-];
-
-function isTransferToPerson(merchant: string): boolean {
-  if (!TRANSFER_TO_PERSON_RE.test(merchant)) return false;
-  return !KNOWN_SERVICE_PREFIXES.some(p => merchant.startsWith(p));
-}
 
 function parseDates(raw: string | string[]): string[] {
   if (Array.isArray(raw)) return raw;
@@ -73,10 +59,11 @@ function cleanName(merchant: string): string {
 }
 
 function classifyFrequency(medianInterval: number): string | null {
-  // Monthly: 25-38 days (months vary 28-31, billing dates drift)
-  if (medianInterval >= 25 && medianInterval <= 38) return "monthly";
-  if (medianInterval >= 80 && medianInterval <= 100) return "quarterly";
-  if (medianInterval >= 350 && medianInterval <= 395) return "yearly";
+  // Monthly: 20-45 days — wide range because utility bills, catch-up payments,
+  // and weekend-shifted billing create irregular intervals
+  if (medianInterval >= 20 && medianInterval <= 45) return "monthly";
+  if (medianInterval >= 80 && medianInterval <= 110) return "quarterly";
+  if (medianInterval >= 340 && medianInterval <= 400) return "yearly";
   return null;
 }
 
@@ -143,7 +130,14 @@ export const subscriptionsConnector: Connector = {
       }
     }
 
-    const candidates = [...mergedMap.values()].filter(r => r.occurrences >= 3);
+    // Minimum 3 occurrences normally; 2 allowed only for utility-like categories
+    // where we know the merchant is a recurring bill
+    const UTILITY_CATEGORIES = new Set(["utilities", "transfer_out", "business", "insurance"]);
+    const candidates = [...mergedMap.values()].filter(r => {
+      if (r.occurrences >= 3) return true;
+      // Allow 2 occurrences only for known bill categories
+      return r.occurrences >= 2 && r.category && UTILITY_CATEGORIES.has(r.category);
+    });
     console.log(`[subscriptions] ${candidates.length} candidates to evaluate`);
 
     const now = new Date();
@@ -154,10 +148,7 @@ export const subscriptionsConnector: Connector = {
       // Skip excluded categories (groceries, dining, family transfers, etc.)
       if (row.category && EXCLUDED_CATEGORIES.has(row.category)) continue;
 
-      // Skip person-to-person transfers ("To Dagmar Carnevale Lavezzoli")
-      if (isTransferToPerson(row.merchant)) continue;
-
-      // Skip very small amounts (< £2) — incidental, not subscriptions
+      // Skip very small amounts (< £2) — incidental, not recurring payments
       if (row.latestAmount < 2) continue;
 
       // --- Interval analysis ---
@@ -182,9 +173,21 @@ export const subscriptionsConnector: Connector = {
       // Lenient threshold: billing dates drift, weekends shift payments
       const timingConsistent = intervalStddev < 12;
 
-      // Require timing consistency for all detections.
-      // High occurrence can compensate for slightly noisier timing.
-      if (!timingConsistent && !(row.occurrences >= 10 && intervalStddev < 18)) continue;
+      // Timing consistency requirement.
+      // Utility bills and business payments have messy timing (catch-up payments,
+      // variable billing cycles) but are clearly recurring. Accept them with
+      // looser thresholds based on category.
+      const isUtilityLike = row.category && UTILITY_CATEGORIES.has(row.category);
+      const looselyRecurring = intervalStddev < 20;
+
+      if (isUtilityLike) {
+        // Utilities: accept any frequency classification — timing can be messy
+        // but the merchant clearly recurs
+      } else if (!timingConsistent && !looselyRecurring) {
+        continue;
+      } else if (row.occurrences <= 3 && !timingConsistent) {
+        continue;
+      }
 
       // --- Status ---
 
