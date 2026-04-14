@@ -29,6 +29,27 @@ interface MergedCandidate {
 
 const CARD_PREFIX_RE = /^Card transaction of [\d.,]+ [A-Z]+ issued by /i;
 
+// Categories that are never subscriptions — regular purchases or transfers
+const EXCLUDED_CATEGORIES = new Set([
+  "family", "childcare", "dining", "food", "groceries",
+  "shopping", "travel", "transport", "self_transfer", "income",
+  "property", "tax", "investment", "vehicle", "transfer_out",
+]);
+
+// "To [Name]" patterns are person-to-person transfers, not subscriptions.
+// Allow "To [Business]" by checking against known utility/service prefixes.
+const TRANSFER_TO_PERSON_RE = /^To [A-Z][a-z]+ [A-Z]/;
+const KNOWN_SERVICE_PREFIXES = [
+  "To British Gas", "To OVO Energy", "To H3g", "To Virgin Media",
+  "To Southern Water", "To BT ", "To L B Camden",
+  "To GBP Savings", "To American Express",
+];
+
+function isTransferToPerson(merchant: string): boolean {
+  if (!TRANSFER_TO_PERSON_RE.test(merchant)) return false;
+  return !KNOWN_SERVICE_PREFIXES.some(p => merchant.startsWith(p));
+}
+
 function parseDates(raw: string | string[]): string[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === "string") return raw.replace(/[{}]/g, "").split(",").filter(Boolean);
@@ -44,13 +65,18 @@ function median(values: number[]): number {
 }
 
 function cleanName(merchant: string): string {
-  return merchant.replace(/^To /, "").trim();
+  return merchant
+    .replace(/^To /, "")
+    .replace(/^Paid to /, "")
+    .replace(/^Sent money to /, "")
+    .trim();
 }
 
 function classifyFrequency(medianInterval: number): string | null {
-  if (medianInterval >= 25 && medianInterval <= 35) return "monthly";
+  // Monthly: 25-38 days (months vary 28-31, billing dates drift)
+  if (medianInterval >= 25 && medianInterval <= 38) return "monthly";
   if (medianInterval >= 80 && medianInterval <= 100) return "quarterly";
-  if (medianInterval >= 350 && medianInterval <= 380) return "yearly";
+  if (medianInterval >= 350 && medianInterval <= 395) return "yearly";
   return null;
 }
 
@@ -123,7 +149,19 @@ export const subscriptionsConnector: Connector = {
     const now = new Date();
 
     for (const row of candidates) {
-      // Compute intervals between consecutive dates
+      // --- Pre-filters: skip things that are clearly not subscriptions ---
+
+      // Skip excluded categories (groceries, dining, family transfers, etc.)
+      if (row.category && EXCLUDED_CATEGORIES.has(row.category)) continue;
+
+      // Skip person-to-person transfers ("To Dagmar Carnevale Lavezzoli")
+      if (isTransferToPerson(row.merchant)) continue;
+
+      // Skip very small amounts (< £2) — incidental, not subscriptions
+      if (row.latestAmount < 2) continue;
+
+      // --- Interval analysis ---
+
       const timestamps = row.dates.map(d => new Date(d).getTime());
       if (timestamps.length < 2) continue;
 
@@ -133,26 +171,23 @@ export const subscriptionsConnector: Connector = {
       }
 
       const medianInterval = median(intervals);
-
-      // Classify frequency
       const frequency = classifyFrequency(medianInterval);
       if (!frequency) continue;
 
-      // Timing consistency check (primary signal for subscription detection)
+      // --- Timing consistency (primary signal) ---
+
       const intervalStddev = intervals.length > 1
         ? Math.sqrt(intervals.reduce((s, v) => s + (v - medianInterval) ** 2, 0) / intervals.length)
         : 0;
-      const timingConsistent = intervalStddev < 10;
+      // Lenient threshold: billing dates drift, weekends shift payments
+      const timingConsistent = intervalStddev < 12;
 
-      // For 6+ occurrences with consistent timing, always accept (price changes are fine)
-      // For fewer, require some amount stability
-      if (!(row.occurrences >= 6 && timingConsistent)) {
-        // Need at least rough amount consistency for small sample sizes
-        // Skip if we can't verify (merged groups lose stddev)
-        if (row.occurrences < 6 && !timingConsistent) continue;
-      }
+      // Require timing consistency for all detections.
+      // High occurrence can compensate for slightly noisier timing.
+      if (!timingConsistent && !(row.occurrences >= 10 && intervalStddev < 18)) continue;
 
-      // Determine status
+      // --- Status ---
+
       const lastSeenDate = new Date(row.lastSeen);
       const daysSinceLastSeen = Math.round((now.getTime() - lastSeenDate.getTime()) / (1000 * 60 * 60 * 24));
       let status: string;
@@ -164,22 +199,24 @@ export const subscriptionsConnector: Connector = {
         status = "cancelled";
       }
 
-      // Confidence
+      // --- Confidence ---
+
       let confidence: string;
-      if (row.occurrences >= 6 && timingConsistent && intervalStddev < 5) {
+      if (row.occurrences >= 6 && intervalStddev < 5) {
         confidence = "high";
-      } else if (row.occurrences >= 4 && timingConsistent) {
+      } else if (row.occurrences >= 4 && intervalStddev < 10) {
         confidence = "medium";
       } else {
         confidence = "low";
       }
 
-      // Next expected (only if active)
-      const nextExpected = status === "active" ? addDays(row.lastSeen, medianInterval) : null;
+      // --- Next expected ---
 
+      const nextExpected = status === "active" ? addDays(row.lastSeen, medianInterval) : null;
       const name = cleanName(row.merchant);
 
-      // Upsert
+      // --- Upsert ---
+
       try {
         await db.insert(subscriptions).values({
           name,
