@@ -92,6 +92,13 @@
       "when": 1775654863040,
       "tag": "0012_slow_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1776146659175,
+      "tag": "0013_clever_kate_bishop",
+      "breakpoints": true
     }
   ]
 }

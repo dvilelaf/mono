@@ -405,6 +405,50 @@ financeRouter.get("/income-statement", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// --- Subscriptions ---
+
+financeRouter.get("/subscriptions/summary", async (_req, res, next) => {
+  try {
+    const result = await db.execute(sql`
+      SELECT
+        count(*) FILTER (WHERE status = 'active')::int AS active_count,
+        count(*) FILTER (WHERE status = 'cancelled')::int AS cancelled_count,
+        count(*) FILTER (WHERE status = 'paused')::int AS paused_count,
+        currency,
+        round(sum(CASE
+          WHEN status = 'active' AND frequency = 'monthly' THEN amount::numeric
+          WHEN status = 'active' AND frequency = 'yearly' THEN amount::numeric / 12
+          WHEN status = 'active' AND frequency = 'quarterly' THEN amount::numeric / 3
+          ELSE 0
+        END)::numeric, 2) AS monthly_total,
+        round(sum(CASE
+          WHEN status = 'active' AND frequency = 'yearly' THEN amount::numeric
+          WHEN status = 'active' AND frequency = 'monthly' THEN amount::numeric * 12
+          WHEN status = 'active' AND frequency = 'quarterly' THEN amount::numeric * 4
+          ELSE 0
+        END)::numeric, 2) AS yearly_total
+      FROM subscriptions
+      GROUP BY currency
+    `);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+financeRouter.get("/subscriptions", async (req, res, next) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const statusFilter = status ? sql`AND status = ${status}` : sql``;
+    const result = await db.execute(sql`
+      SELECT * FROM subscriptions
+      WHERE true ${statusFilter}
+      ORDER BY
+        CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
+        amount::numeric DESC
+    `);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // --- CSV Import ---
 
 financeRouter.post("/import/csv", upload.single("file"), async (req, res, next) => {
