@@ -83,11 +83,13 @@ These are intentionally distinct from the normal operator compose volumes.
    ```bash
    yarn setup:testnet-acceptance-operator --bootstrap
    ```
-4. Log Claude into the dedicated acceptance auth volume once:
+4. Authenticate Claude for Docker (one-time, on your host machine):
    ```bash
-   docker compose --env-file .acceptance/docker-compose.env \
-     -f docker-compose.acceptance.yml \
-     run --rm -it --entrypoint claude jinn-acceptance-daemon auth login
+   claude setup-token
+   ```
+   Add the resulting `sk-*` token to `client/.env.acceptance`:
+   ```bash
+   echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
    ```
 5. Run the steady-state release gate:
    ```bash
@@ -119,12 +121,16 @@ After funding, finish bootstrap:
 yarn setup:testnet-acceptance-operator --bootstrap
 ```
 
-Then do the one-time Claude login:
+Then authenticate Claude for Docker (on your host machine, one-time):
 
 ```bash
-docker compose --env-file .acceptance/docker-compose.env \
-  -f docker-compose.acceptance.yml \
-  run --rm -it --entrypoint claude jinn-acceptance-daemon auth login
+claude setup-token
+```
+
+Add the resulting token to `client/.env.acceptance`:
+
+```bash
+echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
 ```
 
 ## Modes

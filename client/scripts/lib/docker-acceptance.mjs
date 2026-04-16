@@ -73,6 +73,7 @@ export function buildDockerComposeEnv({
     JINN_POLL_INTERVAL_MS: String(pollIntervalMs),
     JINN_REWARD_CLAIM_INTERVAL_MS: String(rewardClaimIntervalMs),
     JINN_TARGET_SERVICES: String(targetServices),
+    CLAUDE_CODE_OAUTH_TOKEN: merged['CLAUDE_CODE_OAUTH_TOKEN'] ?? '',
     NO_COLOR: '1',
   };
 }

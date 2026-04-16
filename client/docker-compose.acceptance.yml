@@ -14,6 +14,7 @@ services:
     restart: "no"
     environment:
       JINN_PASSWORD: ${JINN_PASSWORD}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       NO_COLOR: ${NO_COLOR:-1}
     volumes:
       - jinn-acceptance-data:/data

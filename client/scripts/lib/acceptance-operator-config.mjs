@@ -47,11 +47,17 @@ export function buildAcceptanceDesiredStates(runIdSuffix) {
   return [
     {
       id: `release-acceptance-${runIdSuffix}-1`,
-      description: `Release acceptance desired state 1 for ${runIdSuffix}.`,
+      description:
+        'The Jinn client service is healthy and operational. '
+        + 'Confirm the service is running by checking its status via the available tools, '
+        + 'then report that the service is healthy.',
     },
     {
       id: `release-acceptance-${runIdSuffix}-2`,
-      description: `Release acceptance desired state 2 for ${runIdSuffix}.`,
+      description:
+        'A basic connectivity check has been performed. '
+        + 'Verify the protocol tools are reachable and responsive, '
+        + 'then report that connectivity is confirmed.',
     },
   ];
 }
