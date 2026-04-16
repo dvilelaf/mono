@@ -6,7 +6,7 @@
 
 ## Problem Statement
 
-A user wants to go from zero to operating an agent on the Jinn Network. Today the client is a monorepo-internal Node.js daemon with a 17-verb CLI (`jinn run`, `jinn init`, etc.), an 11-step fleet bootstrap state machine, and contract deployments on Base Sepolia. The question: what packaging format and onboarding flow gets an external operator running with minimum friction?
+A user wants to go from zero to operating an agent on the Jinn Network. The client is a published npm package (`@jinn-network/client`) with a 17-verb CLI, an 11-step fleet bootstrap state machine, and contract deployments on Base Sepolia. A Docker image is also available. The question: what additional packaging and onboarding improvements get an external operator running with minimum friction — particularly for agent-to-agent consumption?
 
 ---
 
@@ -84,18 +84,11 @@ The `FleetBootstrapper` walks through wallet creation → Safe deployment → se
 
 ## 2. Packaging Format Analysis
 
-### 2.1 npm Package with CLI (Primary — Ready Today)
+### 2.1 npm Package with CLI (Shipped)
 
-**What it is:** `npm install -g @jinn-network/client` gives the user `jinn` on PATH.
+**Status:** Published as `@jinn-network/client`. `npm install -g @jinn-network/client` gives the user `jinn` on PATH. The CLI has 17 verbs covering the full operator lifecycle.
 
-**Current readiness:** High. The `bin`, `files`, `publishConfig`, and `prepublishOnly` fields are already configured. The CLI has 17 verbs covering the full operator lifecycle.
-
-**Gaps:**
-- No `npx @jinn-network/client` quick-start experience (the bin name is `jinn`, which works)
-- No guided interactive setup (all config is via env vars or JSON file)
-- Need to verify `yarn pack` → install → `jinn doctor` works cleanly outside the monorepo (the `pack:smoke` script exists for this)
-
-**Verdict:** This is the foundation. Ship this first.
+**Remaining gap:** No guided interactive setup — all config is via env vars or JSON file. A `jinn quickstart` command (section 3.3) would address this.
 
 ### 2.2 Standalone MCP Server (High Value — Needs Building)
 
@@ -121,13 +114,22 @@ The `FleetBootstrapper` walks through wallet creation → Safe deployment → se
 
 **Implementation approach:** Since the CLI already emits structured JSON, the simplest path is a thin MCP wrapper that shells out to `jinn <verb>` and returns the parsed JSON. This avoids duplicating logic and means the MCP server always matches CLI behavior. A `client/src/mcp/operator-server.ts` that imports from `cli/` directly (without spawning a subprocess) would be even cleaner — each MCP tool calls the same `CommandModule.run()` that the CLI uses.
 
-**Registration:** Users would add to their MCP config:
+**Entry point — separate bin, not a CLI subcommand.** The MCP convention is a dedicated binary that speaks stdio, not a subcommand of an existing CLI. Since `jinn` is already a CLI dispatcher, the right pattern is a second `bin` entry in package.json:
+
+```json
+"bin": {
+  "jinn": "./dist/bin/jinn.js",
+  "jinn-mcp": "./dist/mcp/operator-server.js"
+}
+```
+
+**Registration:** Users add to their MCP config:
 ```json
 {
   "mcpServers": {
     "jinn": {
       "command": "npx",
-      "args": ["@jinn-network/client", "mcp-serve"],
+      "args": ["-p", "@jinn-network/client", "jinn-mcp"],
       "env": { "JINN_PASSWORD": "..." }
     }
   }
@@ -139,13 +141,14 @@ Or if installed globally:
 {
   "mcpServers": {
     "jinn": {
-      "command": "jinn",
-      "args": ["mcp-serve"],
+      "command": "jinn-mcp",
       "env": { "JINN_PASSWORD": "..." }
     }
   }
 }
 ```
+
+This follows the same pattern as `@modelcontextprotocol/server-github` and similar MCP packages — a dedicated binary that starts a `StdioServerTransport` and runs until stdin closes.
 
 ### 2.3 Claude Code Skill / Codex Plugin
 
@@ -155,29 +158,19 @@ Or if installed globally:
 
 **Verdict:** Nice-to-have after MCP server ships. Could be a single markdown file that describes the protocol and available tools.
 
-### 2.4 Docker Image
+### 2.4 Docker Image (Shipped)
 
-**What it would be:** `docker run ghcr.io/jinn-network/client` with volume mounts for keystore persistence.
+**Status:** Available. Useful for operators who don't want Node.js installed and for cloud/Kubernetes deployment.
 
-**Assessment:** Useful for:
-- Operators who don't want Node.js installed
-- Deployment on cloud VMs, Kubernetes, etc.
-- Reproducible environment (pinned Node version, dependencies)
+**Remaining gap:** Claude Code CLI inside the image (large dependency). Operators running the Docker image may need to mount the Claude binary or use an alternative runner.
 
-**Gaps:**
-- Claude Code CLI would need to be in the image (large dependency)
-- Keystore persistence needs volume mount guidance
-- Interactive password entry doesn't work well with Docker
+### 2.5 Priority Recommendation
 
-**Verdict:** Valuable for production operators, but not the first packaging target. The npm package covers the initial audience (developers and agent builders).
+Since npm and Docker are already shipped, the remaining packaging work is:
 
-### 2.5 Combination Recommendation
-
-**Ship order:**
-1. **npm package** (today — mostly ready)
-2. **Standalone MCP server** (`jinn mcp-serve` verb) — highest impact for agent consumption
-3. **Claude Code skill** — discovery and onboarding layer
-4. **Docker image** — production deployment
+1. **Standalone operator MCP server** (`jinn-mcp` bin) — highest impact for agent consumption
+2. **`jinn quickstart` command** — collapse onboarding into one step
+3. **Claude Code skill** — discovery and onboarding layer for MCP-equipped agents
 
 ---
 
@@ -225,7 +218,7 @@ Or if installed globally:
 Or for MCP-first users:
 ```
 1. Add to MCP config:
-   { "mcpServers": { "jinn": { "command": "npx", "args": ["@jinn-network/client", "mcp-serve"] } } }
+   { "mcpServers": { "jinn": { "command": "npx", "args": ["-p", "@jinn-network/client", "jinn-mcp"] } } }
 2. Tell your agent: "Set up a Jinn agent on testnet"
 3. Agent calls jinn_init, jinn_bootstrap, jinn_start_daemon
 ```
@@ -298,12 +291,22 @@ await cdp.evm.requestFaucet({
 ```
 
 **Constraints:**
-- Requires a free CDP API key (sign up at cdp.coinbase.com)
+- **Requires a free CDP API key** — sign up at cdp.coinbase.com, then set `CDP_API_KEY_ID` + `CDP_API_KEY_SECRET` env vars. This is an extra signup step, which weakens the "just works" story.
 - Rate limited: 1 claim per 24 hours per address
 - Only testnet — not a mainnet solution
 - Dispenses a small amount (~0.1 ETH, varies) which is sufficient for bootstrap gas
 
-**Integration recommendation:** Make CDP faucet opt-in via `COINBASE_CDP_API_KEY_ID` / `COINBASE_CDP_API_KEY_SECRET` env vars. If set, `jinn quickstart` and `jinn bootstrap` attempt auto-funding before pausing at the funding gate. If not set, print the manual faucet URL (`https://faucet.circle.com/` or `https://www.coinbase.com/faucets/base-ethereum/sepolia`). Don't add `@coinbase/cdp-sdk` as a hard dependency — dynamic import with a helpful error message if missing.
+**Bottom line on testnet funding:** There is no zero-auth programmatic faucet for Base Sepolia. Every option requires either a CDP API key signup (Coinbase) or a manual web UI visit (Alchemy, Circle).
+
+**Ship a Jinn-project CDP API key in the package?** Yes — this is the cleanest path to zero-friction onboarding. Create a dedicated CDP API key under a Jinn project account and embed it as a default in the client. The key is free-tier and rate-limited (1 claim/24h/address), so abuse risk is bounded. Operators can override with their own key via `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` env vars.
+
+Considerations for shipping a public key:
+- CDP free tier rate limits are per-address, not per-key — an attacker can't drain the faucet for all users
+- The key only grants testnet faucet access (no mainnet, no wallet control)
+- If Coinbase revokes the key, `jinn quickstart` falls back to printing the manual faucet URL — not a hard failure
+- Monitor usage via the CDP dashboard; rotate if abused
+
+**Integration recommendation:** Ship a default CDP API key for testnet auto-funding. Allow override via env vars. Don't add `@coinbase/cdp-sdk` as a hard dependency — dynamic import with a helpful error message if missing. Fall back to manual faucet URL (`https://faucet.circle.com/` or `https://www.coinbase.com/faucets/base-ethereum/sepolia`) if the SDK isn't installed or the faucet call fails.
 
 **Alternative faucets (web-only, no API):**
 - Alchemy Base Sepolia faucet — web UI only, 1 claim/24h
@@ -366,17 +369,18 @@ Option A is simpler and matches existing architecture. The daemon already writes
 
 ### 5.3 MCP Server Entry Point
 
-New verb: `jinn mcp-serve`
+New bin: `jinn-mcp` (not a CLI subcommand — separate binary, per MCP convention)
 
 ```
-jinn mcp-serve [--password-fd N]
+jinn-mcp
 
 Starts an MCP server on stdio (StdioServerTransport).
 Exposes operator-level tools for agent consumption.
 Long-lived — runs until stdin closes or SIGTERM.
+Reads JINN_PASSWORD from env (same as jinn CLI).
 ```
 
-This would be a new file at `client/src/mcp/operator-server.ts` and a new CLI command at `client/src/cli/commands/mcp-serve.ts`.
+Implementation: a new file at `client/src/mcp/operator-server.ts` with a corresponding `client/src/bin/jinn-mcp.ts` entry point. Add `"jinn-mcp": "./dist/bin/jinn-mcp.js"` to the `bin` field in package.json.
 
 ---
 
@@ -418,25 +422,21 @@ This would be a new file at `client/src/mcp/operator-server.ts` and a new CLI co
 
 ### 7.1 Immediate (This Sprint)
 
-1. **Publish npm package.** Run `yarn pack:smoke` to verify the package installs and `jinn doctor` works outside the monorepo. Then `npm publish`.
-
-2. **Add `jinn mcp-serve` verb.** Thin MCP server wrapping CLI commands. Start with read-only tools (`jinn_status`, `jinn_doctor`, `jinn_fleet`, `jinn_balance`, `jinn_history`) plus `jinn_init`. This is shippable in a day.
+1. **Add `jinn-mcp` bin entry.** Thin MCP server wrapping CLI commands via a dedicated binary (per MCP convention). Start with read-only tools (`jinn_status`, `jinn_doctor`, `jinn_fleet`, `jinn_balance`, `jinn_history`) plus `jinn_init`. This is shippable in a day.
 
 ### 7.2 Near-term (Next 2 Weeks)
 
-3. **Add write tools to MCP server.** `jinn_bootstrap`, `jinn_submit_intent`, `jinn_start_daemon`, `jinn_stop_daemon`. These require careful error handling since they mutate state.
+2. **Add write tools to MCP server.** `jinn_bootstrap`, `jinn_submit_intent`, `jinn_start_daemon`, `jinn_stop_daemon`. These require careful error handling since they mutate state.
 
-4. **Add `jinn quickstart` verb.** Guided flow combining init + fund-check + bootstrap + run. Detects CDP credentials and attempts auto-funding.
+3. **Add `jinn quickstart` verb.** Guided flow combining init + fund-check + bootstrap + run.
 
-5. **Optional CDP faucet integration.** Dynamic import of `@coinbase/cdp-sdk`, gated on env vars. Fails gracefully to manual instructions if unavailable.
+4. **Testnet faucet integration.** Ship a Jinn-project CDP API key for auto-funding (see section 4.4). Dynamic import of `@coinbase/cdp-sdk`, falls back to manual faucet URL if unavailable.
 
 ### 7.3 Medium-term
 
-6. **Claude Code skill.** A markdown skill file that describes the Jinn protocol and teaches agents how to use the MCP tools. Distributable via the npm package or a separate skill registry.
+5. **Claude Code skill.** A markdown skill file that describes the Jinn protocol and teaches agents how to use the MCP tools. Distributable via the npm package or a separate skill registry.
 
-7. **Docker image.** `Dockerfile` in `client/`, published to ghcr.io. Include Node.js + Claude Code CLI. Volume mount for `~/.jinn-client/`.
-
-8. **Codex / Cursor / Windsurf plugin manifests.** These ecosystems are converging on MCP, so the MCP server covers them. If any require custom plugin formats, create thin wrappers.
+6. **Codex / Cursor / Windsurf plugin manifests.** These ecosystems are converging on MCP, so the MCP server covers them. If any require custom plugin formats, create thin wrappers.
 
 ### 7.4 Architecture Principle
 
@@ -468,8 +468,8 @@ The existing task MCP server and the proposed operator MCP server serve differen
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| npm package has monorepo-specific paths | Medium | High (broken install) | `pack:smoke` script exists — run it in CI |
 | MCP server daemon management is fragile | Medium | Medium | Use existing pidfile + HTTP API pattern |
+| Shipped CDP API key gets revoked/abused | Low | Low | Rate limits are per-address; fallback to manual faucet URL; monitor via CDP dashboard |
 | CDP faucet rate limits block multi-service bootstrap | High | Low | Only need ~0.01 ETH; one faucet claim is sufficient |
 | Claude Code CLI not installed | High | High (can't run daemon) | `jinn doctor` already checks this; clear error message |
 | Testnet contracts redeploy breaks config | Medium | High | Ship deployment artifacts in npm package (`deployments/` is in `files`) |
