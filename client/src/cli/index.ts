@@ -16,6 +16,7 @@ import { ConfigLoadError } from '../config.js';
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
 import initCommand from './commands/init.js';
+import quickstartCommand from './commands/quickstart.js';
 import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
@@ -36,6 +37,7 @@ const COMMANDS: CommandModule[] = [
   versionCommand,
   doctorCommand,
   initCommand,
+  quickstartCommand,
   bootstrapCommand,
   fundRequirementsCommand,
   runCommand,
