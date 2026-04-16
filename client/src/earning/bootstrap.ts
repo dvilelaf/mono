@@ -92,6 +92,7 @@ export interface FleetBootstrapperOptions {
   earningDir?: string;
   chain?: 'base' | 'base-sepolia';
   rpcUrl?: string;
+  env?: NodeJS.ProcessEnv;
   stakingMode?: 'standard' | 'self-bond';
   targetServices?: number;
   testnetL2DeploymentPath?: string;
@@ -118,10 +119,12 @@ export class FleetBootstrapper {
   private readonly targetServices: number;
   private readonly debug: boolean;
   private readonly masterEthDailyEstimateWei: bigint;
+  private readonly env: NodeJS.ProcessEnv;
 
   constructor(options: FleetBootstrapperOptions = {}) {
     this.store = new FleetStateStore(options.earningDir);
     this.chain = options.chain ?? 'base';
+    this.env = options.env ?? process.env;
     this.stakingMode = options.stakingMode ?? 'standard';
     this.targetServices = options.targetServices ?? 1;
     this.debug = options.debug ?? isJinnDebug();
@@ -200,7 +203,7 @@ export class FleetBootstrapper {
       const requiredMasterEth = this.stakingMode === 'standard'
         ? this.config.minEoaGasEth
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
-      const autoFaucetEnabled = process.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
+      const autoFaucetEnabled = this.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
       if (systemEth < requiredMasterEth) {
         // On testnet, attempt automatic faucet funding before giving up
         if (this.chain === 'base-sepolia' && autoFaucetEnabled) {

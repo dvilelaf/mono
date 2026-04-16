@@ -40,6 +40,11 @@ interface CommandRunResult {
   exitCode: number | null;
 }
 
+interface McpToolResponse extends Record<string, unknown> {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: true;
+}
+
 /**
  * Run a CLI CommandModule in-process, capturing its stdout output as a string.
  *
@@ -71,13 +76,23 @@ async function runCommandResult(
   return { text: chunks.join(''), exitCode };
 }
 
-async function runCommand(
+async function runToolCommand(
   command: CommandModule,
   argv: string[],
   env: NodeJS.ProcessEnv,
-): Promise<string> {
-  const result = await runCommandResult(command, argv, env);
-  return result.text;
+): Promise<McpToolResponse> {
+  try {
+    const result = await runCommandResult(command, argv, env);
+    return {
+      content: [{ type: 'text' as const, text: result.text }],
+      ...(result.exitCode !== null && result.exitCode !== 0 ? { isError: true as const } : {}),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
+      isError: true,
+    };
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -190,84 +205,42 @@ export function createOperatorServer(): McpServer {
     'jinn_init',
     'Create the master wallet and write the encrypted keystore. Idempotent.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(initCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(initCommand, ['--json'], process.env),
   );
 
   server.tool(
     'jinn_doctor',
     'Preflight checks: node version, claude binary, keystore, deployment config.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(doctorCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(doctorCommand, ['--json'], process.env),
   );
 
   server.tool(
     'jinn_fund_requirements',
     'List addresses that need funding before bootstrap can advance.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(fundRequirementsCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(fundRequirementsCommand, ['--json'], process.env),
   );
 
   server.tool(
     'jinn_status',
     'Daemon liveness and fleet health roll-up. Poll this for monitoring.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(statusCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(statusCommand, ['--json'], process.env),
   );
 
   server.tool(
     'jinn_fleet',
     'Per-service fleet detail: wallets, staking status, activity counts.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(fleetCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(fleetCommand, ['--json'], process.env),
   );
 
   server.tool(
     'jinn_balance',
     'Flat per-wallet balance map across master and service wallets.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(balanceCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(balanceCommand, ['--json'], process.env),
   );
 
   server.tool(
@@ -278,14 +251,9 @@ export function createOperatorServer(): McpServer {
       since: z.string().optional().describe('Only return events after this ISO-8601 timestamp'),
     },
     async ({ limit, since }) => {
-      try {
-        const argv = ['--json', '--limit', String(limit)];
-        if (since) argv.push('--since', since);
-        const text = await runCommand(historyCommand, argv, process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
+      const argv = ['--json', '--limit', String(limit)];
+      if (since) argv.push('--since', since);
+      return runToolCommand(historyCommand, argv, process.env);
     },
   );
 
@@ -295,14 +263,7 @@ export function createOperatorServer(): McpServer {
     'jinn_bootstrap',
     'Advance the fleet state machine. Idempotent. May take several minutes. Returns funding_required if wallet needs ETH.',
     {},
-    async () => {
-      try {
-        const text = await runCommand(bootstrapCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
-    },
+    async () => runToolCommand(bootstrapCommand, ['--json'], process.env),
   );
 
   server.tool(
@@ -314,15 +275,10 @@ export function createOperatorServer(): McpServer {
       dry_run: z.boolean().optional().default(false).describe('Preview without posting on-chain'),
     },
     async ({ id, description, dry_run }) => {
-      try {
-        const argv = ['--id', id, '--description', description, '--json'];
-        if (dry_run) argv.push('--dry-run');
-        else argv.push('--yes'); // implicit confirmation in MCP context
-        const text = await runCommand(submitIntentCommand, argv, process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (err) {
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }], isError: true };
-      }
+      const argv = ['--id', id, '--description', description, '--json'];
+      if (dry_run) argv.push('--dry-run');
+      else argv.push('--yes'); // implicit confirmation in MCP context
+      return runToolCommand(submitIntentCommand, argv, process.env);
     },
   );
 
