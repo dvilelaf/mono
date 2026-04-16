@@ -124,13 +124,24 @@ function hasSkillBlock(filePath: string): boolean {
 }
 
 function upsertSkillBlock(filePath: string, content: string): { ok: boolean; detail: string } {
-  if (hasSkillBlock(filePath)) {
-    return { ok: true, detail: `Skill block already present in ${filePath}` };
-  }
   mkdirSync(dirname(filePath), { recursive: true });
+  const block = `${BLOCK_START}\n${content}\n${BLOCK_END}\n`;
+
+  if (hasSkillBlock(filePath)) {
+    // Replace existing block so `jinn plugin install` propagates updates
+    const existing = readFileSync(filePath, 'utf-8');
+    const re = new RegExp(
+      BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+      '[\\s\\S]*?' +
+      BLOCK_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+      '\\n?',
+    );
+    writeFileSync(filePath, existing.replace(re, block), 'utf-8');
+    return { ok: true, detail: `Updated skill block in ${filePath}` };
+  }
+
   const existing = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
   const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : existing.length > 0 ? '\n' : '';
-  const block = `${BLOCK_START}\n${content}\n${BLOCK_END}\n`;
   writeFileSync(filePath, existing + separator + block, 'utf-8');
   return { ok: true, detail: `Appended skill block to ${filePath}` };
 }
@@ -158,12 +169,10 @@ function hasClaudeSkill(targetDir: string): boolean {
 }
 
 function installClaudeSkill(targetDir: string): { ok: boolean; detail: string } {
-  if (hasClaudeSkill(targetDir)) {
-    return { ok: true, detail: `Skill already installed at ${targetDir}` };
-  }
+  const verb = hasClaudeSkill(targetDir) ? 'Updated' : 'Copied';
   mkdirSync(targetDir, { recursive: true });
   copyFileSync(join(SKILL_DIR, 'SKILL.md'), join(targetDir, 'SKILL.md'));
-  return { ok: true, detail: `Copied skill to ${targetDir}` };
+  return { ok: true, detail: `${verb} skill at ${targetDir}` };
 }
 
 function removeClaudeSkill(targetDir: string): { ok: boolean; detail: string } {
@@ -183,12 +192,10 @@ function hasCursorRule(targetPath: string): boolean {
 }
 
 function installCursorRule(targetPath: string, content: string): { ok: boolean; detail: string } {
-  if (hasCursorRule(targetPath)) {
-    return { ok: true, detail: `Rule already installed at ${targetPath}` };
-  }
+  const verb = hasCursorRule(targetPath) ? 'Updated' : 'Wrote';
   mkdirSync(dirname(targetPath), { recursive: true });
   writeFileSync(targetPath, content, 'utf-8');
-  return { ok: true, detail: `Wrote rule to ${targetPath}` };
+  return { ok: true, detail: `${verb} rule at ${targetPath}` };
 }
 
 function removeCursorRule(targetPath: string): { ok: boolean; detail: string } {
