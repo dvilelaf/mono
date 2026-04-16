@@ -319,6 +319,20 @@ export async function main(): Promise<DaemonStartupInfo> {
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
+    balanceTopup:
+      config.balanceTopupIntervalMs > 0
+        ? {
+            intervalMs: config.balanceTopupIntervalMs,
+            publicClient,
+            masterWallet,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            eoaTopupTrigger: CHAIN_CONFIG.eoaTopupTrigger,
+            eoaTopupTarget: CHAIN_CONFIG.minEoaGasEth,
+            safeTopupTrigger: CHAIN_CONFIG.safeTopupTrigger,
+            safeTopupTarget: CHAIN_CONFIG.minSafeEth,
+          }
+        : undefined,
   });
 
   // Graceful shutdown
