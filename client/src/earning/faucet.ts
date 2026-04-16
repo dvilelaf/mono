@@ -7,8 +7,9 @@
  * KEY ROTATION: Change the constants below and publish a new npm version.
  */
 
-// Jinn project CDP API key — testnet faucet access only
-const JINN_DEFAULT_CDP_API_KEY_ID = 'yAY2P1e181EHl5bsrrkwyUkHCfok5rh1';
+// Jinn project CDP secret API key pair — testnet faucet access only
+const JINN_DEFAULT_CDP_API_KEY_ID = 'b743bfce-7f46-4e8e-ba04-0993b2c4908e';
+const JINN_DEFAULT_CDP_API_KEY_SECRET = 'lrGwqLwt3tX8/UIPHK4/AlM7TtqyGYXypXs/HqA3ORDCBgjLemJHhA40gmBNj0uK9PCAKaXlbhgFKuxAT/MfVw==';
 
 const MANUAL_FAUCET_URL = 'https://portal.cdp.coinbase.com/products/faucet';
 
@@ -23,13 +24,17 @@ export async function requestTestnetFunding(
   address: string,
   network: 'base-sepolia',
 ): Promise<FaucetResult> {
-  // Resolve API key: env override > shipped default
-  const apiKeyId = process.env['CDP_API_KEY_ID'] ?? JINN_DEFAULT_CDP_API_KEY_ID;
+  const envApiKeyId = process.env['CDP_API_KEY_ID'];
+  const envApiKeySecret = process.env['CDP_API_KEY_SECRET'];
+  const hasEnvPair = Boolean(envApiKeyId && envApiKeySecret);
+
+  // Resolve credential pair: complete env override > shipped default pair
+  const apiKeyId = hasEnvPair ? envApiKeyId! : JINN_DEFAULT_CDP_API_KEY_ID;
+  const apiKeySecret = hasEnvPair ? envApiKeySecret! : JINN_DEFAULT_CDP_API_KEY_SECRET;
 
   // Warn on partial override
-  if ((process.env['CDP_API_KEY_ID'] && !process.env['CDP_API_KEY_SECRET']) ||
-      (!process.env['CDP_API_KEY_ID'] && process.env['CDP_API_KEY_SECRET'])) {
-    console.error('[faucet] Warning: Only one of CDP_API_KEY_ID/CDP_API_KEY_SECRET is set. Using defaults.');
+  if ((envApiKeyId && !envApiKeySecret) || (!envApiKeyId && envApiKeySecret)) {
+    console.error('[faucet] Warning: Only one of CDP_API_KEY_ID/CDP_API_KEY_SECRET is set. Using shipped defaults.');
   }
 
   // Dynamic import — SDK is optional
@@ -45,14 +50,11 @@ export async function requestTestnetFunding(
   }
 
   try {
-    const clientOpts: Record<string, string> = { apiKeyId };
-    if (process.env['CDP_API_KEY_SECRET']) {
-      clientOpts.apiKeySecret = process.env['CDP_API_KEY_SECRET'];
-    }
+    const clientOpts: Record<string, string> = { apiKeyId, apiKeySecret };
     const cdp = new CdpClient(clientOpts);
     const result = await cdp.evm.requestFaucet({
       address,
-      network: 'base-sepolia',
+      network,
       token: 'eth',
     });
     return { ok: true, txHash: result.transactionHash ?? String(result) };

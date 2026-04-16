@@ -12,6 +12,39 @@ class StringWriter {
   toString(): string { return this.chunks.join(''); }
 }
 
+interface PluginInstallResultEntry {
+  target: string;
+  mcp: { status: string; detail: string };
+  skill: { status: string; detail: string };
+}
+
+function summarizePluginInstall(
+  output: string,
+  exitCode: number | null,
+): { status: 'ok' | 'error'; detail: string } {
+  if (exitCode !== null && exitCode !== 0) {
+    return { status: 'error', detail: output || `plugin install exited with code ${exitCode}` };
+  }
+
+  try {
+    const parsed = JSON.parse(output) as { results?: PluginInstallResultEntry[] };
+    const results = Array.isArray(parsed.results) ? parsed.results : [];
+    const failures = results.flatMap((result) => {
+      const failedParts: string[] = [];
+      if (result.mcp.status === 'error') failedParts.push(`MCP: ${result.mcp.detail}`);
+      if (result.skill.status === 'error') failedParts.push(`Skill: ${result.skill.detail}`);
+      if (failedParts.length === 0) return [];
+      return [`${result.target} (${failedParts.join('; ')})`];
+    });
+    if (failures.length > 0) {
+      return { status: 'error', detail: failures.join(' | ') };
+    }
+    return { status: 'ok', detail: 'Plugins updated' };
+  } catch {
+    return { status: 'error', detail: output || 'Unexpected plugin install output' };
+  }
+}
+
 async function run(ctx: CommandContext): Promise<void> {
   let parsed;
   try {
@@ -76,11 +109,12 @@ async function run(ctx: CommandContext): Promise<void> {
     });
 
     const pluginOutput = pluginWriter.toString().trim();
-    if (pluginExitCode === null || pluginExitCode === 0) {
-      steps.push({ step: 'plugin-install', status: 'ok', detail: 'Plugins updated' });
+    const pluginResult = summarizePluginInstall(pluginOutput, pluginExitCode);
+    if (pluginResult.status === 'ok') {
+      steps.push({ step: 'plugin-install', status: 'ok', detail: pluginResult.detail });
       console.error('[update] Plugins updated.');
     } else {
-      steps.push({ step: 'plugin-install', status: 'error', detail: pluginOutput });
+      steps.push({ step: 'plugin-install', status: 'error', detail: pluginResult.detail });
       console.error('[update] Plugin update had issues.');
     }
   } else {
