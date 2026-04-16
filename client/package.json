@@ -63,6 +63,9 @@
     "viem": "^2.0.0",
     "zod": "^3.22.0"
   },
+  "optionalDependencies": {
+    "@coinbase/cdp-sdk": "^1.47.0"
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
