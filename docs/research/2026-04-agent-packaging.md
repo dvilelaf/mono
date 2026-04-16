@@ -240,43 +240,76 @@ Since npm and Docker are already shipped, the remaining packaging work is:
 
 ### 3.2 Ideal Flow (What We Should Build)
 
+**Fully automated — zero manual intervention:**
 ```
-1. npm install -g @jinn-network/client
-2. jinn quickstart
-   → Prompts for password (or reads from env)
-   → Generates wallet
-   → Attempts faucet funding (Coinbase CDP API)
-   → If faucet fails: prints address + faucet URL, waits
-   → Runs bootstrap
-   → Starts daemon
-   → Prints: "Your agent is running. API at http://127.0.0.1:7331"
+npm install -g @jinn-network/client
+jinn quickstart
 ```
 
-Or for MCP-first users:
+That's it. The `quickstart` command:
+1. Auto-generates a keystore password, saves to `~/.jinn-client/keystore-password`
+2. Creates wallet (idempotent)
+3. Funds master wallet via CDP faucet (shipped API key)
+4. Bootstraps (Safe → service → staking → mech)
+5. Starts daemon
+6. Prints:
+   ```
+   Your agent is running.
+   Dashboard: http://127.0.0.1:7331
+
+   Your keystore password was auto-generated and saved to:
+     ~/.jinn-client/keystore-password
+   To set your own password: jinn keys change-password
+   ```
+
+The only prerequisite is Claude Code installed and authenticated (the daemon spawns it as a subprocess for restoration work).
+
+**For MCP-first users:**
 ```
 1. Add to MCP config:
    { "mcpServers": { "jinn": { "command": "npx", "args": ["-p", "@jinn-network/client", "jinn-mcp"] } } }
 2. Tell your agent: "Set up a Jinn agent on testnet"
-3. Agent calls jinn_init, jinn_bootstrap, jinn_start_daemon
+3. Agent calls jinn_quickstart → fully automated, same as above
 ```
 
 ### 3.3 Proposed `jinn quickstart` Command
 
-A new CLI verb that combines init + fund + bootstrap + run into a guided flow:
+A new CLI verb that combines init + fund + bootstrap + run into a fully automated flow:
 
 ```
-jinn quickstart [--password-fd N] [--no-daemon]
+jinn quickstart [--no-daemon]
 
 Steps:
-  1. init        — create wallet (idempotent)
-  2. fund-check  — check balances
-  3. auto-fund   — attempt Coinbase CDP faucet (if testnet + CDP key available)
-  4. wait-fund   — if auto-fund fails, print instructions and poll until funded
-  5. bootstrap   — advance state machine to completion
-  6. run         — start daemon (unless --no-daemon)
+  1. password    — generate random password, save to ~/.jinn-client/keystore-password
+                   (skip if JINN_PASSWORD is set — respect explicit operator choice)
+  2. init        — create wallet with generated/provided password (idempotent)
+  3. fund-check  — check balances
+  4. auto-fund   — attempt Coinbase CDP faucet (shipped key; operator can override via CDP env vars)
+  5. wait-fund   — if auto-fund fails, print address + faucet URL, poll until funded
+  6. bootstrap   — advance state machine to completion
+  7. run         — start daemon (unless --no-daemon)
 ```
 
-This doesn't replace the individual verbs — operators still need granular control. But it collapses the 80% case into one command.
+This doesn't replace the individual verbs — operators still need granular control. But it collapses the 80% case into a single command with zero manual steps.
+
+### 3.4 Proposed `jinn keys change-password` Command
+
+Allows operators to replace the auto-generated password with their own:
+
+```
+jinn keys change-password
+
+Steps:
+  1. Read current password from ~/.jinn-client/keystore-password (or JINN_PASSWORD)
+  2. Decrypt mnemonic
+  3. Prompt for new password (or read from --password-fd / JINN_NEW_PASSWORD)
+  4. Re-encrypt mnemonic with new password
+  5. Overwrite mnemonic.keystore.json
+  6. Delete keystore-password file
+  7. Print: "Password changed. Set JINN_PASSWORD for future commands."
+```
+
+The wallet, Safe, staking, and all on-chain state are unchanged — the password only protects the local keystore file. This is the expected path for operators moving from testnet to mainnet: run `quickstart` with auto-generated password, then `change-password` before real funds are involved.
 
 ---
 
@@ -305,11 +338,11 @@ This doesn't replace the individual verbs — operators still need granular cont
 
 | Step | Why |
 |------|-----|
-| Password choice | Security — must be chosen by operator |
-| Claude Code CLI installation | Separate product, separate auth flow |
+| Claude Code CLI installation | Separate product, separate auth flow — must be done before `jinn quickstart` |
 | Mainnet ETH funding | Real money; no faucet |
 | Custom desired states | Domain-specific; operator defines what their agent should do |
 | Network choice (testnet vs mainnet) | Operational decision (default testnet is correct for onboarding) |
+| Password change (optional) | Auto-generated for quickstart; operator should change before mainnet via `jinn keys change-password` |
 
 ### 4.4 Coinbase CDP Faucet — Implementation Notes
 
