@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -35,6 +35,11 @@ import stopCommand from '../cli/commands/stop.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+interface CommandRunResult {
+  text: string;
+  exitCode: number | null;
+}
+
 /**
  * Run a CLI CommandModule in-process, capturing its stdout output as a string.
  *
@@ -42,12 +47,13 @@ import stopCommand from '../cli/commands/stop.js';
  * with a no-op so the MCP server process is not terminated. The captured text
  * is always the JSON envelope the command writes.
  */
-async function runCommand(
+async function runCommandResult(
   command: CommandModule,
   argv: string[],
   env: NodeJS.ProcessEnv,
-): Promise<string> {
+): Promise<CommandRunResult> {
   const chunks: string[] = [];
+  let exitCode: number | null = null;
   const writer = {
     write(s: string): boolean {
       chunks.push(s);
@@ -58,11 +64,116 @@ async function runCommand(
     argv,
     stdoutIsTty: false,
     writer,
-    exit: () => {}, // no-op: prevent process.exit() in MCP context
+    exit: (code) => { exitCode = code; },
     env,
   };
   await command.run(ctx);
-  return chunks.join('');
+  return { text: chunks.join(''), exitCode };
+}
+
+async function runCommand(
+  command: CommandModule,
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  const result = await runCommandResult(command, argv, env);
+  return result.text;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForPidfile(pidPath: string, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(pidPath)) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return false;
+}
+
+function parseStopCommandNotRunning(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text) as { code?: string; details?: { field?: string } };
+    return parsed.code === 'invalid_invocation' && parsed.details?.field === 'daemon_pidfile';
+  } catch {
+    return false;
+  }
+}
+
+export async function startDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
+  { ok: true; payload: { pid: number | undefined; status: 'already_running' | 'started' | 'starting' } }
+  | { ok: false; payload: { status: 'failed'; detail: string } }
+> {
+  const earningDir =
+    env['JINN_EARNING_DIR'] ??
+    join(env['HOME'] ?? '.', '.jinn-client', 'earning');
+  const pidPath = join(earningDir, 'daemon.pid');
+
+  if (existsSync(pidPath)) {
+    try {
+      const existingPid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
+      process.kill(existingPid, 0);
+      return { ok: true, payload: { pid: existingPid, status: 'already_running' } };
+    } catch {
+      try {
+        unlinkSync(pidPath);
+      } catch {
+        /* ignore stale pidfile cleanup failures */
+      }
+    }
+  }
+
+  const jinnBinPath = fileURLToPath(new URL('../bin/jinn.js', import.meta.url));
+  const child = spawn(process.execPath, [jinnBinPath, 'run'], {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...env },
+  });
+
+  const startResult = await Promise.race<
+    { status: 'started' | 'starting'; pid: number | undefined } | { status: 'failed'; detail: string }
+  >([
+    new Promise((resolve) => {
+      child.once('error', (err) => {
+        resolve({ status: 'failed', detail: err instanceof Error ? err.message : String(err) });
+      });
+      child.once('exit', (code, signal) => {
+        resolve({ status: 'failed', detail: `daemon exited during startup (code=${code ?? 'null'}, signal=${signal ?? 'null'})` });
+      });
+    }),
+    (async () => {
+      const pidfileReady = await waitForPidfile(pidPath, 5000);
+      return {
+        status: pidfileReady ? 'started' as const : 'starting' as const,
+        pid: child.pid,
+      };
+    })(),
+  ]);
+
+  child.unref();
+
+  if (startResult.status === 'failed') {
+    return { ok: false, payload: { status: 'failed', detail: startResult.detail } };
+  }
+
+  return { ok: true, payload: { pid: startResult.pid, status: startResult.status } };
+}
+
+export async function stopDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
+  { ok: true; payload: Record<string, unknown> } | { ok: false; payload: string }
+> {
+  const result = await runCommandResult(stopCommand, ['--json'], env);
+  if (result.exitCode === null || result.exitCode === 0) {
+    return { ok: true, payload: JSON.parse(result.text) as Record<string, unknown> };
+  }
+  if (parseStopCommandNotRunning(result.text)) {
+    return { ok: true, payload: { status: 'not_running' } };
+  }
+  return { ok: false, payload: result.text };
 }
 
 // ── Server factory ──────────────────────────────────────────────────────────
@@ -220,43 +331,23 @@ export function createOperatorServer(): McpServer {
     'Start the jinn daemon as a detached background process. Returns the PID.',
     {},
     async () => {
-      const earningDir =
-        process.env['JINN_EARNING_DIR'] ??
-        join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
-      const pidPath = join(earningDir, 'daemon.pid');
-
-      // Check if already running
-      if (existsSync(pidPath)) {
-        try {
-          const existingPid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
-          process.kill(existingPid, 0); // existence check
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({ pid: existingPid, status: 'already_running' }),
-              },
-            ],
-          };
-        } catch {
-          /* stale pidfile — fall through to start */
-        }
+      const result = await startDetachedDaemon(process.env);
+      if (!result.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result.payload),
+            },
+          ],
+          isError: true,
+        };
       }
-
-      // Resolve jinn binary path relative to this file
-      const jinnBinPath = fileURLToPath(new URL('../bin/jinn.js', import.meta.url));
-      const child = spawn(process.execPath, [jinnBinPath, 'run'], {
-        detached: true,
-        stdio: 'ignore',
-        env: { ...process.env },
-      });
-      child.unref();
-
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ pid: child.pid, status: 'started' }),
+            text: JSON.stringify(result.payload),
           },
         ],
       };
@@ -268,17 +359,11 @@ export function createOperatorServer(): McpServer {
     'Stop the running jinn daemon. Idempotent: returns success even if already stopped.',
     {},
     async () => {
-      try {
-        const text = await runCommand(stopCommand, ['--json'], process.env);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch {
-        // "No pidfile" is not an error in MCP context — daemon isn't running, which is the goal
-        return {
-          content: [
-            { type: 'text' as const, text: JSON.stringify({ status: 'not_running' }) },
-          ],
-        };
+      const result = await stopDetachedDaemon(process.env);
+      if (result.ok) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result.payload) }] };
       }
+      return { content: [{ type: 'text' as const, text: result.payload }], isError: true };
     },
   );
 

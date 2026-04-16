@@ -200,9 +200,10 @@ export class FleetBootstrapper {
       const requiredMasterEth = this.stakingMode === 'standard'
         ? this.config.minEoaGasEth
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
+      const autoFaucetEnabled = process.env['JINN_DISABLE_TESTNET_FAUCET'] !== '1';
       if (systemEth < requiredMasterEth) {
         // On testnet, attempt automatic faucet funding before giving up
-        if (this.chain === 'base-sepolia') {
+        if (this.chain === 'base-sepolia' && autoFaucetEnabled) {
           console.error('[fleet-bootstrap] Attempting automatic faucet funding via Coinbase CDP...');
           const faucetResult = await requestTestnetFunding(masterAddress, 'base-sepolia');
           if (faucetResult.ok) {

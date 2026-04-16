@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { loadConfig } from '../../config.js';
 import initCommand from './init.js';
 import bootstrapCommand from './bootstrap.js';
 
@@ -38,8 +39,13 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   const noDaemon = parsed.values['no-daemon'] as boolean;
+  const configPath =
+    typeof parsed.values.config === 'string' && parsed.values.config.length > 0
+      ? parsed.values.config
+      : undefined;
   const jinnDir = join(ctx.env['HOME'] ?? homedir(), '.jinn-client');
   const passwordFilePath = join(jinnDir, 'keystore-password');
+  const bootstrapArgv = ['--json', ...(configPath ? ['--config', configPath] : [])];
 
   // ── Step 1: Resolve or generate password ──
   let password: string;
@@ -97,7 +103,7 @@ async function run(ctx: CommandContext): Promise<void> {
     const bsWriter = new StringWriter();
     let bsExitCode: number | null = null;
     await bootstrapCommand.run({
-      argv: ['--json'],
+      argv: bootstrapArgv,
       stdoutIsTty: false,
       writer: bsWriter,
       exit: (code) => { bsExitCode = code; },
@@ -137,11 +143,11 @@ async function run(ctx: CommandContext): Promise<void> {
         const checkWriter = new StringWriter();
         let checkExit: number | null = null;
         await bootstrapCommand.run({
-          argv: ['--json'],
+          argv: bootstrapArgv,
           stdoutIsTty: false,
           writer: checkWriter,
           exit: (code) => { checkExit = code; },
-          env: subEnv,
+          env: { ...subEnv, JINN_DISABLE_TESTNET_FAUCET: '1' },
         });
         if (checkExit === null || checkExit === 0) {
           funded = true;
@@ -180,7 +186,7 @@ async function run(ctx: CommandContext): Promise<void> {
   }
 
   // ── Step 4: Print summary ──
-  const apiPort = ctx.env['JINN_API_PORT'] ?? '7331';
+  const apiPort = String(loadConfig(configPath).apiPort);
   console.error('');
   console.error('Quickstart complete!');
   console.error(`  Dashboard: http://127.0.0.1:${apiPort}`);
