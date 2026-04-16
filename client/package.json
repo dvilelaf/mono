@@ -22,6 +22,7 @@
   "files": [
     "dist/",
     "deployments/",
+    "skills/",
     "README.md",
     "LICENSE"
   ],
