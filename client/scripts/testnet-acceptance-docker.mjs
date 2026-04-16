@@ -425,7 +425,10 @@ async function main() {
       const logs = runCompose(['logs', '--no-color', composeService], '15-logs-startup', [0]);
       writeFileSync(join(evidenceDir, '15-daemon.logs.txt'), logs.stdout, 'utf8');
       const lines = logs.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
-      for (const line of lines) {
+      for (const rawLine of lines) {
+        // Docker Compose prefixes lines with "<service>  | "; strip that.
+        const pipeIdx = rawLine.indexOf('| ');
+        const line = pipeIdx >= 0 ? rawLine.slice(pipeIdx + 2).trim() : rawLine;
         if (!line.startsWith('{')) continue;
         try {
           const payload = JSON.parse(line);
