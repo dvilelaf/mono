@@ -634,13 +634,11 @@ async function runInstall(ctx: CommandContext, rest: string[]): Promise<void> {
       mcpResult = { status: r.ok ? 'configured' : 'error', detail: r.detail };
     }
 
-    let skillResult: { status: string; detail: string };
-    if (target.isSkillConfigured(scope)) {
-      skillResult = { status: 'skipped', detail: 'Already configured' };
-    } else {
-      const r = await target.installSkill(scope, skillContent);
-      skillResult = { status: r.ok ? 'configured' : 'error', detail: r.detail };
-    }
+    // Always run installSkill — the helpers handle both fresh installs and
+    // updates (replacing existing content), so skill changes propagate when
+    // the package is upgraded and `jinn plugin install` is re-run.
+    const sr = await target.installSkill(scope, skillContent);
+    const skillResult = { status: sr.ok ? 'configured' : 'error', detail: sr.detail };
 
     results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
   }

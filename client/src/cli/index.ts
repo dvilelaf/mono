@@ -33,6 +33,7 @@ import claimRewardsCommand from './commands/claim-rewards.js';
 import withdrawCommand from './commands/withdraw.js';
 import keysCommand from './commands/keys-backup.js';
 import pluginCommand from './commands/plugin-install.js';
+import updateCommand from './commands/update.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -55,6 +56,7 @@ const COMMANDS: CommandModule[] = [
   withdrawCommand,
   keysCommand,
   pluginCommand,
+  updateCommand,
 ];
 
 function publicCommandNames(commands: CommandModule[]): string[] {
