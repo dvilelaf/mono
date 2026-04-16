@@ -164,13 +164,50 @@ This follows the same pattern as `@modelcontextprotocol/server-github` and simil
 
 **Remaining gap:** Claude Code CLI inside the image (large dependency). Operators running the Docker image may need to mount the Claude binary or use an alternative runner.
 
-### 2.5 Priority Recommendation
+### 2.5 Operator Dashboard (Needs Building — High Impact, Low Effort)
+
+**What it is:** A static HTML page served by the existing Hono HTTP server at `GET /` (port 7331). Vanilla JS polls the API endpoints that already exist. No framework, no build step, no new dependencies.
+
+**Why it ships fast:** The HTTP server already runs whenever the daemon is running. The data endpoints (`/v1/status`, `/artifacts/search`) already exist. The implementation is a single HTML file with inline CSS/JS, served as a static asset from `dist/`.
+
+**What it shows (v1):**
+
+| Panel | Data source | Status |
+|-------|------------|--------|
+| Daemon health | `GET /v1/status` | Endpoint exists |
+| Fleet overview | Fleet state from status rollup | In status response |
+| RPC connectivity | RPC probe from status | In status response |
+| Recent artifacts | `GET /artifacts/search` | Endpoint exists |
+| Balances | Master ETH, Safe stOLAS | Partially in status; may need `/v1/balances` |
+| Activity log | Intents, restorations, evaluations | Needs new `/v1/history` endpoint |
+
+**Scope for v1:** Dashboard only when daemon is running. Bootstrap visibility stays in the CLI (`jinn bootstrap --human`). The HTTP server starts after bootstrap completes in `daemon.start()` — no refactoring of `main.ts` needed.
+
+**v2 follow-up:** Start the HTTP server before bootstrap and show bootstrap progress on the dashboard. Solves the "is it stuck?" problem during onboarding but requires refactoring `main.ts` to start Hono before calling `bootstrap()`.
+
+**Implementation:**
+```
+client/src/dashboard/index.html   — single file, inline CSS/JS
+client/src/api/server.ts          — add: app.get('/', serves dashboard HTML)
+```
+
+**Startup message change:**
+```
+# Before:
+[main] Daemon running. Press Ctrl+C to stop.
+
+# After:
+[main] Daemon running. Dashboard: http://127.0.0.1:7331
+```
+
+### 2.6 Priority Recommendation
 
 Since npm and Docker are already shipped, the remaining packaging work is:
 
-1. **Standalone operator MCP server** (`jinn-mcp` bin) — highest impact for agent consumption
-2. **`jinn quickstart` command** — collapse onboarding into one step
-3. **Claude Code skill** — discovery and onboarding layer for MCP-equipped agents
+1. **Operator dashboard** — static HTML at `GET /`, polls existing endpoints. One HTML file, zero deps. Fastest path to "see your agent working."
+2. **Standalone operator MCP server** (`jinn-mcp` bin) — highest impact for agent consumption
+3. **`jinn quickstart` command** — collapse onboarding into one step
+4. **Claude Code skill** — discovery and onboarding layer for MCP-equipped agents
 
 ---
 
@@ -422,19 +459,23 @@ Implementation: a new file at `client/src/mcp/operator-server.ts` with a corresp
 
 ### 7.1 Immediate (This Sprint)
 
-1. **Add `jinn-mcp` bin entry.** Thin MCP server wrapping CLI commands via a dedicated binary (per MCP convention). Start with read-only tools (`jinn_status`, `jinn_doctor`, `jinn_fleet`, `jinn_balance`, `jinn_history`) plus `jinn_init`. This is shippable in a day.
+1. **Operator dashboard.** Single HTML file served at `GET /` by the existing Hono server. Polls `/v1/status` and `/artifacts/search`. Zero new dependencies, ships in the npm package. v1 scope: daemon-only (no bootstrap view). Changes the startup message from "Press Ctrl+C to stop" to "Dashboard: http://127.0.0.1:7331".
+
+2. **Add `jinn-mcp` bin entry.** Thin MCP server wrapping CLI commands via a dedicated binary (per MCP convention). Start with read-only tools (`jinn_status`, `jinn_doctor`, `jinn_fleet`, `jinn_balance`, `jinn_history`) plus `jinn_init`.
 
 ### 7.2 Near-term (Next 2 Weeks)
 
-2. **Add write tools to MCP server.** `jinn_bootstrap`, `jinn_submit_intent`, `jinn_start_daemon`, `jinn_stop_daemon`. These require careful error handling since they mutate state.
+3. **Add write tools to MCP server.** `jinn_bootstrap`, `jinn_submit_intent`, `jinn_start_daemon`, `jinn_stop_daemon`. These require careful error handling since they mutate state.
 
-3. **Add `jinn quickstart` verb.** Guided flow combining init + fund-check + bootstrap + run.
+4. **Add `jinn quickstart` verb.** Guided flow combining init + fund-check + bootstrap + run.
 
-4. **Testnet faucet integration.** Ship a Jinn-project CDP API key for auto-funding (see section 4.4). Dynamic import of `@coinbase/cdp-sdk`, falls back to manual faucet URL if unavailable.
+5. **Testnet faucet integration.** Ship a Jinn-project CDP API key for auto-funding (see section 4.4). Dynamic import of `@coinbase/cdp-sdk`, falls back to manual faucet URL if unavailable.
 
 ### 7.3 Medium-term
 
-5. **Claude Code skill.** A markdown skill file that describes the Jinn protocol and teaches agents how to use the MCP tools. Distributable via the npm package or a separate skill registry.
+6. **Dashboard v2 — bootstrap visibility.** Start Hono before `bootstrap()`, show bootstrap progress on the dashboard. Addresses the "is it stuck?" problem during onboarding.
+
+7. **Claude Code skill.** A markdown skill file that describes the Jinn protocol and teaches agents how to use the MCP tools. Distributable via the npm package or a separate skill registry.
 
 6. **Codex / Cursor / Windsurf plugin manifests.** These ecosystems are converging on MCP, so the MCP server covers them. If any require custom plugin formats, create thin wrappers.
 
