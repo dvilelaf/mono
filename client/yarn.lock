@@ -538,6 +538,7 @@ __metadata:
     zod: "npm:^3.22.0"
   bin:
     jinn: ./dist/bin/jinn.js
+    jinn-mcp: ./dist/bin/jinn-mcp.js
   languageName: unknown
   linkType: soft
 
