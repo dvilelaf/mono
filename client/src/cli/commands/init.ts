@@ -69,16 +69,32 @@ async function run(ctx: CommandContext): Promise<void> {
     masterAddress = deriveMasterAddress(mnemonic);
   }
 
+  // Persist master_address so downstream verbs (fund-requirements,
+  // bootstrap) hydrate from the existing wallet instead of rolling a
+  // fresh HD mnemonic.
+  const network = ctx.env['JINN_NETWORK'] ?? 'testnet';
+  const chain: 'base' | 'base-sepolia' = network === 'mainnet' ? 'base' : 'base-sepolia';
+  await store.patchFleet({ master_address: masterAddress, chain });
+
   emitResult(
     {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       master: masterAddress,
       keystoreDir: earningDir,
+      nextStep: {
+        cli: 'jinn fund-requirements',
+        purpose: 'List addresses that need funding before bootstrap can advance.',
+      },
     },
     (v) => {
-      const value = v as { master: string; keystoreDir: string };
-      return `Keystore ready.\nMaster: ${value.master}\nDirectory: ${value.keystoreDir}`;
+      const value = v as { master: string; keystoreDir: string; nextStep: { cli: string } };
+      return (
+        `Keystore ready.\nMaster: ${value.master}\nDirectory: ${value.keystoreDir}\n` +
+        `Next: ${value.nextStep.cli}\n` +
+        `Backup: your JINN_PASSWORD and the mnemonic in this keystore are the only way to recover this wallet. ` +
+        `Run \`jinn keys backup\` to export the mnemonic.`
+      );
     },
     {
       json: Boolean(parsed.values.json),

@@ -43,7 +43,33 @@ describe('doctor command', () => {
     const names = parsed.checks.map((c: { name: string }) => c.name);
     expect(names).toContain('claude_binary');
     expect(names).toContain('node_version');
-    expect(names).toContain('keystore_readable');
+    expect(names).toContain('keystore_present');
+  });
+
+  it('reports keystore_present once jinn init has written the keystore', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'jinn-doctor-'));
+    writeFileSync(join(tmp, 'master_keystore.json'), '{}');
+    const { ctx, writes } = makeCtx({ JINN_EARNING_DIR: tmp });
+    await doctor.run(ctx);
+    const parsed = JSON.parse(writes[0]);
+    const keystoreCheck = parsed.checks.find(
+      (c: { name: string }) => c.name === 'keystore_present',
+    );
+    expect(keystoreCheck).toBeDefined();
+    expect(keystoreCheck.ok).toBe(true);
+    expect(keystoreCheck.detail).toMatch(/master_keystore\.json/);
+  });
+
+  it('--human output is a checklist (not JSON)', async () => {
+    const { ctx, writes } = makeCtx();
+    ctx.argv = ['--human'];
+    await doctor.run(ctx);
+    const out = writes.join('');
+    expect(out.startsWith('[ok  ]') || out.startsWith('[fail]')).toBe(true);
+    expect(out).toMatch(/Summary: /);
   });
 
   it('includes the claude_auth check', async () => {

@@ -68,6 +68,9 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   const keystore = await store.loadMnemonicKeystore();
   const mnemonic = await decryptMnemonic(keystore, password);
   writeFileSync(output, `${mnemonic}\n`, { encoding: 'utf-8', mode: 0o600 });
+  process.stderr.write(
+    `[warn] Mnemonic written in plaintext to ${output} (mode 0600). Treat this file as seed material.\n`,
+  );
 
   emitResult(
     {

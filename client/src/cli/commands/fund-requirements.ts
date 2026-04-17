@@ -1,3 +1,4 @@
+import { formatUnits } from 'viem';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
@@ -24,6 +25,15 @@ interface FundRequirementRow {
   details: { tokenAddress: string | null; tokenSymbol: string };
 }
 
+function formatAmount(wei: string, symbol: string): string {
+  try {
+    // All three asset roles (native, bond, reward) use 18 decimals in Phase 1b.
+    return `${formatUnits(BigInt(wei), 18)} ${symbol}`;
+  } catch {
+    return `${wei} wei (${symbol})`;
+  }
+}
+
 function humanFundRequirements(payload: {
   satisfied: boolean;
   requirements: FundRequirementRow[];
@@ -33,9 +43,9 @@ function humanFundRequirements(payload: {
   }
   const lines = ['Funding required before bootstrap can advance:'];
   for (const r of payload.requirements) {
-    lines.push(
-      `- ${r.role} @ ${r.address}: asset role ${r.asset}, need ${r.needWei} wei, have ${r.haveWei} wei`,
-    );
+    const need = formatAmount(r.needWei, r.details.tokenSymbol);
+    const have = formatAmount(r.haveWei, r.details.tokenSymbol);
+    lines.push(`- ${r.role} @ ${r.address}: need ${need}, have ${have}`);
   }
   return lines.join('\n');
 }

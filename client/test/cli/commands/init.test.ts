@@ -6,6 +6,7 @@ import init from '../../../src/cli/commands/init.js';
 import type { CommandContext } from '../../../src/cli/command.js';
 
 const KEYSTORE_FILE = 'master_keystore.json';
+const STATE_FILE = 'earning_state.json';
 
 function makeCtx(overrides: Partial<CommandContext> = {}): {
   ctx: CommandContext; writes: string[];
@@ -48,6 +49,34 @@ describe('init command', () => {
     await init.run(ctx2);
     const second = JSON.parse(writes2[writes2.length - 1]).master;
     expect(second).toBe(first);
+  });
+
+  it('writes earning_state.json with the same master_address as the keystore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { ctx, writes } = makeCtx();
+    await init.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    const stateFile = join(ctx.env['JINN_EARNING_DIR']!, STATE_FILE);
+    expect(existsSync(stateFile)).toBe(true);
+    const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+    expect(state.master_address).toBe(parsed.master);
+    expect(state.chain).toBe('base-sepolia');
+  });
+
+  it('payload includes a next-step hint pointing at fund-requirements', async () => {
+    const { ctx, writes } = makeCtx();
+    await init.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.nextStep?.cli).toBe('jinn fund-requirements');
+    expect(typeof parsed.nextStep?.purpose).toBe('string');
+  });
+
+  it('--human output includes a backup warning', async () => {
+    const { ctx, writes } = makeCtx({ argv: ['--human'] });
+    await init.run(ctx);
+    const out = writes.join('');
+    expect(out).toMatch(/Next: jinn fund-requirements/);
+    expect(out).toMatch(/Backup:/);
   });
 
   it('emits invalid_invocation for bad flags', async () => {
