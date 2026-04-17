@@ -18,7 +18,13 @@ function makeCtx(overrides: Partial<CommandContext> = {}): {
     stdoutIsTty: false,
     writer: { write: (s: string) => { writes.push(s); return true; } },
     exit: () => { /* unused */ },
-    env: { JINN_PASSWORD: 'testpw', JINN_EARNING_DIR: earningDir },
+    // JINN_NETWORK=testnet isolates the chain picked by init from the
+    // developer's real ~/.jinn-client/config.json if it exists.
+    env: {
+      JINN_PASSWORD: 'testpw',
+      JINN_EARNING_DIR: earningDir,
+      JINN_NETWORK: 'testnet',
+    },
     ...overrides,
   };
   return { ctx, writes };
