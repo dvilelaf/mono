@@ -41,6 +41,7 @@ async function run(ctx: CommandContext): Promise<void> {
         limit: { type: 'string', default: '100' },
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        config: { type: 'string' },
       },
       allowPositionals: false,
     });

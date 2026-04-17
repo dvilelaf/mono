@@ -19,6 +19,7 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
         output: { type: 'string' },
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        config: { type: 'string' },
       },
       allowPositionals: false,
     });
