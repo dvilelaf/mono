@@ -14,28 +14,47 @@ used `npx --yes -p @jinn-network/client@latest jinn <verb>` against a fresh
 funded; every command was exercised as far as the unfunded path allowed, plus
 behavioural probes (help, `--human`, dry runs, state introspection).
 
+After the first pass against the published tarball, every finding was
+re-verified against the current worktree HEAD by running `yarn build` and
+invoking `node dist/bin/jinn.js ...` out of a fresh `$HOME` under
+`/tmp/jinn-head-drill/`. The second column in the table below reflects that
+HEAD build. The per-finding sections below call out "Status on HEAD:" at
+the top of each entry.
+
 ## Summary
 
-| Severity | Count |
-|---------|-------|
-| Blocker | 3 |
-| Major   | 6 |
-| Minor   | 5 |
-| Nit     | 4 |
+| Severity | Count (published 0.1.0) | Still reproducible on HEAD |
+|---------|------------------------|----------------------------|
+| Blocker | 3 | 2 |
+| Major   | 6 | 4 (+2 partially fixed) |
+| Minor   | 5 | 4 (+1 partially fixed) |
+| Nit     | 4 | 3 (+1 fixed) |
 
-The headline issue is that the three documented lifecycle commands — `jinn
-init`, `jinn fund-requirements`, `jinn bootstrap` — silently disagree about
-which master wallet exists. An operator who follows the README end-to-end
-ends up being asked to fund an address that is *not* the one `jinn init`
-printed, and on each subsequent invocation the keystore gets overwritten with
-a new HD mnemonic (published 0.1.0). The partial fix on HEAD
-(`client/src/earning/bootstrap.ts:338-352`) hydrates from the existing
-keystore but is not yet in any published release, and does not repair the
-core lifecycle contract between `init` and `bootstrap`.
+The headline issue on the published tarball — the three documented lifecycle
+commands `jinn init` / `jinn fund-requirements` / `jinn bootstrap` disagreeing
+about which master wallet exists — **is already fixed on HEAD** by the
+hydration branch in `client/src/earning/bootstrap.ts:342-352` (commit
+`e09fde0d`, 2026-04-16). Verified on HEAD: all three verbs now resolve to the
+same master address. The fix is just not yet in any published release.
+
+Everything else in the finding list is *still reproducible on HEAD* unless
+noted otherwise in the per-finding "Status on HEAD" header. The README
+quick-start contradiction, the `jinn logs` empty envelope, the `jinn doctor`
+keystore-filename bug, the `jinn submit-intent --dry-run` `"0x"` placeholder,
+and `jinn version`'s `commit: "unknown"` are all present on HEAD and need
+follow-up fixes.
 
 ## Findings
 
 ### Blocker-1 — `jinn init` and `jinn bootstrap` generate different master wallets in published 0.1.0
+
+**Status on HEAD: FIXED (unreleased).** Verified by running HEAD-built
+`jinn init → fund-requirements → bootstrap` on a fresh `$HOME`; all three
+resolved to the same master `0x2786794153C786D27d0D04302B8fBD7DD02C0966`
+with no "Generating new HD wallet" stderr. Published 0.1.0 still broken.
+The remaining gap on HEAD is that `jinn init` itself still does not write
+`earning_state.json`; hydration works only because `bootstrap` now reads
+the existing keystore when `state.master_address` is empty.
 
 **Where:** `client/src/earning/bootstrap.ts:186-195` (published 0.1.0 dist)
 vs `client/src/cli/commands/init.ts:62-70`, `client/src/earning/store.ts:15`.
@@ -69,6 +88,10 @@ by a second run of `jinn bootstrap`.
 
 ### Blocker-2 — README quick start contradicts `jinn init` runtime contract
 
+**Status on HEAD: NOT FIXED.** `client/README.md:19-28` on HEAD still shows
+`jinn init` on its own line without `JINN_PASSWORD`; `jinn init` on the
+HEAD build still exits 11 `invalid_invocation` without the env var.
+
 **Where:** `client/README.md:19-28` vs `client/src/cli/commands/init.ts:40-52`.
 
 The quick start block is:
@@ -92,6 +115,10 @@ that the password encrypts the mnemonic and is required.
 ---
 
 ### Blocker-3 — `jinn submit-intent --dry-run` renders a plan with an empty `creatorMultisig`
+
+**Status on HEAD: NOT FIXED.** HEAD build still emits
+`"Would post intent 't' from 0x"` and `"creatorMultisig":"0x"` when no
+service at step `complete` exists.
 
 **Where:** `client/src/cli/commands/submit-intent.ts:73-80`.
 
@@ -120,6 +147,11 @@ plan.
 
 ### Major-1 — `jinn doctor` keystore check targets the wrong filename
 
+**Status on HEAD: NOT FIXED.** `client/src/cli/commands/doctor.ts:32` still
+reads `join(earningDir, 'mnemonic.keystore.json')` while the store writes
+`master_keystore.json`. Verified: after `jinn init` on HEAD, doctor still
+prints `"no keystore yet (expected on a fresh install)"`.
+
 **Where:** `client/src/cli/commands/doctor.ts:31-45` vs
 `client/src/earning/store.ts:15`.
 
@@ -137,6 +169,9 @@ after `init`.
 
 ### Major-2 — `jinn logs` violates the output contract (empty stdout)
 
+**Status on HEAD: NOT FIXED.** HEAD build of `jinn logs` on a fresh install
+still writes 0 bytes to stdout, exit 0.
+
 **Where:** `client/src/cli/commands/logs.ts:41-58`.
 
 `jinn logs` on a fresh install writes **zero bytes to stdout** (exit 0,
@@ -153,6 +188,10 @@ hint. Add a test for the empty case.
 ---
 
 ### Major-3 — `--human` is wired only for a subset of verbs; `version` and `doctor` ignore it
+
+**Status on HEAD: NOT FIXED.** HEAD `jinn version --human` and
+`jinn doctor --human` still emit JSON (pretty-printed). `fund-requirements
+--human` still emits `5000000000000000 wei` rather than `0.005 ETH`.
 
 **Where:** `client/src/cli/commands/version.ts`, `client/src/cli/commands/doctor.ts`.
 
@@ -178,7 +217,16 @@ already present on the row.
 
 ### Major-4 — Operator quickstart never covers actually starting the fleet on Base Sepolia
 
+**Status on HEAD: PARTIALLY FIXED.** HEAD now ships a `jinn quickstart`
+verb (`client/src/cli/commands/quickstart.ts`, committed d2d5b9da) that
+combines `init → fund → bootstrap → run` — the exact one-shot the README
+quick-start is missing. `client/README.md` on HEAD, however, still does
+not mention `jinn quickstart` at all; neither does the
+"Operator commands" table. So the plumbing exists but is invisible to a
+new operator reading the README.
+
 **Where:** `client/README.md:17-28`, `client/README.md:40-70`,
+`client/src/cli/commands/quickstart.ts`,
 `docs/phase1a-operator-runbook.md:1-215`.
 
 The README's "Quick start" goes `init` → `doctor` → `run`. But `run`
@@ -206,8 +254,23 @@ their own stack.
 
 ### Major-5 — `jinn version` hard-codes `"unknown"` for commit and deployment digest on the published tarball
 
+**Status on HEAD: PARTIALLY FIXED.**
+`client/scripts/write-dist-build-meta.mjs` now resolves the commit from
+`JINN_BUILD_COMMIT` / `GITHUB_SHA` — so a CI publish will carry a real SHA
+(local `yarn build` still reports `"unknown"`, verified on HEAD). The
+`deployments` side is still broken: `computeDeploymentDigest`
+(`client/src/cli/deployment-digest.ts:14-38`) only reads
+`config.testnet*DeploymentPath`, which is populated only from
+`JINN_TESTNET_*_DEPLOYMENT` env vars. The bundled deployments that
+`getChainConfig` discovers via
+`client/src/earning/contracts.ts:28-33` are not fed into the digest, so
+`jinn version` on HEAD still reports `digest: "unknown"` and `artifacts:
+[]` for a zero-config operator.
+
 **Where:** drill transcript `logs/02-version.log`, build step in
-`client/package.json:build` (`node scripts/write-dist-build-meta.mjs`).
+`client/package.json:build` (`node scripts/write-dist-build-meta.mjs`),
+`client/src/cli/deployment-digest.ts`,
+`client/src/earning/contracts.ts:28-33`.
 
 Published 0.1.0 reports:
 
@@ -230,8 +293,15 @@ deployments manifest into `artifacts` at publish time. Surface them in
 
 ### Major-6 — README lists commands that are not in the published CLI
 
+**Status on HEAD: PARTIALLY FIXED.** HEAD `jinn --help` now enumerates
+`quickstart`, `plugin`, and `update` alongside the original verbs
+(verified: `node dist/bin/jinn.js --help` on HEAD). `client/README.md`
+still does not list `quickstart`, `plugin`, or `update` in the
+"Operator commands" table — the README / help mismatch has flipped
+direction rather than closed.
+
 **Where:** `client/README.md:97-107` vs `jinn --help` on 0.1.0
-(`logs/01-help.log`).
+(`logs/01-help.log`) and HEAD help output.
 
 The "Actions" table lists `jinn fleet scale --to N`, `jinn fleet retire <index>`,
 and `jinn withdraw --to <addr>`. On 0.1.0, `jinn --help` advertises
@@ -251,6 +321,9 @@ table to list *every* verb the published binary accepts.
 
 ### Minor-1 — `jinn init` output does not mention next steps or mnemonic safety
 
+**Status on HEAD: NOT FIXED.** HEAD `jinn init` JSON payload is still
+`{"master": …, "keystoreDir": …}` with no `nextStep` hint or backup warning.
+
 **Where:** `client/src/cli/commands/init.ts:72-90`.
 
 JSON result is `{"master": "0x…", "keystoreDir": "/…"}`. No hint to run
@@ -266,6 +339,10 @@ backup warning.
 ---
 
 ### Minor-2 — `jinn doctor` reports `ok: true` for a missing keystore
+
+**Status on HEAD: NOT FIXED.** Same behaviour as published — always
+reports `ok: true` with `"no keystore yet (expected on a fresh install)"`,
+compounded by the filename bug in Major-1.
 
 **Where:** `client/src/cli/commands/doctor.ts:40-45`.
 
@@ -283,6 +360,10 @@ attempts to decrypt with a provided password-fd, else reports `skipped`).
 
 ### Minor-3 — npm install spews deprecation warnings on every `npx` invocation
 
+**Status on HEAD: NOT FIXED.** `client/package.json` on HEAD still pulls
+the js-IPFS stack; the warnings reproduce the same way on any fresh
+`npx @jinn-network/client@latest` run.
+
 **Where:** client dependency tree (`ipfs-http-client`, `ipfs-core-utils`,
 `ipfs-core-types`, `multicodec`, `multibase`, `cids`, `prebuild-install`).
 
@@ -299,6 +380,10 @@ lines.
 ---
 
 ### Minor-4 — `jinn keys backup` silently writes a plaintext mnemonic
+
+**Status on HEAD: NOT FIXED.** HEAD `jinn keys backup` still writes the
+12-word mnemonic in plaintext and emits only
+`{"verb":"keys backup","output":"...","words":12}` with no warning.
 
 **Where:** `client/src/cli/commands/keys-backup.ts` (file created at
 `./backup.json` during drill; content was literal 12-word mnemonic with
@@ -318,6 +403,11 @@ mode 0600. Treat `./backup.json` as seed material."), and/or support a
 
 ### Minor-5 — `jinn bootstrap --help` shows a failure example but `jinn run` does not
 
+**Status on HEAD: PARTIALLY FIXED.** HEAD `jinn run --help` now describes
+the funding gate in prose ("exits 10 with a funding_required envelope if
+funding is missing") but still does not include a concrete
+copy-pasteable failure example like `bootstrap --help` does.
+
 **Where:** `client/src/cli/commands/bootstrap.ts:helpText`,
 `client/src/cli/commands/run.ts:helpText`.
 
@@ -333,6 +423,10 @@ path the same way.
 
 ### Nit-1 — `jinn` help omits `quickstart`, `plugin install`, `update` even when the binary ships them
 
+**Status on HEAD: FIXED.** HEAD `jinn --help` now lists `quickstart`,
+`plugin`, and `update` alongside the original verbs. Keep this finding
+for the published-tarball history.
+
 **Where:** `client/src/cli/help.ts` or wherever verbs are enumerated.
 
 The help page lists curated verbs; the source tree has more. Either the help
@@ -343,6 +437,10 @@ so operators know they exist.
 ---
 
 ### Nit-2 — `version.tokens.bond.symbol` and `.reward.symbol` are both `stOLAS`, but README still references OLAS/JINN
+
+**Status on HEAD: NOT FIXED.** `client/README.md` on HEAD still has no
+`stOLAS` reference; `docs/phase1a-operator-runbook.md:263-268` still
+talks about OLAS bonds.
 
 **Where:** `version` output on 0.1.0 (`logs/02-version.log`) vs
 `docs/phase1a-operator-runbook.md:263-268` and `CLAUDE.md:80-86`.
@@ -355,6 +453,10 @@ further up. At minimum the runbook should lead with `stOLAS` for Phase 1b.
 ---
 
 ### Nit-3 — `jinn fund-requirements` JSON envelope contains `blocks: "bootstrap"` but no `blocks: "run"` / `"submit-intent"` rows are emitted pre-bootstrap
+
+**Status on HEAD: NOT FIXED.** No `--forecast` flag on HEAD;
+`fund-requirements --help` still shows only `--human` / `--config` /
+`--password-fd` options.
 
 **Where:** `client/src/cli/commands/fund-requirements.ts:124-136`.
 
@@ -369,6 +471,9 @@ deployment would cut hours out of the onboarding.
 ---
 
 ### Nit-4 — Drill's fresh `$HOME` discovery: `~/.jinn-client` is documented but not surfaced on first run
+
+**Status on HEAD: NOT FIXED.** HEAD `jinn status` output still does not
+include a `paths` stanza; earning directory only surfaces from `jinn init`.
 
 **Where:** `client/README.md:121-140` (config table) and
 `client/src/cli/commands/init.ts:77` (emits `keystoreDir`).
@@ -397,16 +502,46 @@ npx --yes -p @jinn-network/client@latest jinn submit-intent \
     --id t --description t --dry-run                                 # "Would post intent 't' from 0x"
 ```
 
+## HEAD re-verification matrix
+
+Built locally from the worktree HEAD (`3f772789` before this edit) and
+reran every finding from a clean `/tmp/jinn-head-drill/home`.
+
+| Finding | HEAD status | Evidence |
+|---|---|---|
+| Blocker-1 (wallet drift) | Fixed (unreleased) | bootstrap.ts:342-352; verified `init/fund-req/bootstrap` all resolved `0x2786…0966` |
+| Blocker-2 (README missing JINN_PASSWORD) | Not fixed | README line 21 unchanged; HEAD binary still exits 11 |
+| Blocker-3 (submit-intent `"0x"`) | Not fixed | `Would post intent 't' from 0x` reproduced on HEAD |
+| Major-1 (doctor filename) | Not fixed | doctor.ts:32 still `mnemonic.keystore.json` |
+| Major-2 (empty `jinn logs`) | Not fixed | HEAD build: stdout bytes = 0 |
+| Major-3 (`--human` wired narrowly) | Not fixed | version/doctor `--human` still JSON; fund-req still wei |
+| Major-4 (Phase 1b docs gap) | Partial | `jinn quickstart` ships on HEAD; README does not mention it |
+| Major-5 (`commit`/`digest` = `"unknown"`) | Partial | commit meta lands via CI env; digest still empty for zero-config operators |
+| Major-6 (README/help parity) | Partial | HEAD help lists quickstart/plugin/update; README still doesn't |
+| Minor-1 (init next-step hint) | Not fixed | JSON payload unchanged |
+| Minor-2 (doctor `ok: true` for missing keystore) | Not fixed | same behaviour |
+| Minor-3 (deprecation noise) | Not fixed | dep tree unchanged |
+| Minor-4 (keys backup silent plaintext) | Not fixed | same behaviour |
+| Minor-5 (run --help failure example) | Partial | prose only; no copy-paste example |
+| Nit-1 (help omissions) | Fixed | HEAD help lists all shipping verbs |
+| Nit-2 (stOLAS naming) | Not fixed | README has no stOLAS reference |
+| Nit-3 (fund-requirements forecast) | Not fixed | no `--forecast` flag |
+| Nit-4 (paths in inspection verbs) | Not fixed | `status` output unchanged |
+
 ## Suggested follow-up work (not done in this session)
 
-1. Patch-release Blocker-1 from HEAD to stop the "mnemonic rotates on every
-   bootstrap" behaviour in the published tarball.
-2. Fix the README quick-start `JINN_PASSWORD` inconsistency (Blocker-2).
+1. Cut a patch release that carries Blocker-1's fix so the "mnemonic rotates
+   on every bootstrap" behaviour stops reaching any new operator via npm.
+   This is the single most valuable ship right now.
+2. Fix the README quick-start `JINN_PASSWORD` inconsistency (Blocker-2) and
+   add a one-line section for `jinn quickstart` in the same pass (closes
+   the README half of Major-4 and Major-6).
 3. Land the doctor filename fix (Major-1) and empty `jinn logs` envelope
    (Major-2) together — both are one-line changes with immediate operator
    wins.
-4. Carve the "Phase 1b npm-operator path" out of
-   `docs/phase1a-operator-runbook.md` into a shorter `client/README.md`
-   section (Major-4).
-5. Publish a non-`"unknown"` commit digest in `jinn version` (Major-5) so
-   support can triage reports.
+4. Feed bundled deployments into `computeDeploymentDigest`
+   (`client/src/cli/deployment-digest.ts`) so `jinn version` reports a real
+   digest for zero-config operators (remainder of Major-5).
+5. Short-circuit `jinn submit-intent --dry-run` when no complete service
+   exists (Blocker-3) — emit a `bootstrap_required` envelope rather than a
+   `"0x"` placeholder plan.
