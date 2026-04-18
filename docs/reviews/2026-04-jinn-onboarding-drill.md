@@ -545,3 +545,172 @@ reran every finding from a clean `/tmp/jinn-head-drill/home`.
 5. Short-circuit `jinn submit-intent --dry-run` when no complete service
    exists (Blocker-3) — emit a `bootstrap_required` envelope rather than a
    `"0x"` placeholder plan.
+
+## 2026-04-18 re-drill verification
+
+Every finding above has been addressed on a branch rebased onto
+`origin/main` (which carries `cc2fffdf client: Docker acceptance gate,
+jinn auth, and daemon resilience`). The `release:testnet-acceptance`
+gate now completes end-to-end on Base Sepolia:
+
+- image: `jinn-client:acceptance-local`
+- commit: `74e69505bbc81e3225bfbd16cb4bab95981b8807` on
+  `ale/jinn-operator-onboarding-drill` (v0.1.1)
+- deployment digest: `6e98a131263c0232a1671d8905f21cc815073f97635aa48a72b5960219b171cc`
+- cycles observed: 2 / 2 (both `restoration: SUCCESS` and
+  `evaluation: SUCCESS` for the two deterministic desired states)
+- claim-rewards tx: 1 submitted (pending 0.2748 JINN before claim)
+- evidence: `client/acceptance-runs/2026-04-18T10-53-46-446Z-logm0s/`
+- local gates: `yarn typecheck`, `yarn test` (316/316), `yarn build`,
+  `yarn pack:smoke` (0.1.1), `yarn staking` (6/6),
+  `yarn e2e` (24/24) all green
+
+### New drill-class findings discovered during the acceptance run
+
+The Docker acceptance surfaced five issues that were not in the original
+npm-drill report. All are fixed on the re-drill branch.
+
+#### New-1 — Major: `fund-requirements` reports `satisfied: true` while the Safe has 0 ETH
+
+**Where:** `client/src/cli/commands/fund-requirements.ts:124-136`
++ `client/src/earning/bootstrap.ts` (funding probe).
+
+**What happened:** After bootstrap reached `step: complete`, the Safe
+(`0xa1A38dc5fece0196500F2d0F8136Eb08b1084c59`) held exactly 0 ETH.
+`fund-requirements --json` still reported `satisfied: true` because the
+funding probe only checks master-EOA ETH. The daemon then spent the
+entire run retrying `createEvaluationJob` (which sends 99 wei as
+`msg.value` to the mech for the evaluation fee) — every call reverted
+with `execTransaction` wrapping the inner `insufficient funds`.
+
+**Repro:** from a cold Safe,
+`jinn fund-requirements --json` → `satisfied: true` despite
+`cast balance $SAFE` returning `0`.
+
+**Proposed fix:** the funding probe should include per-Safe native-ETH
+runway. A Safe that is `complete` but holds < N × mech fee is not
+runnable; surface it as a `native`/blocks=`run` requirement row.
+
+#### New-2 — Major: `ExternalStakingDistributor.reStake` is permissioned — regular operators can't self-heal an evicted service
+
+**Where:**
+`contracts/src/vendor/stolas/ExternalStakingDistributor.sol:778-806`
+vs. `client/src/earning/bootstrap.ts` (reconcile path).
+
+**What happened:** service 27 was evicted on-chain between runs. The
+bootstrap reconcile logic called `distributor.reStake(stakingProxy,
+serviceId)` from the operator EOA and the tx reverted with
+`UnauthorizedAccount(0xEfbd…)`. `reStake` gates on
+`mapCuratingAgents[msg.sender] || mapManagingAgents[msg.sender] ||
+msg.sender == owner` — a plain operator has none of those roles. In
+this run the distributor owner (the deployer) had to call `reStake`
+manually to unblock the gate.
+
+**Proposed fix:** detect `UnauthorizedAccount` during the reconcile
+path and fall through to "abandon the evicted service, bootstrap a new
+one" rather than retrying forever. Optionally emit a
+`reconcile_needed` envelope so ops know the old Safe's stOLAS bond is
+stranded and needs manual cleanup.
+
+#### New-3 — Major: Safe 1.3.0 wraps every inner execTransaction revert as `GS013`; `isRecoverableTransactionError` treated it as non-recoverable
+
+**Where:** `client/src/tx-retry.ts:55` (pre-fix) vs.
+`GnosisSafe.sol §execTransaction`
+(`require(success || safeTxGas != 0 || gasPrice != 0, "GS013")`).
+
+**What happened:** `restorer` and `delivery-watcher` both queue Safe
+writes. Even with the process-local `safeLocks` Map in
+`client/src/adapters/mech/safe.ts:35` serialising those writes, the
+viem pre-broadcast simulate-step reads the Safe nonce, signs, and then
+can race with an in-flight execution. On a nonce miss, inner
+`checkSignatures` reverts with `GS026 "Invalid owner provided"` because
+the signed SafeTxHash bound to nonce N no longer recovers to an owner
+now that the Safe is at N+k. Safe catches that and re-reverts as
+`GS013`, so viem reports `"GS013"` and the retry classifier gave up
+after the first attempt. Verified on-chain: signature valid for nonce
+84, Safe at 86 by execution time; `cast wallet verify` matched only
+`getTransactionHash(..., 84)`.
+
+**Fix landed:** `client/src/tx-retry.ts` — treat `GS013` as
+recoverable. `executeSafeTransaction` already re-reads the nonce and
+re-signs on every retry inside `withRecoverableRetry`, so this
+self-heals for the race case. Truly unrecoverable GS013 still fails
+after `maxAttempts` with the same error — same end state as before.
+Regression test in `client/test/tx-retry.test.ts`.
+
+#### New-4 — Major: runner env allowlist didn't forward `CLAUDE_CODE_OAUTH_TOKEN`, breaking headless Docker auth
+
+**Where:** `client/src/runner/claude.ts:ENV_ALLOWLIST`.
+
+**What happened:** The daemon process had `CLAUDE_CODE_OAUTH_TOKEN`
+set (from `docker-compose.acceptance.yml`), but
+`buildAgentEnv()` strictly filtered to an allowlist that covered
+`PATH`, `HOME`, `XDG_*`, `NODE_*`, etc. — and nothing Claude-auth.
+Every spawned `claude -p …` exited with `Not logged in · Please run
+/login` even though the parent daemon had a valid token.
+
+**Fix landed:** added `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`
+to the allowlist with a comment explaining these are Claude
+credentials (not Jinn operator secrets) and scoped forwarding is
+intentional.
+
+#### New-5 — Minor: Docker-compose mount at `/root/.claude` leaves `/root/.claude.json` on ephemeral overlay
+
+**Where:** `client/docker-compose.yml:32`,
+`client/docker-compose.acceptance.yml:20`.
+
+**What happened:** The acceptance volume mounts at `/root/.claude`
+(directory), which persists the credentials file Claude writes at
+`/root/.claude/.credentials.json`. Claude Code also writes a main
+config to `/root/.claude.json` (file, one level up, outside the
+mount) with non-secret state like `migrationVersion`,
+`opusProMigrationComplete`, `userID`. That file is wiped on every
+`docker compose run --rm`; Claude warns about it on every restart
+(`"Claude configuration file not found at: /root/.claude.json. A
+backup file exists at …"`) but does not block. Still noisy, and
+confused the debugging of New-4.
+
+**Fix landed:** `client/Dockerfile` symlinks
+`/root/.claude.json → /root/.claude/claude.json` so the main config
+lives inside the mounted directory.
+
+Note: this commit was originally written before I discovered that the
+OAT flow uses `CLAUDE_CODE_OAUTH_TOKEN` env var, not file storage.
+The symlink is still useful belt-and-braces defence for the warning
+chatter and for older Claude-CLI versions that stored more state in
+`.claude.json`, but it is no longer on the critical path for Docker
+auth.
+
+#### New-6 — Process: deterministic acceptance prompts lived on origin/main but not on the drill-fix branch
+
+**Where:** `client/scripts/lib/acceptance-operator-config.mjs
+:buildAcceptanceDesiredStates`.
+
+**What happened:** The user wrote concrete, verifiable prompts for the
+acceptance harness on 2026-04-16 (merged to main as `cc2fffdf`). The
+drill-fix branch was forked before that merge and was still using the
+earlier vague template
+(`"Release acceptance desired state N for <runId>."`). The evaluator
+Claude correctly returned `FAILURE` on the vague prompts, which looked
+like "the protocol is broken" until the divergence was caught. Rebase
+onto `origin/main` pulled the concrete prompts back in and the
+harness went green on the first retry after rebase.
+
+**Proposed fix (process, not code):** `yarn
+release:testnet-acceptance` should refuse to run if the current
+branch's merge-base with `origin/main` is more than ~2 commits behind,
+or at least surface a warning. Catching this earlier would have saved
+about an hour of investigation this session.
+
+## Release status
+
+- Branch: `ale/jinn-operator-onboarding-drill` (local only).
+- Tip: `74e69505` (v0.1.1, acceptance-green).
+- Pending: `git push origin ale/jinn-operator-onboarding-drill` +
+  `git tag client-v0.1.1 && git push origin client-v0.1.1` which
+  triggers `.github/workflows/npm-publish.yml` (publishes
+  `@jinn-network/client@0.1.1` with `latest` dist-tag via OIDC
+  trusted publishing) and `.github/workflows/docker.yml` (pushes
+  OCI image to GHCR).
+- Not pushed autonomously — tag push is the documented checkpoint in
+  the release plan.
