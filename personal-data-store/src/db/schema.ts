@@ -9,5 +9,6 @@ export * from "../domains/documents/documents.schema.js";
 export * from "../domains/finance/income.schema.js";
 export * from "../domains/finance/yield-positions.schema.js";
 export * from "../domains/media/media.schema.js";
+export * from "../domains/media/film-reviews.schema.js";
 export * from "../domains/analyses/analyses.schema.js";
 export * from "../domains/finance/subscriptions.schema.js";
