@@ -47,20 +47,34 @@ describe('doctor command', () => {
   });
 
   it('reports keystore_present once jinn init has written the keystore', async () => {
-    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const tmp = mkdtempSync(join(tmpdir(), 'jinn-doctor-'));
-    writeFileSync(join(tmp, 'master_keystore.json'), '{}');
-    const { ctx, writes } = makeCtx({ JINN_EARNING_DIR: tmp });
-    await doctor.run(ctx);
-    const parsed = JSON.parse(writes[0]);
-    const keystoreCheck = parsed.checks.find(
-      (c: { name: string }) => c.name === 'keystore_present',
-    );
-    expect(keystoreCheck).toBeDefined();
-    expect(keystoreCheck.ok).toBe(true);
-    expect(keystoreCheck.detail).toMatch(/master_keystore\.json/);
+    // `doctor` reads earningDir via loadConfig, which consults process.env and
+    // the on-disk ~/.jinn-client/config.json — not ctx.env. Isolate both by
+    // pointing HOME at a throwaway dir and injecting JINN_EARNING_DIR into
+    // process.env for the duration of the test.
+    const home = mkdtempSync(join(tmpdir(), 'jinn-doctor-home-'));
+    const earning = mkdtempSync(join(tmpdir(), 'jinn-doctor-earn-'));
+    writeFileSync(join(earning, 'master_keystore.json'), '{}');
+    const prev = { ...process.env };
+    process.env.HOME = home;
+    process.env.JINN_EARNING_DIR = earning;
+    try {
+      const { ctx, writes } = makeCtx({ JINN_EARNING_DIR: earning });
+      await doctor.run(ctx);
+      const parsed = JSON.parse(writes[0]);
+      const keystoreCheck = parsed.checks.find(
+        (c: { name: string }) => c.name === 'keystore_present',
+      );
+      expect(keystoreCheck).toBeDefined();
+      expect(keystoreCheck.ok).toBe(true);
+      expect(keystoreCheck.detail).toMatch(/master_keystore\.json/);
+    } finally {
+      process.env = prev;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(earning, { recursive: true, force: true });
+    }
   });
 
   it('--human output is a checklist (not JSON)', async () => {
