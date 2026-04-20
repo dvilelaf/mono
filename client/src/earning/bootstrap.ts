@@ -71,9 +71,11 @@ import {
 } from './orphan-sweep.js';
 import { requestTestnetFunding } from './faucet.js';
 import {
+  flattenErrorMessage,
   viemSendTransactionWithRetry,
   waitForTransactionReceiptWithRetry,
 } from '../tx-retry.js';
+import { isUnauthorizedAccountError } from '../errors/unauthorized-account.js';
 import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork } from './viem-clients.js';
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
@@ -717,17 +719,11 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
 
-    // Master EOA pays gas. It is NOT automatically a curating/managing agent:
-    // `distributor.stake()` does not write to the top-level
-    // `mapCuratingAgents` / `mapManagingAgents` mappings; only the distributor
-    // owner's `setCuratingAgents` / `setManagingAgents` does. `reStake` gates
-    // on those top-level mappings (see
-    // `contracts/src/vendor/stolas/ExternalStakingDistributor.sol:804`), so
-    // for a typical operator this call reverts with
-    // `UnauthorizedAccount(<master>)`. We attempt it anyway (it succeeds for
-    // the distributor owner / whitelisted operators), and on
-    // `UnauthorizedAccount` we surface a `reconcile_needed`-shaped error
-    // instead of infinite-retrying on a permission wall.
+    // `distributor.stake()` writes only to guard-scoped curating-agent maps,
+    // never to the top-level `mapCuratingAgents` that `reStake()` reads —
+    // so plain operators will hit `UnauthorizedAccount` here unless the
+    // distributor owner pre-whitelisted them. Catch-and-surface below rather
+    // than retry forever.
     const masterAccount = deriveMasterSigner(mnemonic);
     const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
 
@@ -747,11 +743,8 @@ export class FleetBootstrapper {
         gas: 1_500_000n,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('UnauthorizedAccount') || message.includes('0x32b2baa3')) {
-        // 0x32b2baa3 = selector for UnauthorizedAccount(address). Surface a
-        // clear, non-retrying error so ops know this service is stranded and
-        // cannot self-heal without owner action.
+      const message = flattenErrorMessage(err);
+      if (isUnauthorizedAccountError(message)) {
         throw new Error(
           `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy and reStake is gated by the distributor's curating-agent whitelist. ` +
           `Master EOA ${masterAccount.address} is not authorized. To recover: ` +

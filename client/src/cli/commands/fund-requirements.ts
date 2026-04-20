@@ -165,29 +165,40 @@ async function run(ctx: CommandContext): Promise<void> {
       chain: viemChain,
       transport: http(config.rpcUrl),
     });
-    for (const svc of result.fleet_state.services) {
-      if (svc.step !== 'complete' || !svc.safe_address) continue;
-      try {
-        const bal = await publicClient.getBalance({ address: svc.safe_address as Address });
-        if (bal < chainCfg.minSafeEth) {
-          const need = (chainCfg.minSafeEth - bal).toString();
-          requirements.push({
-            role: `service_${svc.index}_safe`,
-            address: svc.safe_address,
-            asset: 'native',
-            haveWei: bal.toString(),
-            needWei: need,
-            reason:
-              `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
-              `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
-              `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
-            blocks: 'run',
-            details: { tokenAddress: null, tokenSymbol: 'ETH' },
-          });
-        }
-      } catch {
-        // RPC hiccup on a probe is not a funding gap; ignore and continue.
-      }
+    const probeRows = await Promise.all(
+      result.fleet_state.services
+        .filter(svc => svc.step === 'complete' && svc.safe_address)
+        .map(async (svc): Promise<FundRequirementRow | null> => {
+          const address = svc.safe_address as string;
+          try {
+            const bal = await publicClient.getBalance({ address: address as Address });
+            if (bal >= chainCfg.minSafeEth) return null;
+            return {
+              role: `service_${svc.index}_safe`,
+              address,
+              asset: 'native',
+              haveWei: bal.toString(),
+              needWei: (chainCfg.minSafeEth - bal).toString(),
+              reason:
+                `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
+                `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
+                `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
+              blocks: 'run',
+              details: { tokenAddress: null, tokenSymbol: 'ETH' },
+            };
+          } catch (err) {
+            // Probe failures are not a funding gap on their own; emit a warning
+            // so operators can distinguish "Safe OK" from "couldn't tell".
+            const message = err instanceof Error ? err.message : String(err);
+            process.stderr.write(
+              `[warn] fund-requirements: failed to probe Safe ${address} for service ${svc.index}: ${message}\n`,
+            );
+            return null;
+          }
+        }),
+    );
+    for (const row of probeRows) {
+      if (row) requirements.push(row);
     }
   }
 

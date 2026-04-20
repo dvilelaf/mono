@@ -3,6 +3,8 @@
  * Full stack traces and raw RPC errors are reserved for JINN_DEBUG mode.
  */
 
+import { isUnauthorizedAccountError } from './errors/unauthorized-account.js';
+
 function envDebugTruthy(value: string | undefined): boolean {
   if (value === undefined) return false;
   const v = value.trim().toLowerCase();
@@ -55,7 +57,7 @@ export function formatBootstrapOperatorMessage(error: unknown): OperatorErrorPar
   const msg = stringifyUnknown(error);
   const lower = msg.toLowerCase();
 
-  if (msg.includes('UnauthorizedAccount') || msg.includes('curating-agent whitelist')) {
+  if (isUnauthorizedAccountError(msg) || msg.includes('curating-agent whitelist')) {
     // Surfaces from `recoverEvictedService` when distributor.reStake reverts
     // because the operator is not in mapCuratingAgents / mapManagingAgents on
     // the stOLAS ExternalStakingDistributor. Keep the full actionable message
