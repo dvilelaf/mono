@@ -40,7 +40,9 @@ describe('init command', () => {
     expect(existsSync(join(ctx.env['JINN_EARNING_DIR']!, KEYSTORE_FILE))).toBe(true);
   });
 
-  it('is idempotent — second run returns the same master address', async () => {
+  // Two scrypt-keyed mnemonic encrypt/decrypt rounds make this test slow
+  // enough to flake at the default 5 s timeout on contended CI workers.
+  it('is idempotent — second run returns the same master address', { timeout: 20_000 }, async () => {
     const { ctx: ctx1, writes: w1 } = makeCtx();
     await init.run(ctx1);
     const first = JSON.parse(w1[w1.length - 1]).master;

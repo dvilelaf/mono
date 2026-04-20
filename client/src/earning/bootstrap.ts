@@ -717,16 +717,20 @@ export class FleetBootstrapper {
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
 
-    // Master EOA is the curating agent for this service and pays gas
+    // Master EOA pays gas. It is NOT automatically a curating/managing agent:
+    // `distributor.stake()` does not write to the top-level
+    // `mapCuratingAgents` / `mapManagingAgents` mappings; only the distributor
+    // owner's `setCuratingAgents` / `setManagingAgents` does. `reStake` gates
+    // on those top-level mappings (see
+    // `contracts/src/vendor/stolas/ExternalStakingDistributor.sol:804`), so
+    // for a typical operator this call reverts with
+    // `UnauthorizedAccount(<master>)`. We attempt it anyway (it succeeds for
+    // the distributor owner / whitelisted operators), and on
+    // `UnauthorizedAccount` we surface a `reconcile_needed`-shaped error
+    // instead of infinite-retrying on a permission wall.
     const masterAccount = deriveMasterSigner(mnemonic);
     const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
 
-    // Use distributor.reStake() — a purpose-built entry point for evicted services.
-    // It calls IStaking.unstake() → IStaking.stake() on the staking proxy without
-    // touching the service lifecycle (no terminate/unbond/recoverAccess). The service
-    // stays in Deployed state, the Safe owners are untouched, and the same service
-    // ID, Safe address, and mech address are preserved across the eviction.
-    // Authorization: master EOA is a curating agent (recorded when it called stake()).
     const reStakeData = encodeFunctionData({
       abi: STOLAS_DISTRIBUTOR_ABI,
       functionName: 'reStake',
@@ -734,12 +738,30 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
-    const reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
-      account: masterAccount as Account,
-      to: addr(this.config.distributorAddress),
-      data: reStakeData,
-      gas: 1_500_000n,
-    });
+    let reStakeHash: Hex;
+    try {
+      reStakeHash = await viemSendTransactionWithRetry(masterWallet, this.publicClient, {
+        account: masterAccount as Account,
+        to: addr(this.config.distributorAddress),
+        data: reStakeData,
+        gas: 1_500_000n,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('UnauthorizedAccount') || message.includes('0x32b2baa3')) {
+        // 0x32b2baa3 = selector for UnauthorizedAccount(address). Surface a
+        // clear, non-retrying error so ops know this service is stranded and
+        // cannot self-heal without owner action.
+        throw new Error(
+          `Service ${index} (service_id ${serviceId}) is evicted on the staking proxy and reStake is gated by the distributor's curating-agent whitelist. ` +
+          `Master EOA ${masterAccount.address} is not authorized. To recover: ` +
+          `(a) have the distributor owner call setCuratingAgents([${masterAccount.address}], [true]) on ${this.config.distributorAddress}, then re-run jinn bootstrap; or ` +
+          `(b) abandon this service and provision a new one (stOLAS bond stays with the old Safe until it's manually swept). ` +
+          `reStake revert: ${message}`,
+        );
+      }
+      throw err;
+    }
     const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, reStakeHash);
     if (receipt.status !== 'success') {
       throw new Error(`reStake failed for service ${index}: ${reStakeHash}`);

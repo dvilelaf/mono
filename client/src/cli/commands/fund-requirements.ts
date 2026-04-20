@@ -1,10 +1,12 @@
-import { formatUnits } from 'viem';
+import { createPublicClient, formatUnits, http, type Address } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
+import { getChainConfig } from '../../earning/contracts.js';
 import { resolveCliPassword } from '../password.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
@@ -143,6 +145,50 @@ async function run(ctx: CommandContext): Promise<void> {
       blocks: 'bootstrap',
       details: { tokenAddress: null, tokenSymbol: 'ETH' },
     });
+  } else {
+    // Bootstrap is satisfied. Still probe per-Safe native ETH: the daemon's
+    // balance-topup-loop auto-tops from master at runtime, but operators
+    // running in tooling contexts (acceptance gate, CI, bare `submit-intent`)
+    // hit the mech-fee path before any topup tick fires. A Safe that holds
+    // less than the per-service `minSafeEth` threshold will silently fail on
+    // `createEvaluationJob`, wrapped as `GS013` at the Safe layer — surface
+    // it here so ops see the gap before running.
+    const chainKey = config.network === 'testnet' ? 'base-sepolia' : 'base';
+    const chainCfg = getChainConfig(chainKey, {
+      testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+      testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+      testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+      testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    });
+    const viemChain = chainKey === 'base' ? base : baseSepolia;
+    const publicClient = createPublicClient({
+      chain: viemChain,
+      transport: http(config.rpcUrl),
+    });
+    for (const svc of result.fleet_state.services) {
+      if (svc.step !== 'complete' || !svc.safe_address) continue;
+      try {
+        const bal = await publicClient.getBalance({ address: svc.safe_address as Address });
+        if (bal < chainCfg.minSafeEth) {
+          const need = (chainCfg.minSafeEth - bal).toString();
+          requirements.push({
+            role: `service_${svc.index}_safe`,
+            address: svc.safe_address,
+            asset: 'native',
+            haveWei: bal.toString(),
+            needWei: need,
+            reason:
+              `Service ${svc.index} Safe needs native ETH to pay mech fees (each evaluation job sends 99 wei). ` +
+              `The daemon's balance-topup-loop auto-refills from master at runtime; funding it manually is ` +
+              `required only when running CLI verbs (submit-intent, acceptance gate) outside the daemon.`,
+            blocks: 'run',
+            details: { tokenAddress: null, tokenSymbol: 'ETH' },
+          });
+        }
+      } catch {
+        // RPC hiccup on a probe is not a funding gap; ignore and continue.
+      }
+    }
   }
 
   const payload = {
