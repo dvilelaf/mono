@@ -702,11 +702,65 @@ branch's merge-base with `origin/main` is more than ~2 commits behind,
 or at least surface a warning. Catching this earlier would have saved
 about an hour of investigation this session.
 
+## 2026-04-18 follow-up commits: remaining re-drill findings
+
+The first re-drill pass landed the retry-classifier and Claude-OAT fixes
+(commit `74e69505`). After the user asked for every finding closed
+before ship, three further fixes landed at `484ef5a1`:
+
+- **New-1** `fund-requirements` now probes every completed service's
+  Safe native balance and emits a `native` / `blocks: run` row when
+  below `chain.minSafeEth`. The daemon's balance-topup-loop still
+  auto-refills at runtime, but CLI paths (acceptance gate,
+  `submit-intent`) that touch the Safe before any topup tick now see
+  the gap in `fund-requirements` output.
+- **New-2** `recoverEvictedService` catches `UnauthorizedAccount`
+  (text + `0x32b2baa3` selector) from `distributor.reStake` and raises
+  a structured error. `formatBootstrapOperatorMessage` gained a
+  matching branch that preserves the full actionable guidance
+  (`setCuratingAgents([operator], [true])` or abandon-and-rebootstrap)
+  instead of truncating to 220 chars. The misleading comment "master
+  EOA is a curating agent (recorded when it called stake())" was
+  replaced with an explanation of why that assumption is false
+  (`stake()` only writes to the guard-scoped mapping, not the
+  top-level `mapCuratingAgents` that `reStake()` reads).
+- **New-6** `testnet-acceptance-docker.mjs` now runs `git fetch
+  origin main` + merge-base and warns (non-fatal) when the current
+  branch is ≥2 commits behind `origin/main`. Silently skipped when
+  `origin/main` can't be reached (offline / shallow). The exact case
+  that cost us half a day today — the deterministic prompts being on
+  main but missing from the drill branch — will now surface at the
+  start of every acceptance run.
+
+Regression coverage in `test/earning/bootstrap.test.ts`: new case
+"surfaces an actionable error when distributor.reStake reverts with
+UnauthorizedAccount" — `317/317` tests green.
+
+### Findings explicitly out of scope for v0.1.1
+
+- **Minor-3** (deprecation noise). The `ipfs-http-client` + `cids` +
+  `multicodec` deprecation warnings come in via
+  `@jinn-network/mech-client-ts@0.0.6`, which is an external package
+  that still pins js-IPFS. Silencing at our level would require
+  forking that package or pinning unrelated transitives via
+  `resolutions`, both of which are beyond a CLI-ergonomics patch
+  release. Filed as a follow-up on the upstream mech client.
+- **Nit-3** full `--forecast` mode for `fund-requirements`. The
+  `blocks: run` Safe-ETH row landed in this release covers the
+  concrete hazard that motivated the finding (operator sees
+  `satisfied: true` despite an empty Safe). A proper forecast that
+  projects bond amounts for unbootstrapped services, reward-liquidity
+  headroom, etc., is new-feature work and should be specced
+  separately.
+
 ## Release status
 
 - Branch: `ale/jinn-operator-onboarding-drill` (local only).
-- Tip: `74e69505` (v0.1.1, acceptance-green).
-- Pending: `git push origin ale/jinn-operator-onboarding-drill` +
+- Tip: `484ef5a1` (v0.1.1, acceptance-green pre-refactor; re-drill pending
+  after refactor to confirm the three follow-up fixes don't regress).
+- Pending: local rebuild + re-run `yarn release:testnet-acceptance`
+  against the 484ef5a1 tip (waiting on docker daemon to come back up).
+  Then `git push origin ale/jinn-operator-onboarding-drill` +
   `git tag client-v0.1.1 && git push origin client-v0.1.1` which
   triggers `.github/workflows/npm-publish.yml` (publishes
   `@jinn-network/client@0.1.1` with `latest` dist-tag via OIDC
