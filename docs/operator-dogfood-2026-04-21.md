@@ -123,19 +123,33 @@ published automatically after PR #19 (docs-only fix) merged to main at
   `0x1e8d02f1765a4e467471cf52731aff5a752908bdfd2cf06c3462a022384c4c66`.
   Three identical cycles now — confirmed shape. Cumulative phantom
   inflation routed back to Treasury across 3 cycles ≈ 342,263 JINN.
+- `21:50Z` / `22:00Z` — Track B: sixth and seventh auto-intents
+  posted at the next two boundaries. creationCount=7,
+  restorationDeliveryCount still 0.
+- `22:07Z` — Track A: fourth checkpoint cycle advances 10 → 11. Tx
+  `0xb07eb7c4568636ada0dda562da94acd70a9596f999099a30bfe99704581c7e54`.
+  Fourth claim-staking-incentives through epoch 11 returned 114,320
+  JINN to Treasury. Tx
+  `0x3cf525661154d82683096e517ebe9f0441b3c3f2740122c23ae147d353cdcacc`.
+  Cumulative across 4 cycles ≈ 456,583 JINN of phantom inflation.
+  The pattern is stable enough to stop itemising each cycle — the
+  trend is "~114K JINN/15-min returned to Treasury, forever, until
+  jinn-mono-hky is resolved." Will continue running checkpoints on
+  cadence and only call out deviations.
 
 ## Track A (protocol-team cadence)
 
-- L1 checkpoints run: 3 (epoch 7→8, 8→9, 9→10)
-- L1 → L2 bridge calls successful: 3 (through epochs 8, 9, 10 — all
-  100% returnAmount)
+- L1 checkpoints run: 4 (epoch 7→8, 8→9, 9→10, 10→11); cadence steady
+  at ~15 min/cycle
+- L1 → L2 bridge calls successful: 4 (through epochs 8, 9, 10, 11 —
+  all 100% returnAmount)
 - Confirmed fresh JINN arrived on L2 via distributor (not just the 549 seed)?:
-  **No.** Three consecutive cycles all returned 100% of the nominee's
-  inflation allocation (113,971 → 114,092 → 114,200 JINN, sum ≈ 342K)
-  to Treasury. Root cause is jinn-mono-hky: Treasury is not the JINN
-  token minter, so `totalSupply` is flat across checkpoints and the
-  dispenser has nothing to route. Re-voting won't help until
-  `transferMinter` runs.
+  **No.** Four consecutive cycles all returned 100% of the nominee's
+  inflation allocation (113,971 → 114,092 → 114,200 → 114,320 JINN,
+  sum ≈ 456,583) to Treasury. Root cause is jinn-mono-hky: Treasury
+  is not the JINN token minter, so `totalSupply` is flat across
+  checkpoints and the dispenser has nothing to route. Re-voting won't
+  help until `transferMinter` runs.
 
 Going-in snapshot: L1 Tokenomics ≈ epoch 7+ (deployment
 `0x302cd1f188fCFcA64EA038aFa738D90951360739`), 1000 JINN locked in veJINN with
