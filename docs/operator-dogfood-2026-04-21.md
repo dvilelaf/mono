@@ -38,7 +38,25 @@ Canary pin: `@jinn-network/client@0.1.1-canary.466a467a`
 - `21:07Z` — `jinn intents --help` does **not** advertise any `--impl` flag;
   task brief's suggested `jinn intents enable prediction.v0 --impl
   claude-mcp-prediction --yes` is not supported. Switching impl currently
-  requires editing `config.restorers.byKind['prediction.v0']`. UX gap.
+  requires editing `config.restorers.byKind['prediction.v0']`. UX gap,
+  filed as jinn-mono-38b.
+- `21:09Z` — Track A: first `checkpoint-and-verify.ts` on Sepolia advanced
+  epoch 7. Tx `0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968`.
+  Health OK. Red flag in the report: **"Minter is Treasury: ✗ WRONG"** and
+  total supply unchanged across checkpoint (5800.019 JINN). Expected inflation
+  of ~90 JINN/epoch missed — Treasury is not the JINN token minter, so epoch
+  advance is not minting into Treasury. Filed as jinn-mono-hky.
+- `21:09Z` — Track A: `phase1a-claim-staking-incentives.ts` ran through epoch
+  8. Claimable JINN: 0. **Return amount: 113,971 JINN** (i.e. the entire
+  inflation allocation for this nominee was returned to Treasury rather than
+  bridged to L2). Tx `0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d`.
+  Nominee hash matches. Plausible cause: vote is newer than the snapshot used
+  for epoch 8's inflation split, so we have to run more epochs before fresh
+  JINN flows through to L2. Will re-verify on the next 15-min cadence.
+- `21:10Z` — Track B: `jinn quickstart` running in background (pid 60535).
+  Master EOA: `0x1a8435E635DBE7608611858eA5a0A0D9a28f8E6a`. CDP faucet
+  auto-dripping to 0.005 ETH target (at drip 25/60, ~0.0025 ETH). No rate
+  limit hit.
 
 ## Track A (protocol-team cadence)
 
