@@ -107,18 +107,35 @@ published automatically after PR #19 (docs-only fix) merged to main at
   Same shape as cycle 1: confirmation that jinn-mono-hky is the
   dominant blocker — no fresh JINN routes to L2 regardless of vote
   because Treasury has nothing to distribute.
+- `21:40Z` — Track B: fifth auto-intent posted at boundary,
+  `0xc61c8b72913116cb3745d217f7caed2d3abd08d5e3e87e0411b56d8ecf1d2e93`.
+  creationCount=5, still no restoration.
+- `21:40Z` — Track B: transient sepolia.base.org RPC timeouts +
+  `HttpRequestError: fetch failed` on `eth_blockNumber` in the mech
+  polling loop. Non-fatal; daemon keeps retrying. Worth noting
+  because a less-tolerant operator would see these scrolling and
+  assume the daemon was broken.
+- `21:46Z` — Track A: third checkpoint cycle advances 9 → 10. Tx
+  `0x006a6709476a56d0f8003eb7e07c9efa3f4ae7ce04873fe8c5b28566fbd44bff`.
+  Supply still flat at 5800.019 JINN.
+- `21:47Z` — Track A: third claim-staking-incentives, through epoch
+  10. Returned 114,200 JINN to Treasury. Tx
+  `0x1e8d02f1765a4e467471cf52731aff5a752908bdfd2cf06c3462a022384c4c66`.
+  Three identical cycles now — confirmed shape. Cumulative phantom
+  inflation routed back to Treasury across 3 cycles ≈ 342,263 JINN.
 
 ## Track A (protocol-team cadence)
 
-- L1 checkpoints run: 2 (epoch 7→8, 8→9)
-- L1 → L2 bridge calls successful: 2 (through epoch 8, through epoch 9
-  — both 100% returnAmount)
+- L1 checkpoints run: 3 (epoch 7→8, 8→9, 9→10)
+- L1 → L2 bridge calls successful: 3 (through epochs 8, 9, 10 — all
+  100% returnAmount)
 - Confirmed fresh JINN arrived on L2 via distributor (not just the 549 seed)?:
-  **No.** Two consecutive cycles both returned 100% of the nominee's
-  inflation allocation (113,971 JINN then 114,092 JINN) to Treasury.
-  Root cause is jinn-mono-hky: Treasury is not the JINN token minter,
-  so `totalSupply` is flat across checkpoints and the dispenser has
-  nothing to route. Re-voting won't help until `transferMinter` runs.
+  **No.** Three consecutive cycles all returned 100% of the nominee's
+  inflation allocation (113,971 → 114,092 → 114,200 JINN, sum ≈ 342K)
+  to Treasury. Root cause is jinn-mono-hky: Treasury is not the JINN
+  token minter, so `totalSupply` is flat across checkpoints and the
+  dispenser has nothing to route. Re-voting won't help until
+  `transferMinter` runs.
 
 Going-in snapshot: L1 Tokenomics ≈ epoch 7+ (deployment
 `0x302cd1f188fCFcA64EA038aFa738D90951360739`), 1000 JINN locked in veJINN with
@@ -275,6 +292,8 @@ Gotchas:
 | L1 claim cycle 1 (100% returnAmount) | [0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d](https://sepolia.etherscan.io/tx/0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d) |
 | L1 checkpoint cycle 2 (epoch 8→9) | [0x1692c0dd6c11dca1edd115623e6501fdfca026aeb7f7cd5223d8b8ef5e7bc378](https://sepolia.etherscan.io/tx/0x1692c0dd6c11dca1edd115623e6501fdfca026aeb7f7cd5223d8b8ef5e7bc378) |
 | L1 claim cycle 2 (100% returnAmount) | [0x198d7f620c41acbce49a5640f3a242075e483ee577376af11451eb365a6a80bf](https://sepolia.etherscan.io/tx/0x198d7f620c41acbce49a5640f3a242075e483ee577376af11451eb365a6a80bf) |
+| L1 checkpoint cycle 3 (epoch 9→10) | [0x006a6709476a56d0f8003eb7e07c9efa3f4ae7ce04873fe8c5b28566fbd44bff](https://sepolia.etherscan.io/tx/0x006a6709476a56d0f8003eb7e07c9efa3f4ae7ce04873fe8c5b28566fbd44bff) |
+| L1 claim cycle 3 (100% returnAmount) | [0x1e8d02f1765a4e467471cf52731aff5a752908bdfd2cf06c3462a022384c4c66](https://sepolia.etherscan.io/tx/0x1e8d02f1765a4e467471cf52731aff5a752908bdfd2cf06c3462a022384c4c66) |
 | Distributor stake tx | [0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9](https://sepolia.basescan.org/tx/0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9) |
 | First restoration delivery | — (blocked by jinn-mono-tt2) |
 | First eval delivery | — (blocked by jinn-mono-tt2) |
