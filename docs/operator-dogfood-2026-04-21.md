@@ -57,13 +57,38 @@ Canary pin: `@jinn-network/client@0.1.1-canary.466a467a`
   Master EOA: `0x1a8435E635DBE7608611858eA5a0A0D9a28f8E6a`. CDP faucet
   auto-dripping to 0.005 ETH target (at drip 25/60, ~0.0025 ETH). No rate
   limit hit.
+- `21:12Z` — Track B: bootstrap complete. Service id=30, safe
+  `0x426306Edd920fd73D13b51DF8c3B9D4FB332bF26`, agent
+  `0x9f8bBa00853A5CE6Aa9338c6710080BdE3c9D255`, mech
+  `0x3Cd2512a1a88d850B283412a3C942b1b7A90326A`. distributor.stake tx
+  `0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9`. Time
+  from `jinn quickstart` start (~21:09) to daemon running (~21:13) ≈ 4 min,
+  dominated by CDP drip loop (two passes needed because `run` re-checks and
+  re-drips to 0.005 ETH after bootstrap spent the first top-up).
+- `21:13Z` — Track B: daemon `kind=daemon_started`. auto-intent generator
+  enabled, `ClaimRegistry: not configured (claim step will use
+  NotImplementedError fallback)`. First observed intents at `0x49fa1272...`
+  (kind=null) and `0x78126762...` (kind=prediction.v0). Both fail with
+  `[NotImplemented] claim — fill in via subsequent task` because
+  `JINN_CLAIM_REGISTRY_ADDRESS` is unset and the phase-1b-mech deployment
+  JSON contains no claim-registry address. **Operator path blocker —**
+  filed as jinn-mono-tt2 (missing deployment) + jinn-mono-fb7 (louder UX).
+- `21:17Z` — Track B: `cast call jinnRouter creationCount(safe)` returns 2
+  (two creation calls made it on-chain — daemon is posting successfully),
+  but `restorationDeliveryCount` / `evaluationCreationCount` /
+  `evaluationDeliveryCount` all return 0 — confirmed the claim blocker
+  prevents any further progress along the loop. Router in use is
+  `0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675` from the phase-1b-mech
+  deployment — **not** the `0x7c502a...` the task brief cited (that address
+  has 0 counters — it appears stale; filing to clarify).
 
 ## Track A (protocol-team cadence)
 
-- L1 checkpoints run: 0
-- L1 → L2 bridge calls successful: 0
+- L1 checkpoints run: 1 (epoch 7 advanced)
+- L1 → L2 bridge calls successful: 1 (claim through epoch 8, but 100% returnAmount)
 - Confirmed fresh JINN arrived on L2 via distributor (not just the 549 seed)?:
-  TBD
+  **No, not yet** — the first cycle's inflation allocation returned to
+  Treasury in full (113,971 JINN). Will re-check after another ~3 epochs.
 
 Going-in snapshot: L1 Tokenomics ≈ epoch 7+ (deployment
 `0x302cd1f188fCFcA64EA038aFa738D90951360739`), 1000 JINN locked in veJINN with
@@ -72,21 +97,73 @@ Going-in snapshot: L1 Tokenomics ≈ epoch 7+ (deployment
 `2026-04-21T16:15:00Z`. 549 JINN pre-seeded in L2 staking contract as
 fallback.
 
+Known red flag: JINN token's minter is still the deployer EOA
+`0x15e78734481bD31F6e183dad05225505a45ACd07`, not the Treasury. Until that
+`transferMinter` call lands, `totalSupply` stays flat across checkpoints and
+dispenser has no fresh JINN to route — any claim will always return the full
+allocation to the Treasury regardless of the vote. Filed as jinn-mono-hky.
+
 ## Track B (operator path)
 
-Operator timeline with cycle-level detail.
+Daemon lifecycle:
+
+| Time (UTC) | Event |
+|---|---|
+| 21:09Z | `jinn quickstart` invoked |
+| 21:13Z | `daemon_started` event (pid 60535) |
+| 21:13Z | Two intents observed; both fail at claim step |
+
+Router counter snapshot at `21:17Z` (router
+`0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675`, safe
+`0x426306Edd920fd73D13b51DF8c3B9D4FB332bF26`):
+
+| Counter | Value |
+|---|---|
+| `creationCount` | 2 |
+| `restorationDeliveryCount` | 0 |
+| `evaluationCreationCount` | 0 |
+| `evaluationDeliveryCount` | 0 |
+
+No cycles complete. Post-only mode in effect.
 
 ## Fixes shipped
 
-_(PR list)_
+- PR #19 — `docs(client): use npx -p flag so two-bin package resolves`
+  (merged, sha `ab614048`). Touches `client/**` so a fresh canary will
+  auto-publish; new sha to pin future steps against lives in the PR.
 
 ## Issues filed (not fixed)
 
-_(beads list)_
+- jinn-mono-7bc (P3) — npx canary package can't run without `-p` flag
+  (two bins, ambiguous). Partly superseded by PR #19 docs fix; code-side
+  option of renaming one bin still open.
+- jinn-mono-38b (P2) — `jinn intents enable` is missing the `--impl`
+  flag. Task brief assumed it existed; today requires editing
+  `config.restorers.byKind`.
+- jinn-mono-hky (P1) — Treasury is not the JINN token minter, so epoch
+  checkpoints don't actually mint inflation. Protocol-team fix
+  (`transferMinter`).
+- jinn-mono-6a6 (P2) — Epoch 8 staking-incentives claim returned 113K
+  JINN to Treasury. Needs more epochs to confirm whether this is a
+  snapshot-timing artifact or a vote-weight wiring bug (partly blocked
+  by jinn-mono-hky — Treasury has nothing to distribute until it can
+  mint).
+- jinn-mono-tt2 (P1) — **ClaimRegistry not deployed on Base Sepolia**,
+  so the Phase 1b daemon can't claim any intent. Operator-loop blocker.
+- jinn-mono-fb7 (P2) — Surface the ClaimRegistry gap louder at startup
+  and in per-intent errors. UX follow-up to tt2.
 
 ## Blockers I couldn't resolve
 
-_(none yet)_
+- **ClaimRegistry missing on Base Sepolia (jinn-mono-tt2).** The daemon
+  posts intents but can never claim them, which blocks the restore →
+  eval → reward path. This needs a protocol-side deployment and a
+  deployment-JSON update before an external operator can close the
+  loop.
+- **Treasury-not-minter on the L1 tokenomics stack (jinn-mono-hky).**
+  Even once the vote-weight snapshot propagates, the dispenser will
+  keep returning `returnAmount` to Treasury because Treasury has no
+  mint rights to produce the epoch's inflation. Protocol-side fix.
 
 ## For an external operator
 
@@ -108,11 +185,17 @@ _More to come once the run confirms steady-state behaviour._
 
 | Artifact | Address / tx |
 |---|---|
-| Master EOA | TBD |
-| Operator Safe | TBD |
-| Service ID | TBD |
-| First creation tx | TBD |
-| First restoration delivery | TBD |
-| First eval delivery | TBD |
-| Reward claim tx | TBD |
+| Master EOA | [0x1a8435E635DBE7608611858eA5a0A0D9a28f8E6a](https://sepolia.basescan.org/address/0x1a8435E635DBE7608611858eA5a0A0D9a28f8E6a) |
+| Operator Safe | [0x426306Edd920fd73D13b51DF8c3B9D4FB332bF26](https://sepolia.basescan.org/address/0x426306Edd920fd73D13b51DF8c3B9D4FB332bF26) |
+| Service ID | 30 |
+| Agent EOA | [0x9f8bBa00853A5CE6Aa9338c6710080BdE3c9D255](https://sepolia.basescan.org/address/0x9f8bBa00853A5CE6Aa9338c6710080BdE3c9D255) |
+| Mech contract | [0x3Cd2512a1a88d850B283412a3C942b1b7A90326A](https://sepolia.basescan.org/address/0x3Cd2512a1a88d850B283412a3C942b1b7A90326A) |
+| JinnRouter (in use) | [0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675](https://sepolia.basescan.org/address/0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675) |
+| L1 Tokenomics | [0x302cd1f188fCFcA64EA038aFa738D90951360739](https://sepolia.etherscan.io/address/0x302cd1f188fCFcA64EA038aFa738D90951360739) |
+| L1 first checkpoint | [0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968](https://sepolia.etherscan.io/tx/0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968) |
+| L1 first staking-incentives claim (100% returnAmount) | [0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d](https://sepolia.etherscan.io/tx/0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d) |
+| Distributor stake tx | [0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9](https://sepolia.basescan.org/tx/0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9) |
+| First restoration delivery | — (blocked by jinn-mono-tt2) |
+| First eval delivery | — (blocked by jinn-mono-tt2) |
+| Reward claim tx | — (blocked by jinn-mono-tt2) |
 
