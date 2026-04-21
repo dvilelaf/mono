@@ -157,15 +157,22 @@ published automatically after PR #19 (docs-only fix) merged to main at
   claim through epoch 14 returned 114,651 JINN to Treasury
   (tx `0x40c101af5b92ddfdb994ceb95578c3428bd41f0b7a6b7624813d5ae697f8591c`).
   Cumulative over 7 cycles ≈ 800,196 JINN.
+- `23:10Z` / `23:20Z` — Track B: auto-intents 14 and 15 posted.
+  creationCount=15.
+- `23:29Z` — Track A cycle 8: epoch 14 → 15
+  (tx `0xa520c09102a8e0d1329b10decf9ed2efd813b310d0ee386750b47e34ef952f79`);
+  claim through epoch 15 returned 114,813 JINN to Treasury
+  (tx `0x86e6a57b2d4f7da9a3d2baa32ef62a579e1fe3c42aabe087ad6a2c860a75679a`).
+  Cumulative over 8 cycles ≈ 915,010 JINN.
 
 ## Track A (protocol-team cadence)
 
-- L1 checkpoints run: 7 (epochs 7→14); cadence steady at ~15 min/cycle
-- L1 → L2 bridge calls successful: 7 (all 100% returnAmount)
+- L1 checkpoints run: 8 (epochs 7→15); cadence steady at ~15 min/cycle
+- L1 → L2 bridge calls successful: 8 (all 100% returnAmount)
 - Confirmed fresh JINN arrived on L2 via distributor (not just the 549 seed)?:
-  **No.** Seven consecutive cycles all returned 100% of the nominee's
+  **No.** Eight consecutive cycles all returned 100% of the nominee's
   inflation allocation to Treasury (per-cycle ~114K JINN, sum
-  ≈ 800,196 JINN). Root cause is jinn-mono-hky: Treasury is not the
+  ≈ 915,010 JINN). Root cause is jinn-mono-hky: Treasury is not the
   JINN token minter, so `totalSupply` is flat across checkpoints and
   the dispenser has nothing to route. Re-voting won't help until
   `transferMinter` runs.
