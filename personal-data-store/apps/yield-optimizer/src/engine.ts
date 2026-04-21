@@ -5,19 +5,24 @@ import { config } from "./config.js";
 
 const MIN_APY_DELTA = 0.005; // 0.5% minimum improvement to recommend a move
 
-// Hurdle rate = what a position needs to beat to justify staying on-chain.
-// Stablecoin hurdle: tradfi risk-free + smart-contract / depeg / custody premium.
-// ETH hurdle: native staking baseline + LST smart-contract premium.
-function stablecoinHurdle(): number {
-  return config.riskFreeRateUsd + config.stablecoinRiskPremium;
+// Derive the risk-free rate from the live APY of whatever tradfi benchmark
+// position is present in the snapshot (e.g. Revolut GBP Savings). This avoids
+// hardcoding rates that vary by tier, bank, or market conditions.
+function derivedRiskFreeRate(
+  positions: YieldPosition[],
+  apys: Map<string, number>,
+): { rate: number; venue: string } | null {
+  for (const pos of positions) {
+    if (getAssetClass(pos.token) === "tradfi") {
+      const apy = apys.get(pos.name);
+      if (apy !== undefined) return { rate: apy, venue: pos.name };
+    }
+  }
+  return null; // no tradfi benchmark in snapshot — hurdle checks disabled
 }
+
 function ethHurdle(): number {
   return config.ethNativeStakingYield + config.ethRiskPremium;
-}
-function hurdleFor(assetClass: "stablecoin" | "eth" | "tradfi" | "other"): number | null {
-  if (assetClass === "stablecoin") return stablecoinHurdle();
-  if (assetClass === "eth") return ethHurdle();
-  return null; // tradfi / other — no hurdle applied
 }
 
 function findBestAlternative(
@@ -132,6 +137,12 @@ export async function runOptimization(positions: YieldPosition[]): Promise<Yield
     fetchTopAlternatives(),
   ]);
 
+  // Risk-free rate comes from the live APY of whichever tradfi benchmark position
+  // is present in the snapshot. No fallback — if it's absent, hurdle checks are skipped.
+  const tradfi = derivedRiskFreeRate(positions, apys);
+  const stablecoinHurdleRate = tradfi !== null ? tradfi.rate + config.stablecoinRiskPremium : null;
+  const ethHurdleRate = ethHurdle();
+
   const totalValue = positions.reduce((s, p) => s + Number(p.valueUsd), 0);
 
   const protocolExposure = new Map<string, number>();
@@ -156,7 +167,9 @@ export async function runOptimization(positions: YieldPosition[]): Promise<Yield
     currentTotal += annualised;
 
     const assetClass = getAssetClass(pos.token);
-    const hurdle = hurdleFor(assetClass);
+    const hurdle = assetClass === "stablecoin" ? stablecoinHurdleRate
+                 : assetClass === "eth"        ? ethHurdleRate
+                 : null;
     if (assetClass === "tradfi") tradfiValue += value;
     else cryptoValue += value;
 
@@ -171,7 +184,7 @@ export async function runOptimization(positions: YieldPosition[]): Promise<Yield
         underHurdleValue += value;
         const tradfiBenchmark = assetClass === "eth"
           ? { apy: config.ethNativeStakingYield, venue: "native ETH staking" }
-          : { apy: config.riskFreeRateGbp, venue: "Revolut GBP Savings (or equivalent)" };
+          : { apy: tradfi!.rate, venue: tradfi!.venue };
         const impact = value * (tradfiBenchmark.apy - currentApy);
         exitRecs.push({
           action: "exit",
@@ -290,8 +303,10 @@ export async function runOptimization(positions: YieldPosition[]): Promise<Yield
       minBaseApyShare: `${MIN_BASE_APY_SHARE * 100}%`,
       minDataPoints: MIN_DATA_POINTS,
       trustedProtocolsOnly: true,
-      stablecoinHurdle: `${(stablecoinHurdle() * 100).toFixed(2)}% (risk-free ${(config.riskFreeRateUsd * 100).toFixed(2)}% + ${(config.stablecoinRiskPremium * 100).toFixed(2)}% crypto premium)`,
-      ethHurdle: `${(ethHurdle() * 100).toFixed(2)}% (native staking ${(config.ethNativeStakingYield * 100).toFixed(2)}% + ${(config.ethRiskPremium * 100).toFixed(2)}% LST premium)`,
+      stablecoinHurdle: stablecoinHurdleRate !== null
+        ? `${(stablecoinHurdleRate * 100).toFixed(2)}% (${tradfi!.venue} ${(tradfi!.rate * 100).toFixed(2)}% + ${(config.stablecoinRiskPremium * 100).toFixed(2)}% crypto premium)`
+        : "n/a (no tradfi benchmark position in snapshot)",
+      ethHurdle: `${(ethHurdleRate * 100).toFixed(2)}% (native staking ${(config.ethNativeStakingYield * 100).toFixed(2)}% + ${(config.ethRiskPremium * 100).toFixed(2)}% LST premium)`,
       philosophy: "Crypto positions are an alternative to tradfi. A position failing to clear its asset-class hurdle should be rotated to tradfi, not to another crypto venue — except within the user's ring-fenced crypto allocation budget for rotation/UX optionality.",
     },
     generatedAt: new Date().toISOString(),
