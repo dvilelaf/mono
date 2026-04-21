@@ -86,14 +86,39 @@ published automatically after PR #19 (docs-only fix) merged to main at
   `0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675` from the phase-1b-mech
   deployment — **not** the `0x7c502a...` the task brief cited (that address
   has 0 counters — it appears stale; filing to clarify).
+- `21:20Z` — Track B: third auto-intent posted at 10-min boundary,
+  `0x314ae602253ffb6de07412f20378c140d3e65bed00904d3bc896e1f2ef73bbcc`
+  (kind=prediction.v0). creationCount=3, still no restoration.
+- `21:23Z` — Track B: `jinn rewards --human` reports Service #0 =
+  0 stOLAS pending / 0 claimed; next checkpoint 21:28Z. `jinn balance
+  --human` prints JSON (verb seems to ignore `--human` — minor UX
+  inconsistency, not filed). Master ETH has decayed to 3.09e15 wei
+  (0.003 ETH) after the top-up consumed some; `jinn status --human`
+  flags `exit.blocking: true, hint: "Master ETH is below the configured
+  minimum runway threshold"`. Daemon still runs.
+- `21:24Z` — Track A: second checkpoint attempt says `NOT READY — epoch
+  8 still in progress`. No-op.
+- `21:29Z` — Track A: checkpoint retry now READY, advances 8 → 9. Tx
+  `0x1692c0dd6c11dca1edd115623e6501fdfca026aeb7f7cd5223d8b8ef5e7bc378`.
+  Supply still flat (5800.019 JINN) — Treasury-not-minter bug persists.
+- `21:29Z` — Track A: second claim-staking-incentives call, through
+  epoch 9. Claimable=0, returnAmount=114,092 JINN back to Treasury. Tx
+  `0x198d7f620c41acbce49a5640f3a242075e483ee577376af11451eb365a6a80bf`.
+  Same shape as cycle 1: confirmation that jinn-mono-hky is the
+  dominant blocker — no fresh JINN routes to L2 regardless of vote
+  because Treasury has nothing to distribute.
 
 ## Track A (protocol-team cadence)
 
-- L1 checkpoints run: 1 (epoch 7 advanced)
-- L1 → L2 bridge calls successful: 1 (claim through epoch 8, but 100% returnAmount)
+- L1 checkpoints run: 2 (epoch 7→8, 8→9)
+- L1 → L2 bridge calls successful: 2 (through epoch 8, through epoch 9
+  — both 100% returnAmount)
 - Confirmed fresh JINN arrived on L2 via distributor (not just the 549 seed)?:
-  **No, not yet** — the first cycle's inflation allocation returned to
-  Treasury in full (113,971 JINN). Will re-check after another ~3 epochs.
+  **No.** Two consecutive cycles both returned 100% of the nominee's
+  inflation allocation (113,971 JINN then 114,092 JINN) to Treasury.
+  Root cause is jinn-mono-hky: Treasury is not the JINN token minter,
+  so `totalSupply` is flat across checkpoints and the dispenser has
+  nothing to route. Re-voting won't help until `transferMinter` runs.
 
 Going-in snapshot: L1 Tokenomics ≈ epoch 7+ (deployment
 `0x302cd1f188fCFcA64EA038aFa738D90951360739`), 1000 JINN locked in veJINN with
@@ -197,8 +222,10 @@ _More to come once the run confirms steady-state behaviour._
 | Mech contract | [0x3Cd2512a1a88d850B283412a3C942b1b7A90326A](https://sepolia.basescan.org/address/0x3Cd2512a1a88d850B283412a3C942b1b7A90326A) |
 | JinnRouter (in use) | [0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675](https://sepolia.basescan.org/address/0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675) |
 | L1 Tokenomics | [0x302cd1f188fCFcA64EA038aFa738D90951360739](https://sepolia.etherscan.io/address/0x302cd1f188fCFcA64EA038aFa738D90951360739) |
-| L1 first checkpoint | [0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968](https://sepolia.etherscan.io/tx/0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968) |
-| L1 first staking-incentives claim (100% returnAmount) | [0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d](https://sepolia.etherscan.io/tx/0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d) |
+| L1 checkpoint cycle 1 (epoch 7→8) | [0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968](https://sepolia.etherscan.io/tx/0xec4be82e39fcb357f6679d7676a698adad9cd56720eae79636b7686dba824968) |
+| L1 claim cycle 1 (100% returnAmount) | [0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d](https://sepolia.etherscan.io/tx/0xeeb8b3d3d1dfb28e550a1dc87e8183d7c224d9c9f442e24b166571a9c4e9a75d) |
+| L1 checkpoint cycle 2 (epoch 8→9) | [0x1692c0dd6c11dca1edd115623e6501fdfca026aeb7f7cd5223d8b8ef5e7bc378](https://sepolia.etherscan.io/tx/0x1692c0dd6c11dca1edd115623e6501fdfca026aeb7f7cd5223d8b8ef5e7bc378) |
+| L1 claim cycle 2 (100% returnAmount) | [0x198d7f620c41acbce49a5640f3a242075e483ee577376af11451eb365a6a80bf](https://sepolia.etherscan.io/tx/0x198d7f620c41acbce49a5640f3a242075e483ee577376af11451eb365a6a80bf) |
 | Distributor stake tx | [0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9](https://sepolia.basescan.org/tx/0x33bee07d8f6e053388199086eb29130b9f42cea2e08af7b646dc919bb38ee9d9) |
 | First restoration delivery | — (blocked by jinn-mono-tt2) |
 | First eval delivery | — (blocked by jinn-mono-tt2) |
