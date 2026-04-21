@@ -4,8 +4,13 @@ External-operator walkthrough of the `@jinn-network/client` canary on Base
 Sepolia. Author: dogfood tester wearing the shoes of a first-time external
 operator, with protocol-team keys alongside for the L1 tokenomics track.
 
-Canary pin: `@jinn-network/client@0.1.1-canary.466a467a`
-(sha `466a467ade6f7433d92236a921408f61d1b3e045`).
+Canary pin (run): `@jinn-network/client@0.1.1-canary.466a467a`
+(sha `466a467ade6f7433d92236a921408f61d1b3e045`) — the daemon has been
+running against this sha since `21:13Z`.
+
+Canary pin (post-fix): `@jinn-network/client@0.1.1-canary.ab614048` —
+published automatically after PR #19 (docs-only fix) merged to main at
+`21:18Z`. Operators starting tomorrow should pin to this sha instead.
 
 ## Summary (fill in last)
 
@@ -176,7 +181,7 @@ export JINN_NETWORK=testnet
 # default JINN_EARNING_DIR is ~/.jinn-client/earning, fine to leave unset.
 
 # Zero-to-running one-liner:
-npx -p @jinn-network/client@0.1.1-canary.466a467a jinn quickstart
+npx -p @jinn-network/client@0.1.1-canary.ab614048 jinn quickstart
 ```
 
 _More to come once the run confirms steady-state behaviour._
