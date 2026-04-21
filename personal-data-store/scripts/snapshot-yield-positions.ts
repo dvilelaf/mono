@@ -385,12 +385,23 @@ async function main() {
 
   // Manual entry for EVM positions Zerion might miss when rate-limited
   // Note: jlUSDT and jlWSOL are now fetched automatically above; removed from manual list
+  // Off-chain / custodial positions (Coinbase Earn, Revolut) also live here until
+  // dedicated connectors exist. Update balances as transfers happen.
+  // TODO: Revolut GBP balance via Open Banking / CSV importer — currently manual.
+  // TODO: Coinbase Earn balance via Coinbase connector — currently manual.
+  // FX: use a shared rate (update as needed) for GBP positions.
+  const gbpUsdRate = Number(process.env.GBP_USD_RATE ?? 1.27);
   const manualPositions = [
     { name: "Steakhouse Prime Instant", protocol: "morpho", chain: "ethereum", token: "steakUSDC", balance: "669091.76", price: "1.01", value: "677454.57" },
     { name: "Staked Ethena USDe", protocol: "ethena", chain: "ethereum", token: "sUSDe", balance: "412018.106", price: "1.23", value: "505250.93" },
     { name: "Savings USDS", protocol: "sky", chain: "ethereum", token: "sUSDS", balance: "407773.22", price: "1.09", value: "445783.86" },
     { name: "Lido Staked ETH", protocol: "lido", chain: "ethereum", token: "stETH", balance: "119.023", price: "2255.76", value: "268664.15" },
     { name: "Syrup USDT", protocol: "maple", chain: "ethereum", token: "syrupUSDT", balance: "234235.482", price: "1.12", value: "263048.74" },
+    // Coinbase Earn — reduced 2026-04 after £200k ish offramp to Revolut. Update as transfers happen.
+    // Previous: $1,400,000. Reduce by GBP 200k * rate.
+    { name: "Coinbase Earn (Stablecoins)", protocol: "coinbase", chain: "coinbase", token: "USDC", balance: String(1_400_000 - 200_000 * gbpUsdRate), price: "1.00", value: String(1_400_000 - 200_000 * gbpUsdRate) },
+    // Revolut GBP Savings — tradfi benchmark, destination of the April 2026 Coinbase offramp.
+    { name: "Revolut GBP Savings", protocol: "revolut", chain: "tradfi", token: "GBP", balance: "200000", price: String(gbpUsdRate), value: String(200_000 * gbpUsdRate) },
   ];
 
   for (const mp of manualPositions) {
