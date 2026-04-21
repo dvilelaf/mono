@@ -197,19 +197,68 @@ No cycles complete. Post-only mode in effect.
 
 ## For an external operator
 
-Copy-pasteable commands for tomorrow:
+> **Heads up — the operator loop is not yet closable end-to-end on the
+> current Phase 1b testnet.** The daemon will boot, fund itself via
+> CDP, register a service, and post intents (creation counter on the
+> router will advance), but it **cannot claim / restore / evaluate**
+> until ClaimRegistry lands on Base Sepolia (jinn-mono-tt2). You can
+> still start it up and confirm the posting side works — the missing
+> pieces are loud at startup and in the log.
+
+Copy-pasteable bootstrap:
 
 ```bash
-# Required env (pick a password, pick a home-dir for state):
+# Pick a password + an isolated state dir:
 export JINN_PASSWORD="<your-keystore-password>"
 export JINN_NETWORK=testnet
-# default JINN_EARNING_DIR is ~/.jinn-client/earning, fine to leave unset.
+export JINN_EARNING_DIR="$HOME/.jinn-client/earning-testnet"    # optional but recommended
 
-# Zero-to-running one-liner:
+# Zero-to-running: generates wallet, drips from CDP, bootstraps, starts the daemon:
 npx -p @jinn-network/client@0.1.1-canary.ab614048 jinn quickstart
 ```
 
-_More to come once the run confirms steady-state behaviour._
+Sanity checks while it runs:
+
+```bash
+# Health + daemon state (JSON; hint field calls out runway problems):
+npx -p @jinn-network/client@0.1.1-canary.ab614048 jinn status --human
+
+# Recent protocol activity (intents posted, etc.):
+npx -p @jinn-network/client@0.1.1-canary.ab614048 jinn history
+
+# Pending rewards (stOLAS on testnet):
+npx -p @jinn-network/client@0.1.1-canary.ab614048 jinn rewards --human
+```
+
+What you'll see:
+
+- Master EOA funded via CDP in ~30-60s.
+- `creationCount(yourSafe)` on the JinnRouter
+  (`0x6059Dd37eB0FD3a55BCe7A3C1fA86AB84F2d9675`) grows by one every
+  10-minute boundary as the auto-intent generator posts prediction.v0
+  envelopes against ETH/USD.
+- Every log line of the form `[daemon] engine.process failed for
+  0x... : [NotImplemented] claim — fill in via subsequent task` is the
+  ClaimRegistry blocker — not your fault. `restorationDeliveryCount`,
+  `evaluationCreationCount`, and `evaluationDeliveryCount` will all
+  stay at zero until that's resolved.
+- `jinn rewards` will show 0 stOLAS pending / 0 claimed for the same
+  reason.
+
+Gotchas:
+
+- `npx @jinn-network/client@... jinn-verb` **without** the `-p` flag
+  fails — the package ships two bins. Always use `npx -p
+  @jinn-network/client@<canary> jinn <verb>`.
+- `jinn intents enable prediction.v0 --impl claude-mcp-prediction`
+  isn't a real CLI flag. To switch from `prediction-v0-baseline` to
+  the Claude-spawning impl, edit `~/.jinn-client/config.json` and set
+  `"restorers": { "byKind": { "prediction.v0": "claude-mcp-prediction"
+  } }`, then restart the daemon. (jinn-mono-38b.)
+- The daemon decrypts an explicit password from `JINN_PASSWORD` — it
+  is not read from config files. `quickstart` will auto-generate one
+  under `~/.jinn-client/keystore-password` (mode 0600) if you don't
+  set the env var.
 
 ## Evidence
 
