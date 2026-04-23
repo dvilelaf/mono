@@ -3,8 +3,10 @@ import { pgTable, uuid, text, integer, timestamp, jsonb, index } from "drizzle-o
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   domain: text("domain").notNull(),
+  type: text("type"),
   title: text("title"),
   content: text("content"),
+  source: text("source"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

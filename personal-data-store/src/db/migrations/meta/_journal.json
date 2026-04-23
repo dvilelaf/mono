@@ -99,6 +99,13 @@
       "when": 1776146659175,
       "tag": "0013_clever_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1776873315245,
+      "tag": "0014_right_mandrill",
+      "breakpoints": true
     }
   ]
 }

@@ -2,17 +2,20 @@ import { Router } from "express";
 import {
   createDocument,
   getDocument,
+  updateDocument,
+  deleteDocument,
   queryDocuments,
   semanticSearch,
 } from "./documents.service.js";
 
 export const documentsRouter = Router();
 
-// GET / — query documents (params: domain, from, to)
+// GET / — query documents (params: domain, type, from, to)
 documentsRouter.get("/", async (req, res, next) => {
   try {
     const rows = await queryDocuments({
       domain: req.query.domain as string | undefined,
+      type: req.query.type as string | undefined,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
     });
@@ -41,6 +44,30 @@ documentsRouter.post("/", async (req, res, next) => {
   try {
     const doc = await createDocument(req.body);
     res.status(201).json(doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /:id — update document fields (domain, type, title, content, source, metadata)
+documentsRouter.patch("/:id", async (req, res, next) => {
+  try {
+    const doc = await updateDocument(req.params.id, req.body);
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    res.json(doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /:id — remove document and its embeddings
+documentsRouter.delete("/:id", async (req, res, next) => {
+  try {
+    await deleteDocument(req.params.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

@@ -14,6 +14,7 @@ export const analyses = pgTable(
     result: jsonb("result"),
     sourceQuery: jsonb("source_query"),
     parentId: uuid("parent_id"),
+    source: text("source"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

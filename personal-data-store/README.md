@@ -32,6 +32,24 @@ The server starts on `http://localhost:3000` by default.
 
 ---
 
+## Network Access
+
+### Tailnet (MagicDNS)
+
+`http://pds:3000` reaches the API from any device on the tailnet — `server.ts` binds `0.0.0.0` and the bearer token gates access.
+
+### HTTPS (Tailscale Serve, tailnet-only)
+
+```bash
+./scripts/tailscale-serve.sh
+```
+
+Exposes the API at `https://pds.<tailnet>.ts.net` (port 443) using Tailscale's tailnet-only TLS proxy. Find your URL with `tailscale serve status`. This uses `tailscale serve`, **not** `tailscale funnel` — it is **not** publicly reachable.
+
+Both endpoints accept the same `Authorization: Bearer <API_KEY>` header.
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
