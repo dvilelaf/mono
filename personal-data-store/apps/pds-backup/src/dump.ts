@@ -119,8 +119,3 @@ function runCmd(
     child.on("error", reject);
   });
 }
-
-async function readToStdin(file: string): Promise<Buffer> {
-  const { readFile } = await import("node:fs/promises");
-  return readFile(file);
-}
