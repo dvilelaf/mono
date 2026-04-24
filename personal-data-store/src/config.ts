@@ -15,5 +15,6 @@ export const config = {
     revolut: { enabled: true, schedule: "0 2 * * *" },
     gmail: { enabled: true, schedule: "0 * * * *" },
     csv_import: { enabled: true, schedule: null as string | null },
+    subscriptions: { enabled: true, schedule: "0 3 * * *" },
   },
 } as const;
