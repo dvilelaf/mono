@@ -1,0 +1,15 @@
+module.exports = {
+  apps: [
+    {
+      name: "pds-backup",
+      cwd: __dirname,
+      script: "./node_modules/.bin/tsx",
+      args: "src/index.ts",
+      env: { NODE_ENV: "production" },
+      max_memory_restart: "300M",
+      out_file: "/tmp/pds-backup.out.log",
+      error_file: "/tmp/pds-backup.err.log",
+      time: true,
+    },
+  ],
+};
