@@ -64,8 +64,8 @@ async function main() {
   console.log(`Owner:       ${owner}`);
   console.log(`Minter:      ${minter}`);
 
-  const restoreMinter = minter.toLowerCase() !== signer.address.toLowerCase();
-  if (restoreMinter) {
+  const needsSwap = minter.toLowerCase() !== signer.address.toLowerCase();
+  if (needsSwap) {
     const setMinterTx = await jinn.changeMinter(signer.address);
     console.log(`Set minter tx: ${setMinterTx.hash}`);
     await setMinterTx.wait();
@@ -76,7 +76,11 @@ async function main() {
     console.log(`Mint tx:       ${mintTx.hash}`);
     await mintTx.wait();
   } finally {
-    if (restoreMinter) {
+    // Always reconcile to Treasury as the final step so a partial run (mint
+    // revert, process kill between steps) can't leave the deployer stuck as
+    // minter. Safe to no-op if the current minter is already Treasury.
+    const currentMinter = (await jinn.minter()) as string;
+    if (currentMinter.toLowerCase() !== config.treasury.toLowerCase()) {
       const restoreTx = await jinn.changeMinter(config.treasury);
       console.log(`Restore tx:    ${restoreTx.hash}`);
       await restoreTx.wait();

@@ -112,6 +112,15 @@ npx hardhat run scripts/phase1a-vote-staking-weight.ts --network sepolia
 npx hardhat run scripts/status-phase1a-live.ts --network sepolia
 ```
 
+If `checkpoint-and-verify.ts` ever reports `Minter is Treasury: ✗ WRONG`, the
+vote-mint script was interrupted between its temporary `changeMinter(deployer)`
+and the finally-block restore. Run this idempotent one-shot from the deployer
+key to put Treasury back as minter (no-op if already correct):
+
+```bash
+npx hardhat run scripts/phase1a-restore-jinn-minter.ts --network sepolia
+```
+
 ### Step 6: Seed L2 with JINN
 
 ```bash
