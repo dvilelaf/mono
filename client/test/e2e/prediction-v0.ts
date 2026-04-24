@@ -28,7 +28,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -53,25 +53,25 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 
-import { decodeMarketplaceRequestLogs } from '../src/adapters/mech/contracts.js';
+import { decodeMarketplaceRequestLogs } from '../../src/adapters/mech/contracts.js';
 import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
   NATIVE_PAYMENT_TYPE,
-} from '../src/adapters/mech/types.js';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { PredictionV0BaselineImpl } from '../src/restorer/impls/prediction-v0-baseline/index.js';
-import { PredictionV0Evaluator } from '../src/restorer/impls/prediction-v0-evaluator/index.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { DesiredState } from '../src/types/desired-state.js';
+} from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { PredictionV0BaselineImpl } from '../../src/restorer/impls/prediction-v0-baseline/index.js';
+import { PredictionV0Evaluator } from '../../src/restorer/impls/prediction-v0-evaluator/index.js';
+import type { RestorationContext } from '../../src/restorer/types.js';
+import type { DesiredState } from '../../src/types/desired-state.js';
 import type {
   PredictionV0Intent,
   PredictionSubmissionManifest,
-} from '../src/types/prediction.js';
-import type { SpanningResult } from '../src/venues/chainlink/client.js';
+} from '../../src/types/prediction.js';
+import type { SpanningResult } from '../../src/venues/chainlink/client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -100,7 +100,7 @@ const RESPONSE_TIMEOUT_HEADROOM = 3600n;
 
 // MockV3Aggregator artifact path
 const MOCK_AGGREGATOR_ARTIFACT = join(
-  __dirname, '..', '..', 'contracts',
+  __dirname, '..', '..', '..', 'contracts',
   'artifacts', 'src', 'testnet', 'MockV3Aggregator.sol', 'MockV3Aggregator.json',
 );
 
@@ -535,8 +535,8 @@ async function main(): Promise<void> {
       const [creatorSvc, restorerSvc, evaluatorSvc] = completedServices;
 
       // Derive private keys from HD wallet
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
 
@@ -639,14 +639,14 @@ async function main(): Promise<void> {
       };
       capturedIntent = predictionIntent;
 
-      const { createClients: createClientsLocal } = await import('../src/adapters/mech/safe.js');
-      const { submitRestorationJob, getMechDeliveryRate, getTimeoutBounds } = await import('../src/adapters/mech/contracts.js');
-      const { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } = await import('../src/adapters/mech/ipfs.js');
+      const { createClients: createClientsLocal } = await import('../../src/adapters/mech/safe.js');
+      const { submitRestorationJob, getMechDeliveryRate, getTimeoutBounds } = await import('../../src/adapters/mech/contracts.js');
+      const { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } = await import('../../src/adapters/mech/ipfs.js');
 
       const { walletClient: creatorWalletClient } = createClientsLocal(ANVIL_RPC, creatorAgentPk as Hex, base);
 
       // Build intent payload + upload to IPFS
-      const intentPayload = buildDesiredStatePayload(predictionIntent as unknown as import('../src/types/desired-state.js').DesiredState);
+      const intentPayload = buildDesiredStatePayload(predictionIntent as unknown as import('../../src/types/desired-state.js').DesiredState);
       const intentCid = await uploadToIpfs('https://registry.autonolas.tech', intentPayload);
       const intentDataHex = cidToDigestHex(intentCid) as Hex;
 
@@ -1102,14 +1102,14 @@ async function main(): Promise<void> {
       let capturedDeliveryDataHex: string | undefined;
       // Temporarily capture the yield from watchForDeliveries to extract the verdict
       const evalWatcherIter = creatorEvalWatcherAdapter.watchForDeliveries()[Symbol.asyncIterator]();
-      let deliveryResult: import('../src/types/index.js').DeliveredResult | undefined;
+      let deliveryResult: import('../../src/types/index.js').DeliveredResult | undefined;
       try {
         const result = await Promise.race([
           evalWatcherIter.next(),
           sleep(60000).then(() => { throw new Error('creatorEvalWatcherAdapter.watchForDeliveries() timed out'); }),
         ]);
         if (!result.done && result.value) {
-          deliveryResult = result.value as import('../src/types/index.js').DeliveredResult;
+          deliveryResult = result.value as import('../../src/types/index.js').DeliveredResult;
         }
       } finally {
         clearInterval(miningInterval);

@@ -21,7 +21,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
@@ -47,16 +47,16 @@ import type { WalletClient } from 'viem';
 import { base } from 'viem/chains';
 import {
   decodeMarketplaceRequestLogs,
-} from '../src/adapters/mech/contracts.js';
+} from '../../src/adapters/mech/contracts.js';
 import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
   NATIVE_PAYMENT_TYPE,
-} from '../src/adapters/mech/types.js';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
+} from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
 const __dirname = join(fileURLToPath(import.meta.url), '..');
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -219,8 +219,8 @@ async function runJinnCliSubprocess(
   cliArgs: string[],
   options: { passwordFdContent?: string; tmpDirForPw: string },
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  /** `e2e-validate.ts` lives in `client/scripts/`; package root is one level up. */
-  const clientRoot = join(__dirname, '..');
+  /** `validate.ts` lives in `client/test/e2e/`; package root is two levels up. */
+  const clientRoot = join(__dirname, '..', '..');
   const jinnBin = join(clientRoot, 'bin', 'jinn.ts');
   let pwFd: number | undefined;
   let finalArgs = cliArgs;
@@ -564,7 +564,7 @@ async function main(): Promise<void> {
   let agentEoaPrivateKeyB: Hex | undefined;
 
   // API server for DAEMON_API_URL flow
-  let restorerApiServer: import('../src/api/server.js').ApiServer | undefined;
+  let restorerApiServer: import('../../src/api/server.js').ApiServer | undefined;
 
   try {
     // ── Phase 1: Infrastructure ──────────────────────────────────────────────
@@ -711,8 +711,8 @@ async function main(): Promise<void> {
         }
 
         // Step 4: Decrypt mnemonic keystore to derive agent EOA private key
-        const { FleetStateStore } = await import('../src/earning/store.js');
-        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+        const { FleetStateStore } = await import('../../src/earning/store.js');
+        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
         const store = new FleetStateStore(tmpDir);
         const mnemonic = await decryptMnemonic(
           await store.loadMnemonicKeystore(),
@@ -835,12 +835,12 @@ async function main(): Promise<void> {
     // ClaimRegistry deps on the fork. Phases 5–8 use {@link E2eRestorerLoop} —
     // same behavior as the former production `RestorerLoop` (adapter + runner).
 
-    const { E2eRestorerLoop } = await import('./e2e-legacy-restorer.js');
-    const { ClaudeRunner } = await import('../src/runner/claude.js');
-    const { Store } = await import('../src/store/store.js');
+    const { E2eRestorerLoop } = await import('./legacy-restorer.js');
+    const { ClaudeRunner } = await import('../../src/runner/claude.js');
+    const { Store } = await import('../../src/store/store.js');
 
     const USE_REAL_AGENT = process.env['JINN_E2E_AGENT'] === 'real';
-    const agentPath = USE_REAL_AGENT ? 'claude' : join(__dirname, 'mock-agent.sh');
+    const agentPath = USE_REAL_AGENT ? 'claude' : join(__dirname, '..', '..', 'scripts', 'mock-agent.sh');
     const agentModel = USE_REAL_AGENT ? 'claude-haiku-4-5-20251001' : undefined;
     const agentTimeoutMs = USE_REAL_AGENT ? 300000 : 60000;
     if (USE_REAL_AGENT) {
@@ -852,7 +852,7 @@ async function main(): Promise<void> {
 
     // Start API server so submit_restoration_result can POST artifacts via DAEMON_API_URL
     // Use port 0 to let the OS assign a free port, avoiding EADDRINUSE from stale e2e runs.
-    const { startApiServer } = await import('../src/api/server.js');
+    const { startApiServer } = await import('../../src/api/server.js');
     restorerApiServer = await startApiServer({ port: 0, store });
     const daemonApiUrl = `http://127.0.0.1:${restorerApiServer.port}`;
 
@@ -1285,13 +1285,13 @@ async function main(): Promise<void> {
           throw new Error('Missing credentials from Phase 2');
         }
 
-        const { Daemon } = await import('../src/daemon/daemon.js');
-        const { ClaudeRunner } = await import('../src/runner/claude.js');
-        const { createClients } = await import('../src/adapters/mech/safe.js');
-        const { RestorerImplRegistry } = await import('../src/restorer/engine/registry.js');
-        const { buildRestorerImpls } = await import('../src/restorer/impls/index.js');
-        const { DEFAULT_BY_KIND, DEFAULT_DISABLED_IMPLS } = await import('../src/cli/intent-registry-access.js');
-        const { ClaimRegistryClient } = await import('../src/adapters/claim-registry/client.js');
+        const { Daemon } = await import('../../src/daemon/daemon.js');
+        const { ClaudeRunner } = await import('../../src/runner/claude.js');
+        const { createClients } = await import('../../src/adapters/mech/safe.js');
+        const { RestorerImplRegistry } = await import('../../src/restorer/engine/registry.js');
+        const { buildRestorerImpls } = await import('../../src/restorer/impls/index.js');
+        const { DEFAULT_BY_KIND, DEFAULT_DISABLED_IMPLS } = await import('../../src/cli/intent-registry-access.js');
+        const { ClaimRegistryClient } = await import('../../src/adapters/claim-registry/client.js');
 
         const daemonAdapter = new MechAdapter({
           rpcUrl: ANVIL_RPC,
@@ -1531,8 +1531,8 @@ async function main(): Promise<void> {
           throw new Error('Operator B bootstrap completed but missing safe or mech_address');
         }
 
-        const { FleetStateStore } = await import('../src/earning/store.js');
-        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+        const { FleetStateStore } = await import('../../src/earning/store.js');
+        const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
         const storeFleetB = new FleetStateStore(tmpDir2);
         const mnemonicB = await decryptMnemonic(
           await storeFleetB.loadMnemonicKeystore(),
@@ -1596,8 +1596,8 @@ async function main(): Promise<void> {
         console.log(`    Cross-operator requestId: ${crossRequestId}`);
 
         // B picks up the request and delivers
-        const { E2eRestorerLoop: E2eRestorerB } = await import('./e2e-legacy-restorer.js');
-        const { Store: StoreB } = await import('../src/store/store.js');
+        const { E2eRestorerLoop: E2eRestorerB } = await import('./legacy-restorer.js');
+        const { Store: StoreB } = await import('../../src/store/store.js');
         const storeB = new StoreB(':memory:');
         const restorerB = new E2eRestorerB(
           restorerAdapterB,
@@ -1684,7 +1684,7 @@ async function main(): Promise<void> {
 
     // ── Phase 13: Priority Window + ClaimPolicy ────────────────────────────
 
-    const { PriorityWindowPolicy } = await import('../src/adapters/mech/claim-policy.js');
+    const { PriorityWindowPolicy } = await import('../../src/adapters/mech/claim-policy.js');
 
     results.push(
       await runPhase('Phase 13: Priority Window — PriorityWindowPolicy rejects during window, accepts after', async () => {
@@ -1813,9 +1813,9 @@ async function main(): Promise<void> {
 
     // ── Phase 13b: On-Chain ClaimRegistry ──────────────────────────────────
 
-    const { OnChainClaimPolicy } = await import('../src/adapters/mech/claim-policy.js');
+    const { OnChainClaimPolicy } = await import('../../src/adapters/mech/claim-policy.js');
     // Canonical ABI — do not import from adapters/mech/types (CLAIM_REGISTRY_ABI was removed there).
-    const { CLAIM_REGISTRY_ABI } = await import('../src/adapters/claim-registry/abi.js');
+    const { CLAIM_REGISTRY_ABI } = await import('../../src/adapters/claim-registry/abi.js');
 
     results.push(
       await runPhase('Phase 13b: On-Chain ClaimRegistry — deploy, claim, reject, expire, reclaim', async () => {
@@ -1844,7 +1844,7 @@ async function main(): Promise<void> {
         // Read compiled bytecode (requires `forge build` / contracts sync in repo root)
         const { readFileSync: readFS, existsSync } = await import('node:fs');
         const { join: joinPath } = await import('node:path');
-        const artifactPath = joinPath(__dirname, '..', '..', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
+        const artifactPath = joinPath(__dirname, '..', '..', '..', 'contracts', 'artifacts', 'src', 'claiming', 'ClaimRegistry.sol', 'ClaimRegistry.json');
         if (!existsSync(artifactPath)) {
           console.log(
             `    SKIP: ClaimRegistry artifact not found (${artifactPath}) — run contracts build to enable Phase 13b`,
@@ -1871,7 +1871,7 @@ async function main(): Promise<void> {
         console.log(`    ClaimRegistry deployed at: ${claimRegistryAddress}`);
 
         // Create viem clients for operator A and B
-        const { createClients } = await import('../src/adapters/mech/safe.js');
+        const { createClients } = await import('../../src/adapters/mech/safe.js');
         const clientsA = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex);
         const clientsB = createClients(ANVIL_RPC, agentEoaPrivateKeyB as Hex);
 
@@ -1906,7 +1906,7 @@ async function main(): Promise<void> {
         console.log(`    Test requestId: ${claimTestRequestId}`);
 
         // --- Test 1: Operator A claims successfully ---
-        const { claimJob: claimJobFn, getJobClaim: getJobClaimFn } = await import('../src/adapters/mech/contracts.js');
+        const { claimJob: claimJobFn, getJobClaim: getJobClaimFn } = await import('../../src/adapters/mech/contracts.js');
 
         const claimTxA = await claimJobFn(
           clientsA.publicClient,
@@ -2061,7 +2061,7 @@ async function main(): Promise<void> {
 
     // ── Phase 13c: Cross-Node Artifact Sync ────────────────────────────────
 
-    const { PeerSync } = await import('../src/api/peers.js');
+    const { PeerSync } = await import('../../src/api/peers.js');
 
     results.push(
       await runPhase('Phase 13c: Cross-Node Artifact Sync — two API servers, publish, sync, acquire', async () => {
@@ -2147,8 +2147,8 @@ async function main(): Promise<void> {
 
     // ── Phase 13d: 8004 Registry + Subgraph Backfill ───────────────────────
 
-    const { Registry8004 } = await import('../src/discovery/registry.js');
-    const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../src/discovery/subgraph.js');
+    const { Registry8004 } = await import('../../src/discovery/registry.js');
+    const { queryArtifacts: querySubgraphArtifacts, getMetadataValue: getMeta } = await import('../../src/discovery/subgraph.js');
 
     results.push(
       await runPhase('Phase 13d: 8004 Registry + Subgraph — register artifact, mock subgraph, backfill', async () => {
@@ -2268,7 +2268,7 @@ async function main(): Promise<void> {
 
     // ── Phase 13e: x402 Payment Gating ─────────────────────────────────────
 
-    const { acquireArtifactWithPayment, buildAcquisitionUrl } = await import('../src/x402/acquire.js');
+    const { acquireArtifactWithPayment, buildAcquisitionUrl } = await import('../../src/x402/acquire.js');
 
     results.push(
       await runPhase('Phase 13e: x402 — payment gating + best-effort acquisition', async () => {
@@ -2349,7 +2349,7 @@ async function main(): Promise<void> {
 
     // ── Phase 13f: ERC-8128 Auth on API ────────────────────────────────────
 
-    const { createPrivateKeyHttpSigner, signRequestWithErc8128 } = await import('../src/auth/erc8128.js');
+    const { createPrivateKeyHttpSigner, signRequestWithErc8128 } = await import('../../src/auth/erc8128.js');
 
     results.push(
       await runPhase('Phase 13f: ERC-8128 Auth — unsigned rejected, signed accepted', async () => {
@@ -2554,9 +2554,9 @@ async function main(): Promise<void> {
         const failScript = join(tmpDir!, 'fail-agent.sh');
         writeFS2(failScript, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
 
-        const { ClaudeRunner } = await import('../src/runner/claude.js');
-        const { E2eRestorerLoop: E2eFail } = await import('./e2e-legacy-restorer.js');
-        const { Store: StoreFail } = await import('../src/store/store.js');
+        const { ClaudeRunner } = await import('../../src/runner/claude.js');
+        const { E2eRestorerLoop: E2eFail } = await import('./legacy-restorer.js');
+        const { Store: StoreFail } = await import('../../src/store/store.js');
         const failRunner = new ClaudeRunner({ claudePath: failScript });
         const failStore = new StoreFail(join(tmpDir!, 'fail-test.db'));
         const failRestorer = new E2eFail(failAdapter, failRunner, failStore, join(tmpDir!, 'fail-work'), 30_000);
@@ -2883,12 +2883,12 @@ async function main(): Promise<void> {
             throw new Error(`expected withdraw dryRun, got ${JSON.stringify(jWdr)}`);
           }
 
-          const { nextFleetServiceIndex } = await import('../src/earning/next-service-index.js');
+          const { nextFleetServiceIndex } = await import('../../src/earning/next-service-index.js');
           if (nextFleetServiceIndex([{ index: 1 }, { index: 3 }]) !== 4) {
             throw new Error('nextFleetServiceIndex([1,3]) expected 4');
           }
 
-          const { tickStolasDistributorClaims } = await import('../src/earning/stolas-claim.js');
+          const { tickStolasDistributorClaims } = await import('../../src/earning/stolas-claim.js');
           const chainCfg = getChainConfig('base');
           const tickEmpty = await tickStolasDistributorClaims(
             publicClient,

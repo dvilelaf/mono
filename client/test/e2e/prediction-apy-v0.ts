@@ -10,7 +10,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -19,20 +19,20 @@ import { tmpdir } from 'node:os';
 import { createPublicClient, decodeEventLog, encodeAbiParameters, getAddress, http, keccak256, numberToHex, pad, parseAbi, toHex, type Address, type Hex, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../src/adapters/mech/contracts.js';
-import { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } from '../src/adapters/mech/ipfs.js';
-import { createClients } from '../src/adapters/mech/safe.js';
-import { PredictionApyV0BaselineImpl } from '../src/restorer/impls/prediction-apy-v0-baseline/index.js';
-import { PredictionApyV0Evaluator } from '../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
-import { signCanonical } from '../src/restorer/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../src/restorer/impls/evaluation-context.js';
-import type { DesiredState } from '../src/types/desired-state.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { PredictionApySubmissionManifest } from '../src/types/prediction-apy.js';
-import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { decodeMarketplaceRequestLogs, getMechDeliveryRate, getTimeoutBounds, submitRestorationJob } from '../../src/adapters/mech/contracts.js';
+import { buildDesiredStatePayload, uploadToIpfs, cidToDigestHex } from '../../src/adapters/mech/ipfs.js';
+import { createClients } from '../../src/adapters/mech/safe.js';
+import { PredictionApyV0BaselineImpl } from '../../src/restorer/impls/prediction-apy-v0-baseline/index.js';
+import { PredictionApyV0Evaluator } from '../../src/restorer/impls/prediction-apy-v0-evaluator/index.js';
+import { signCanonical } from '../../src/restorer/engine/signing.js';
+import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../src/restorer/impls/evaluation-context.js';
+import type { DesiredState } from '../../src/types/desired-state.js';
+import type { RestorationContext } from '../../src/restorer/types.js';
+import type { PredictionApySubmissionManifest } from '../../src/types/prediction-apy.js';
+import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../../src/adapters/mech/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
@@ -177,8 +177,8 @@ async function main(): Promise<void> {
       const svc = r2.fleet_state.services.find(s => s.step === 'complete' && s.safe_address && s.mech_address);
       if (!svc) throw new Error('no completed service');
 
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
       agentPk = walletPrivateKeyAtIndex(mnemonic, svc.index) as `0x${string}`;

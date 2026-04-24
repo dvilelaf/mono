@@ -16,14 +16,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPublicClient, http, parseAbi, type Address } from 'viem';
 import { base } from 'viem/chains';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import {
   SERVICE_REGISTRY_L2_ABI,
   STOLAS_DISTRIBUTOR,
   STOLAS_DISTRIBUTOR_ABI,
   STOLAS_STAKING_SLOTS_ABI,
   getChainConfig,
-} from '../src/earning/contracts.js';
+} from '../../src/earning/contracts.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

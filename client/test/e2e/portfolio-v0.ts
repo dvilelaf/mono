@@ -23,7 +23,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.env') });
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
@@ -48,23 +48,23 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 
-import { decodeMarketplaceRequestLogs } from '../src/adapters/mech/contracts.js';
+import { decodeMarketplaceRequestLogs } from '../../src/adapters/mech/contracts.js';
 import {
   MECH_ABI,
   MECH_MARKETPLACE_ABI,
   JINN_ROUTER_ABI,
   NATIVE_PAYMENT_TYPE,
-} from '../src/adapters/mech/types.js';
-import { MechAdapter } from '../src/adapters/mech/adapter.js';
-import { FleetBootstrapper } from '../src/earning/bootstrap.js';
-import { getChainConfig } from '../src/earning/contracts.js';
-import { assembleAndSignManifest } from '../src/restorer/engine/manifest-assembly.js';
-import { ClaudeMcpHyperliquidImpl } from '../src/restorer/impls/claude-mcp-hyperliquid/index.js';
-import { PortfolioV0Evaluator } from '../src/restorer/impls/portfolio-v0-evaluator/index.js';
-import type { RestorationContext } from '../src/restorer/types.js';
-import type { HlClearinghouseState, HlFill, HlGridPoint } from '../src/venues/hyperliquid/types.js';
-import type { DesiredState } from '../src/types/desired-state.js';
-import type { RestorationManifest } from '../src/types/portfolio.js';
+} from '../../src/adapters/mech/types.js';
+import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
+import { getChainConfig } from '../../src/earning/contracts.js';
+import { assembleAndSignManifest } from '../../src/restorer/engine/manifest-assembly.js';
+import { ClaudeMcpHyperliquidImpl } from '../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
+import { PortfolioV0Evaluator } from '../../src/restorer/impls/portfolio-v0-evaluator/index.js';
+import type { RestorationContext } from '../../src/restorer/types.js';
+import type { HlClearinghouseState, HlFill, HlGridPoint } from '../../src/venues/hyperliquid/types.js';
+import type { DesiredState } from '../../src/types/desired-state.js';
+import type { RestorationManifest } from '../../src/types/portfolio.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -370,8 +370,8 @@ async function main(): Promise<void> {
       mechAddress = firstComplete?.mech_address as Address | undefined;
       if (!safeAddress || !mechAddress) throw new Error('Bootstrap completed but missing safe/mech address');
 
-      const { FleetStateStore } = await import('../src/earning/store.js');
-      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../src/earning/wallet.js');
+      const { FleetStateStore } = await import('../../src/earning/store.js');
+      const { decryptMnemonic, walletPrivateKeyAtIndex } = await import('../../src/earning/wallet.js');
       const store = new FleetStateStore(tmpDir);
       const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), PASSWORD);
       agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, firstComplete!.index);
@@ -483,7 +483,7 @@ async function main(): Promise<void> {
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
 
       // Build impl with mocked HL + noop runSession
-      const mockHlClient = new MockHlClient() as unknown as import('../src/venues/hyperliquid/client.js').HyperliquidClient;
+      const mockHlClient = new MockHlClient() as unknown as import('../../src/venues/hyperliquid/client.js').HyperliquidClient;
       const impl = new ClaudeMcpHyperliquidImpl({
         _testDeps: {
           runSession: async (_sessionId: string, _prompt: string) => ({ stdout: '' }),
