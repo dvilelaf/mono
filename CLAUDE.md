@@ -246,6 +246,12 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 - **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
 - **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 
+## Testing
+
+See [`docs/runbooks/testing.md`](docs/runbooks/testing.md) for the test SOP: pyramid,
+where tests go, the mock policy, shared helpers. Design rationale lives in
+[`docs/superpowers/specs/2026-04-24-test-architecture-design.md`](docs/superpowers/specs/2026-04-24-test-architecture-design.md).
+
 ## Development Commands
 
 ```bash
