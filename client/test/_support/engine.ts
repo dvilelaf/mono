@@ -9,6 +9,7 @@ import {
   type PersistedIntent,
   type PersistedIntentInput,
 } from '@/restorer/engine/persistence.js';
+import { IntentState } from '@/restorer/engine/state.js';
 import type { Store } from '@/store/store.js';
 
 const NOOP_REGISTRY: RestorerImplRegistry = { resolveImplName: () => null };
@@ -55,6 +56,8 @@ class TestPersistence extends IntentPersistence {
 export interface StateMachineSpyOpts {
   store: Store;
   paths?: { workingDirRoot: string; implStateDirRoot: string };
+  /** When provided, the real claim() implementation is used (via super.claim()). */
+  claimDeps?: RestorationEngineOptions['claimDeps'];
   onClaim?(intent: PersistedIntent): Promise<void>;
   onPreSnapshot?(intent: PersistedIntent): Promise<void>;
   onRunImpl?(intent: PersistedIntent): Promise<void>;
@@ -69,7 +72,7 @@ export interface StateMachineSpy {
   callsByIntent: Map<string, string[]>;
 }
 
-class SpyEngine extends RestorationEngine {
+export class SpyEngine extends RestorationEngine {
   readonly calls: string[] = [];
   readonly callsByIntent: Map<string, string[]> = new Map();
   private readonly spyOpts: StateMachineSpyOpts;
@@ -84,6 +87,7 @@ class SpyEngine extends RestorationEngine {
       store: opts.store,
       registry: NOOP_REGISTRY,
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
+      claimDeps: opts.claimDeps,
     });
     this.spyOpts = opts;
     // Replace the protected persistence with our TestPersistence subclass so
@@ -105,7 +109,17 @@ class SpyEngine extends RestorationEngine {
   override async claim(intent: PersistedIntent): Promise<void> {
     this.record(intent, 'claim');
     if (this.spyOpts.onClaim) return this.spyOpts.onClaim(intent);
+    // When claimDeps is injected, delegate to the real implementation.
+    if (this.claimDeps) return super.claim(intent);
     throw new NotImplementedError('claim');
+  }
+
+  /**
+   * Exposes the private dataDrivenAdvance method for unit testing the data-driven
+   * advance logic in isolation.
+   */
+  testDataDrivenAdvance(intent: PersistedIntent): IntentState | null {
+    return (this as unknown as { dataDrivenAdvance(i: PersistedIntent): IntentState | null }).dataDrivenAdvance(intent);
   }
   override async takePreSnapshot(intent: PersistedIntent): Promise<void> {
     this.record(intent, 'takePreSnapshot');
