@@ -23,5 +23,5 @@ Awaiting mid-May 2026 panel — first post-berberine data point.
 
 ## Evidence trail
 - Analysis: [apob-trajectory](../../10-analysis/health/apob-trajectory.md)
-- Processing: [randox](../../00-processing/health/randox.md), [lifecode-gx](../../00-processing/genomics/lifecode-gx.md)
-- Source: [goals-h2-2026.md §Cardiovascular](../../../docs/goals-h2-2026.md)
+- Processing: [randox](../../00-processing/health/randox.md), [lifecode-gx](../../00-processing/genomics/lifecode-gx.md), [goals](../../00-processing/meta/goals.md)
+- Goals source: `documents` row, slug `goals-h2-2026` §Cardiovascular

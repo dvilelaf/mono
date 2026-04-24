@@ -24,4 +24,5 @@ $130K current. $40K gap. Three named idle capital buckets exist.
 
 ## Evidence trail
 - Analysis: [yield-gap](../../10-analysis/finance/yield-gap.md)
-- Processing: [yield-positions](../../00-processing/crypto/yield-positions.md)
+- Processing: [yield-positions](../../00-processing/crypto/yield-positions.md), [goals](../../00-processing/meta/goals.md)
+- Goals source: `documents` row, slug `goals-h2-2026` §Yield & Income

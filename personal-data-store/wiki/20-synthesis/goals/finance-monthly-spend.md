@@ -23,4 +23,5 @@ April 2026 is first post-cut month. Needs query + clean categorisation.
 
 ## Evidence trail
 - Analysis: [monthly-spend](../../10-analysis/finance/monthly-spend.md)
-- Processing: [transactions](../../00-processing/finance/transactions.md)
+- Processing: [transactions](../../00-processing/finance/transactions.md), [goals](../../00-processing/meta/goals.md)
+- Goals source: `documents` row, slug `goals-h2-2026` §Spending

@@ -26,4 +26,5 @@ Health (Oura, yield snapshot), Crypto (Zerion, Coinbase yield) are auto. Apple H
 **Backup + restore validated (2026-04-24)** — pds-backup app live under pm2. Daily 03:00 dumps to ~/Backups/pds/. Restore verified against a scratch DB. Retention: 30 daily + 12 monthly.
 
 ## Evidence trail
-- Source memory: [project_pds_data_sources.md](../../../../.claude/projects/-Users-gcd-Repositories-main/memory/project_pds_data_sources.md) — live status of each source
+- Processing: [connectors](../../00-processing/meta/connectors.md), [goals](../../00-processing/meta/goals.md)
+- Goals source: `documents` row, slug `goals-h2-2026` §Data & Tooling

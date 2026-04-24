@@ -1,6 +1,6 @@
 # Personal Wiki
 
-Data in → insight out. The wiki turns the PDS into ranked blockers against goals in [goals-h2-2026.md](../docs/goals-h2-2026.md).
+Data in → insight out. The wiki turns the PDS into ranked blockers against the goals stored in the `documents` table (slug `goals-h2-2026`). See [00-processing/meta/goals.md](00-processing/meta/goals.md) for how to retrieve and update them.
 
 ## If you only read one thing
 Latest synthesis note: `20-synthesis/YYYY-MM-DD-read-me.md` (generated Tue/Thu by the synthesise job).

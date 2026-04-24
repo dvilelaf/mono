@@ -1,6 +1,6 @@
 # Personal Wiki — Conventions
 
-This wiki converts the Personal Data Store (PDS) into insight against the user's goals in [docs/goals-h2-2026.md](../docs/goals-h2-2026.md).
+This wiki converts the Personal Data Store (PDS) into insight against the user's goals, which live in the `documents` table (slug `goals-h2-2026`). See [00-processing/meta/goals.md](00-processing/meta/goals.md) for retrieval and update rules. Never cite `docs/goals-h2-2026.md` as a source — that file may be removed.
 
 ## Three layers — data flows upward only
 
@@ -29,7 +29,7 @@ Subfolders: `health/`, `finance/`, `genomics/`, `photos/`, `crypto/`.
 One page per pattern, trend, or correlation. Single-domain goes under `health/`, `finance/`, `genomics/`. Cross-domain goes under `cross/`.
 
 ### `20-synthesis/` — what to *do about it*
-- `goals/` — one page per goal from goals-h2-2026.md, updated with live status and top blockers.
+- `goals/` — one page per goal, derived from the `documents` row slug `goals-h2-2026`, updated with live status and top blockers.
 - `blockers/` — one page per identified blocker to a goal. Must link to (a) the goal it blocks and (b) the analysis page(s) that evidence it.
 
 Synthesis is the only layer the user reads for decisions. Keep it scannable.
@@ -78,7 +78,7 @@ Three scheduled jobs live in `scripts/`. Each has a markdown prompt template and
 - `analyse.md` — re-runs patterns on processing updates, writes to `10-analysis/`.
 - `synthesise.md` — re-ranks blockers against current goals, writes to `20-synthesis/`.
 
-All three write to their layer only. None edit `goals-h2-2026.md` or raw PDS data.
+All three write to their layer only. None edit the goals row in `documents` or raw PDS data.
 
 ## What belongs in `ROADMAP.md`
 

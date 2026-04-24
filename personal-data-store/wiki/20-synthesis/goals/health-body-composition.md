@@ -23,4 +23,5 @@ Context gathered. Window comparison not yet run.
 
 ## Evidence trail
 - Analysis: [body-composition-regression](../../10-analysis/health/body-composition-regression.md), [sleep-vs-activity](../../10-analysis/cross/sleep-vs-activity.md)
-- Processing: [apple-health](../../00-processing/health/apple-health.md), [strong](../../00-processing/health/strong.md), [oura](../../00-processing/health/oura.md)
+- Processing: [apple-health](../../00-processing/health/apple-health.md), [strong](../../00-processing/health/strong.md), [oura](../../00-processing/health/oura.md), [goals](../../00-processing/meta/goals.md)
+- Goals source: `documents` row, slug `goals-h2-2026` §Body Composition
