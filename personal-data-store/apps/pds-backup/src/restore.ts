@@ -10,6 +10,15 @@ export type RestoreOptions = {
 
 export async function restore(opts: RestoreOptions): Promise<void> {
   // Guard: refuse to restore over the prod DB unless explicitly allowed.
+  // Most-specific check first: is this the configured production database?
+  if (opts.targetDb === config.pgDatabase && !opts.allowProdRestore) {
+    throw new Error(
+      `restore() refused: target database "${opts.targetDb}" matches the production database ` +
+        `(config.pgDatabase="${config.pgDatabase}"). Pass --allow-prod to override.`,
+    );
+  }
+
+  // Softer check: does it look like a non-prod name?
   const looksLikeTest = /test|restore|scratch/i.test(opts.targetDb);
   if (!looksLikeTest && !opts.allowProdRestore) {
     throw new Error(
