@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, stat } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
@@ -7,6 +7,7 @@ import { config } from "./config.js";
 export type DumpResult = {
   file: string;
   bytes: number;
+  mirrored: string | null;
   startedAt: string;
   finishedAt: string;
 };
@@ -45,9 +46,15 @@ export async function dump(): Promise<DumpResult> {
 
   await verify(file);
 
+  const mirrored = await mirrorToIcloud(file).catch((e) => {
+    console.error("[pds-backup] iCloud mirror failed:", e);
+    return null;
+  });
+
   return {
     file,
     bytes: size,
+    mirrored,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
   };
@@ -75,6 +82,14 @@ async function verify(file: string): Promise<void> {
       tmp,
     ]).catch(() => {/* best-effort cleanup */});
   }
+}
+
+export async function mirrorToIcloud(file: string): Promise<string | null> {
+  if (!config.icloudBackupDir) return null;
+  await mkdir(config.icloudBackupDir, { recursive: true });
+  const dest = path.join(config.icloudBackupDir, path.basename(file));
+  await copyFile(file, dest);
+  return dest;
 }
 
 function runCmd(
