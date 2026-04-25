@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
 import { createRunCommand } from '../../../src/cli/commands/run.js';
+import { makeCommandCtx } from '@test/cli.js';
 import type { RunDeps } from '../../../src/cli/commands/run.js';
 
 function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
@@ -38,23 +38,6 @@ function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
   };
 }
 
-function makeCtx(env: Record<string, string> = { JINN_PASSWORD: 'test' }): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv: [],
-    stdoutIsTty: false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (code: number) => { exits.push(code); },
-    env,
-  };
-  return { ctx, writes, exits };
-}
-
 describe('run command', () => {
   let fakeDeps: RunDeps;
 
@@ -64,7 +47,7 @@ describe('run command', () => {
 
   it('requires JINN_PASSWORD', async () => {
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCtx({});
+    const { ctx, writes, exits } = makeCommandCtx({ env: {} });
     await run.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');
@@ -73,7 +56,7 @@ describe('run command', () => {
 
   it('delegates to mainFn() when JINN_PASSWORD is set', async () => {
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes } = makeCtx();
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await run.run(ctx);
     expect(fakeDeps.mainFn).toHaveBeenCalled();
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -85,7 +68,7 @@ describe('run command', () => {
       checkApiPortAvailable: vi.fn(async () => ({ ok: false as const, port: 7331, code: 'EADDRINUSE', message: 'in use' })) as unknown as RunDeps['checkApiPortAvailable'],
     });
     const run = createRunCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await run.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');

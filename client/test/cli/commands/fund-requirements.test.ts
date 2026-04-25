@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
 import { createFundRequirementsCommand, type FundRequirementsDeps } from '../../../src/cli/commands/fund-requirements.js';
+import { makeCommandCtx } from '@test/cli.js';
 
 type BootstrapResult = {
   ok: boolean;
@@ -25,26 +25,6 @@ function makeFakeDeps(bootstrapResult: BootstrapResult, passwordOk = true): Fund
   };
 }
 
-function makeCtx(
-  env: Record<string, string> = { JINN_PASSWORD: 'test' },
-  argv: string[] = [],
-): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (code: number) => { exits.push(code); },
-    env,
-  };
-  return { ctx, writes, exits };
-}
-
 describe('fund-requirements command', () => {
   it('emits a requirements array with role, address, asset, needWei', async () => {
     const deps = makeFakeDeps({
@@ -58,7 +38,7 @@ describe('fund-requirements command', () => {
       fleet_state: { master_address: '0xMASTER', services: [] },
     });
     const fr = createFundRequirementsCommand(deps);
-    const { ctx, writes } = makeCtx();
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.schemaVersion).toBe(1);
@@ -80,7 +60,7 @@ describe('fund-requirements command', () => {
       fleet_state: { master_address: '0xM', services: [] },
     });
     const fr = createFundRequirementsCommand(deps);
-    const { ctx, writes } = makeCtx();
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.satisfied).toBe(true);
@@ -99,7 +79,7 @@ describe('fund-requirements command', () => {
       fleet_state: { master_address: '0xMASTER', services: [] },
     });
     const fr = createFundRequirementsCommand(deps);
-    const { ctx, writes } = makeCtx({ JINN_PASSWORD: 'test' }, ['--human']);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
     await fr.run(ctx);
     const out = writes.join('');
     expect(out).toMatch(/Funding required/);
@@ -119,7 +99,7 @@ describe('fund-requirements command', () => {
       fleet_state: { master_address: '0xMASTER', services: [] },
     });
     const fr = createFundRequirementsCommand(deps);
-    const { ctx, writes } = makeCtx({}, ['--password-fd', '0']);
+    const { ctx, writes } = makeCommandCtx({ argv: ['--password-fd', '0'], env: {} });
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.satisfied).toBe(false);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { makeCommandCtx } from '@test/cli.js';
 import { createSubmitIntentCommand, type SubmitIntentDeps } from '../../../src/cli/commands/submit-intent.js';
 
 const mockRaw: GatheredStatusRaw = {
@@ -48,29 +48,16 @@ function makeFakeDeps(overrides?: Partial<SubmitIntentDeps>): SubmitIntentDeps {
   };
 }
 
-function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: string[]; exits: number[] } {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: tty,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (c: number) => { exits.push(c); },
-    env: { JINN_PASSWORD: 'test' },
-  };
-  return { ctx, writes, exits };
-}
-
 describe('submit-intent command', () => {
   it('--dry-run emits a plan without executing', async () => {
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes } = makeCtx([
+    const { ctx, writes } = makeCommandCtx({ argv: [
       '--id',
       'test-1',
       '--description',
       'The service is healthy',
       '--dry-run',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
@@ -80,7 +67,7 @@ describe('submit-intent command', () => {
 
   it('non-TTY without --yes or --dry-run emits invalid_invocation', async () => {
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes, exits } = makeCtx(['--id', 'test-1', '--description', 'The service is healthy']);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--id', 'test-1', '--description', 'The service is healthy'], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
@@ -89,7 +76,7 @@ describe('submit-intent command', () => {
 
   it('accepts --config and --password-fd on --dry-run (parse path)', async () => {
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes } = makeCtx([
+    const { ctx, writes } = makeCommandCtx({ argv: [
       '--id',
       'test-1',
       '--description',
@@ -99,7 +86,7 @@ describe('submit-intent command', () => {
       '/nonexistent-config-path.json',
       '--password-fd',
       '9',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
@@ -108,7 +95,7 @@ describe('submit-intent command', () => {
 
   it('missing --id emits invalid_invocation', async () => {
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes, exits } = makeCtx(['--dry-run', '--description', 'x']);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--dry-run', '--description', 'x'], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
@@ -124,13 +111,13 @@ describe('submit-intent command', () => {
     const cmd = createSubmitIntentCommand(makeFakeDeps({
       gatherIntrospectionRaw: async () => emptyFleetRaw,
     }));
-    const { ctx, writes, exits } = makeCtx([
+    const { ctx, writes, exits } = makeCommandCtx({ argv: [
       '--id',
       'test-1',
       '--description',
       'x',
       '--dry-run',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('bootstrap_incomplete');
@@ -154,12 +141,12 @@ describe('submit-intent command', () => {
       eligibility: { maxSubmissionDelayMs: 60000 },
     }));
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes } = makeCtx([
+    const { ctx, writes } = makeCommandCtx({ argv: [
       '--id', 'pred-1',
       '--description', 'ETH > 3500',
       '--spec-file', tmpFile,
       '--dry-run',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.dryRun).toBe(true);
@@ -180,12 +167,12 @@ describe('submit-intent command', () => {
       eligibility: {},
     }));
     const cmd = createSubmitIntentCommand(makeFakeDeps());
-    const { ctx, writes, exits } = makeCtx([
+    const { ctx, writes, exits } = makeCommandCtx({ argv: [
       '--id', 'x',
       '--description', 'y',
       '--spec-file', tmpFile,
       '--dry-run',
-    ]);
+    ], env: { JINN_PASSWORD: 'test' } });
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');

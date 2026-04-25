@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { CommandContext } from '../../../src/cli/command.js';
 import { createBootstrapCommand, type BootstrapDeps } from '../../../src/cli/commands/bootstrap.js';
+import { makeCommandCtx } from '@test/cli.js';
 
 type BootstrapResult = {
   ok: boolean;
@@ -80,23 +80,6 @@ function makeFakeDeps(
   };
 }
 
-function makeCtx(
-  env: Record<string, string> = { JINN_PASSWORD: 'test' },
-  opts: { stdoutIsTty?: boolean; argv?: string[] } = {},
-): {
-  ctx: CommandContext; writes: string[]; exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  const ctx: CommandContext = {
-    argv: opts.argv ?? [],
-    stdoutIsTty: opts.stdoutIsTty ?? false,
-    writer: { write: (s: string) => { writes.push(s); return true; } },
-    exit: (code: number) => { exits.push(code); },
-    env,
-  };
-  return { ctx, writes, exits };
-}
 
 let capturedConstructorOptions: Record<string, unknown> | undefined;
 
@@ -118,7 +101,7 @@ describe('bootstrap command', () => {
         fleet_state: { master_address: '0xabc', services: [] },
       },
     }));
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('funding_required');
@@ -135,7 +118,7 @@ describe('bootstrap command', () => {
 
   it('emits invalid_invocation exit 11 when password env is missing', async () => {
     const bootstrap = createBootstrapCommand(makeFakeDeps({ passwordOk: false }));
-    const { ctx, writes, exits } = makeCtx({});
+    const { ctx, writes, exits } = makeCommandCtx({ env: {} });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('invalid_invocation');
@@ -153,7 +136,7 @@ describe('bootstrap command', () => {
         fleet_state: { master_address: '0xabc', services: [] },
       },
     }));
-    const { ctx, writes, exits } = makeCtx({}, { argv: ['--password-fd', '0'] });
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--password-fd', '0'], env: {} });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.code).toBe('funding_required');
@@ -171,7 +154,7 @@ describe('bootstrap command', () => {
         },
       },
     }));
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.schemaVersion).toBe(1);
@@ -200,7 +183,7 @@ describe('bootstrap command', () => {
       }),
       logRpcLocalDevToStderr: (result) => { logRpcCalledWith = result; },
     });
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
     await bootstrap.run(ctx);
     expect(logRpcCalledWith).toMatchObject({ localDev: true, actualChainId: 31337 });
     expect(writes).toHaveLength(1);
@@ -220,7 +203,7 @@ describe('bootstrap command', () => {
         },
       },
     }));
-    const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true });
+    const { ctx, writes, exits } = makeCommandCtx({ tty: true, env: { JINN_PASSWORD: 'test' } });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.master).toBe('0xmaster');
@@ -235,7 +218,7 @@ describe('bootstrap command', () => {
         fleet_state: { master_address: '0xaaa', services: [] },
       },
     }));
-    const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true, argv: ['--human'] });
+    const { ctx, writes, exits } = makeCommandCtx({ tty: true, argv: ['--human'], env: { JINN_PASSWORD: 'test' } });
     await bootstrap.run(ctx);
     const out = writes[writes.length - 1];
     expect(out).toContain('Bootstrap complete.');
@@ -252,10 +235,10 @@ describe('bootstrap command', () => {
       },
       captureConstructorOptions: (opts) => { capturedConstructorOptions = opts; },
     }));
-    const { ctx, exits } = makeCtx({
-      JINN_PASSWORD: 'test-password',
-      JINN_DISABLE_TESTNET_FAUCET: '1',
-    }, { argv: ['--json'] });
+    const { ctx, exits } = makeCommandCtx({
+      argv: ['--json'],
+      env: { JINN_PASSWORD: 'test-password', JINN_DISABLE_TESTNET_FAUCET: '1' },
+    });
 
     await bootstrap.run(ctx);
 
@@ -288,7 +271,7 @@ describe('bootstrap command', () => {
         return deps.bootstrapperFactory(cfg);
       },
     });
-    const { ctx, writes, exits } = makeCtx();
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
 
     await bootstrap.run(ctx);
 

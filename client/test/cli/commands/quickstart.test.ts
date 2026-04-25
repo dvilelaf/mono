@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 import { createQuickstartCommand } from '../../../src/cli/commands/quickstart.js';
 import type { QuickstartDeps } from '../../../src/cli/commands/quickstart.js';
+import { makeCommandCtx } from '@test/cli.js';
 
 function makeFakeDeps(overrides: Partial<QuickstartDeps> = {}): QuickstartDeps {
   return {
@@ -27,26 +28,6 @@ function makeFakeDeps(overrides: Partial<QuickstartDeps> = {}): QuickstartDeps {
     },
     randomBytesFn: vi.fn(() => Buffer.from('deadbeef'.repeat(8), 'hex')),
     ...overrides,
-  };
-}
-
-function makeCtx(argv: string[] = [], env: Record<string, string> = { JINN_PASSWORD: 'test-password' }): {
-  ctx: CommandContext;
-  writes: string[];
-  exits: number[];
-} {
-  const writes: string[] = [];
-  const exits: number[] = [];
-  return {
-    ctx: {
-      argv,
-      stdoutIsTty: false,
-      writer: { write: (s: string) => { writes.push(s); return true; } },
-      exit: (code: number) => { exits.push(code); },
-      env,
-    },
-    writes,
-    exits,
   };
 }
 
@@ -85,7 +66,7 @@ describe('quickstart command', () => {
     });
 
     const quickstart = createQuickstartCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCtx(['--config', '/tmp/custom.json', '--no-daemon']);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['--config', '/tmp/custom.json', '--no-daemon'], env: { JINN_PASSWORD: 'test-password' } });
 
     const runPromise = quickstart.run(ctx);
     await vi.advanceTimersByTimeAsync(15_000);
@@ -118,7 +99,7 @@ describe('quickstart command', () => {
     });
 
     const quickstart = createQuickstartCommand(fakeDeps);
-    const { ctx, writes, exits } = makeCtx([]);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: [], env: { JINN_PASSWORD: 'test-password' } });
     await quickstart.run(ctx);
 
     const parsed = JSON.parse(writes[writes.length - 1] ?? '{}');
