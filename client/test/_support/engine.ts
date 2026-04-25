@@ -58,6 +58,8 @@ export interface StateMachineSpyOpts {
   paths?: { workingDirRoot: string; implStateDirRoot: string };
   /** When provided, the real claim() implementation is used (via super.claim()). */
   claimDeps?: RestorationEngineOptions['claimDeps'];
+  /** When provided, wires the impl registry for claim-gate tests. */
+  implRegistry?: RestorationEngineOptions['implRegistry'];
   onClaim?(intent: PersistedIntent): Promise<void>;
   onPreSnapshot?(intent: PersistedIntent): Promise<void>;
   onRunImpl?(intent: PersistedIntent): Promise<void>;
@@ -88,6 +90,7 @@ export class SpyEngine extends RestorationEngine {
       registry: NOOP_REGISTRY,
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       claimDeps: opts.claimDeps,
+      implRegistry: opts.implRegistry,
     });
     this.spyOpts = opts;
     // Replace the protected persistence with our TestPersistence subclass so
