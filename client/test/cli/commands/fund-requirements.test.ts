@@ -1,40 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { createFundRequirementsCommand, type FundRequirementsDeps } from '../../../src/cli/commands/fund-requirements.js';
 
-const fundReturn = vi.hoisted(() => ({
-  val: {
-    ok: false as boolean,
-    funding: {
-      master_address: '0xMASTER',
-      eth_required: '1000000000000000000',
-      eth_balance: '0',
-    },
-    message: 'need eth',
-    fleet_state: {
-      master_address: '0xMASTER',
-      services: [] as Array<{ index: number; step: string; service_id?: number }>,
-    },
-  },
-}));
+type BootstrapResult = {
+  ok: boolean;
+  funding?: { master_address: string; eth_required: string; eth_balance: string };
+  message: string;
+  fleet_state: { master_address: string; services: Array<{ index: number; step: string; service_id?: number }> };
+};
 
-const passwordResult = vi.hoisted(() => ({
-  val:
-    { ok: true as const, password: 'test' } as
-      | { ok: true; password: string }
-      | { ok: false; message: string },
-}));
-
-vi.mock('../../../src/earning/bootstrap.js', () => ({
-  FleetBootstrapper: class {
-    async bootstrap() {
-      return { ...fundReturn.val };
-    }
-  },
-}));
-
-vi.mock('../../../src/cli/password.js', () => ({
-  resolveCliPassword: vi.fn(() => passwordResult.val),
-}));
+function makeFakeDeps(bootstrapResult: BootstrapResult, passwordOk = true): FundRequirementsDeps {
+  return {
+    loadConfig: () => ({ earningDir: '/tmp', network: 'testnet', rpcUrl: 'http://127.0.0.1:8545' } as any),
+    getConfigPathFromArgs: () => undefined,
+    bootstrapperFactory: () => ({
+      bootstrap: async () => ({ ...bootstrapResult }),
+    } as any),
+    resolveCliPassword: () =>
+      passwordOk
+        ? { ok: true as const, password: 'test' }
+        : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
+    getChainConfig: () => ({ minSafeEth: 1000000000000000n } as any),
+    publicClientFactory: () => ({ getBalance: async () => 0n } as any),
+  };
+}
 
 function makeCtx(
   env: Record<string, string> = { JINN_PASSWORD: 'test' },
@@ -58,8 +47,7 @@ function makeCtx(
 
 describe('fund-requirements command', () => {
   it('emits a requirements array with role, address, asset, needWei', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    fundReturn.val = {
+    const deps = makeFakeDeps({
       ok: false,
       funding: {
         master_address: '0xMASTER',
@@ -68,8 +56,8 @@ describe('fund-requirements command', () => {
       },
       message: 'need eth',
       fleet_state: { master_address: '0xMASTER', services: [] },
-    };
-    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    });
+    const fr = createFundRequirementsCommand(deps);
     const { ctx, writes } = makeCtx();
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -86,13 +74,12 @@ describe('fund-requirements command', () => {
   });
 
   it('reports satisfied=true with empty requirements when no funding needed', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    fundReturn.val = {
+    const deps = makeFakeDeps({
       ok: true,
       message: 'ok',
       fleet_state: { master_address: '0xM', services: [] },
-    };
-    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    });
+    const fr = createFundRequirementsCommand(deps);
     const { ctx, writes } = makeCtx();
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -101,8 +88,7 @@ describe('fund-requirements command', () => {
   });
 
   it('--human formats amounts as ETH (not raw wei)', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    fundReturn.val = {
+    const deps = makeFakeDeps({
       ok: false,
       funding: {
         master_address: '0xMASTER',
@@ -111,8 +97,8 @@ describe('fund-requirements command', () => {
       },
       message: 'need eth',
       fleet_state: { master_address: '0xMASTER', services: [] },
-    };
-    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    });
+    const fr = createFundRequirementsCommand(deps);
     const { ctx, writes } = makeCtx({ JINN_PASSWORD: 'test' }, ['--human']);
     await fr.run(ctx);
     const out = writes.join('');
@@ -122,8 +108,7 @@ describe('fund-requirements command', () => {
   });
 
   it('accepts --password-fd when password env is missing', async () => {
-    passwordResult.val = { ok: true, password: 'from-fd' };
-    fundReturn.val = {
+    const deps = makeFakeDeps({
       ok: false,
       funding: {
         master_address: '0xMASTER',
@@ -132,8 +117,8 @@ describe('fund-requirements command', () => {
       },
       message: 'need eth',
       fleet_state: { master_address: '0xMASTER', services: [] },
-    };
-    const { default: fr } = await import('../../../src/cli/commands/fund-requirements.js');
+    });
+    const fr = createFundRequirementsCommand(deps);
     const { ctx, writes } = makeCtx({}, ['--password-fd', '0']);
     await fr.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
