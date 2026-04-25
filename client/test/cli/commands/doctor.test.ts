@@ -23,6 +23,13 @@ const fakeDeps = {
   }),
   rpcNetworkFailureHint: () => 'unused',
   runPortfolioV0DoctorChecks: () => [],
+  checkDistributorReachable: async () => null,
+  detectAuthContext: () => 'bare' as const,
+  probeClaudeAuth: () => ({
+    authenticated: true,
+    context: 'bare' as const,
+    detail: 'fake claude auth',
+  }),
 } as const;
 
 describe('doctor command (DI integration)', () => {

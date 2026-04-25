@@ -10,7 +10,10 @@ import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { checkClaudeBinary as defaultCheckClaudeBinary, type ClaudeBinaryCheckResult } from '../../preflight/claude-binary.js';
-import { detectAuthContext, probeClaudeAuth } from '../../preflight/claude-auth.js';
+import {
+  detectAuthContext as defaultDetectAuthContext,
+  probeClaudeAuth as defaultProbeClaudeAuth,
+} from '../../preflight/claude-auth.js';
 import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
@@ -30,6 +33,12 @@ export interface DoctorDeps extends BaseCommandDeps {
   checkRpcNetwork: typeof defaultCheckRpcNetwork;
   rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
   runPortfolioV0DoctorChecks: typeof defaultRunPortfolioV0DoctorChecks;
+  /** Probes the distributor's OLAS balance via real RPC; tests inject a fake to avoid network hangs. */
+  checkDistributorReachable: (config: JinnConfig) => Promise<CheckResult | null>;
+  /** Detects whether claude runs in a container/compose/bare context. */
+  detectAuthContext: typeof defaultDetectAuthContext;
+  /** Probes claude auth status via subprocess; tests inject a fake to avoid spawning claude. */
+  probeClaudeAuth: typeof defaultProbeClaudeAuth;
 }
 
 const PRODUCTION_DEPS: DoctorDeps = {
@@ -39,6 +48,9 @@ const PRODUCTION_DEPS: DoctorDeps = {
   checkRpcNetwork: defaultCheckRpcNetwork,
   rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
   runPortfolioV0DoctorChecks: defaultRunPortfolioV0DoctorChecks,
+  checkDistributorReachable,
+  detectAuthContext: defaultDetectAuthContext,
+  probeClaudeAuth: defaultProbeClaudeAuth,
 };
 
 interface CheckResult {
@@ -264,8 +276,8 @@ export function createDoctorCommand(deps: DoctorDeps = PRODUCTION_DEPS): Command
 
   async function checkClaudeAuth(config: JinnConfig): Promise<CheckResult> {
     const cwd = process.cwd();
-    const context = detectAuthContext({ cwd, configuredMode: config.runtimeMode });
-    const probe = probeClaudeAuth({ context, cwd });
+    const context = deps.detectAuthContext({ cwd, configuredMode: config.runtimeMode });
+    const probe = deps.probeClaudeAuth({ context, cwd });
     return {
       name: 'claude_auth',
       ok: probe.authenticated,
@@ -337,7 +349,7 @@ Examples:
       checks.push(await checkDeploymentLoaded(config));
       checks.push(checkDaemonRuntimeReady());
 
-      const distributorCheck = await checkDistributorReachable(config);
+      const distributorCheck = await deps.checkDistributorReachable(config);
       if (distributorCheck) checks.push(distributorCheck);
 
       // portfolio.v0 checks — only run if the operator has configured a
