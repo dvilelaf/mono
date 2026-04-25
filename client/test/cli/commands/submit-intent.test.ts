@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
 import type { GatheredStatusRaw } from '../../../src/api/status-build.js';
+import { createSubmitIntentCommand, type SubmitIntentDeps } from '../../../src/cli/commands/submit-intent.js';
 
 const mockRaw: GatheredStatusRaw = {
   shutdownState: null,
@@ -33,9 +34,19 @@ const mockRaw: GatheredStatusRaw = {
   masterDailyEstimateWei: '0',
 };
 
-vi.mock('../../../src/cli/introspection-context.js', () => ({
-  gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-}));
+function makeFakeDeps(overrides?: Partial<SubmitIntentDeps>): SubmitIntentDeps {
+  return {
+    loadConfig: () => ({ earningDir: '/tmp', network: 'testnet', rpcUrl: 'http://127.0.0.1:8545' } as any),
+    getConfigPathFromArgs: () => undefined,
+    gatherIntrospectionRaw: async () => mockRaw,
+    executionContextFactory: async () => ({ ok: false, envelope: { code: 'fatal', message: 'not used in dry-run tests' } } as any),
+    postingServiceFactory: () => ({ postCandidate: async () => ({ requestId: '0xabc', idempotent: false, attemptId: 'a1', attemptNumber: 1 }) } as any),
+    readChainlinkLatest: async () => ({ answer: 3500n, decimals: 8 } as any),
+    chainlinkPublicClientFactory: () => ({} as any),
+    isRecoverableTransactionError: () => false,
+    ...overrides,
+  };
+}
 
 function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: string[]; exits: number[] } {
   const writes: string[] = [];
@@ -52,7 +63,7 @@ function makeCtx(argv: string[], tty = false): { ctx: CommandContext; writes: st
 
 describe('submit-intent command', () => {
   it('--dry-run emits a plan without executing', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes } = makeCtx([
       '--id',
       'test-1',
@@ -68,7 +79,7 @@ describe('submit-intent command', () => {
   });
 
   it('non-TTY without --yes or --dry-run emits invalid_invocation', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes, exits } = makeCtx(['--id', 'test-1', '--description', 'The service is healthy']);
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
@@ -77,7 +88,7 @@ describe('submit-intent command', () => {
   });
 
   it('accepts --config and --password-fd on --dry-run (parse path)', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes } = makeCtx([
       '--id',
       'test-1',
@@ -96,7 +107,7 @@ describe('submit-intent command', () => {
   });
 
   it('missing --id emits invalid_invocation', async () => {
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes, exits } = makeCtx(['--dry-run', '--description', 'x']);
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
@@ -106,14 +117,13 @@ describe('submit-intent command', () => {
   });
 
   it('--dry-run emits bootstrap_incomplete when no service is at step=complete', async () => {
-    vi.resetModules();
-    vi.doMock('../../../src/cli/introspection-context.js', () => ({
-      gatherIntrospectionRaw: vi.fn(async () => ({
-        ...mockRaw,
-        fleet: { ...mockRaw.fleet!, services: [] },
-      })),
+    const emptyFleetRaw: GatheredStatusRaw = {
+      ...mockRaw,
+      fleet: { ...mockRaw.fleet!, services: [] },
+    };
+    const cmd = createSubmitIntentCommand(makeFakeDeps({
+      gatherIntrospectionRaw: async () => emptyFleetRaw,
     }));
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
     const { ctx, writes, exits } = makeCtx([
       '--id',
       'test-1',
@@ -126,14 +136,9 @@ describe('submit-intent command', () => {
     expect(parsed.code).toBe('bootstrap_incomplete');
     expect(parsed.exitCode).toBe(20);
     expect(exits).toEqual([20]);
-    vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 
   it('accepts --spec-file with a prediction.v0 intent', async () => {
-    vi.resetModules();
-    vi.doMock('../../../src/cli/introspection-context.js', () => ({
-      gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-    }));
     const { mkdtempSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -148,7 +153,7 @@ describe('submit-intent command', () => {
       },
       eligibility: { maxSubmissionDelayMs: 60000 },
     }));
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes } = makeCtx([
       '--id', 'pred-1',
       '--description', 'ETH > 3500',
@@ -161,14 +166,9 @@ describe('submit-intent command', () => {
     expect(parsed.verb).toBe('submit-intent');
     expect(parsed.plan[0]).toMatchObject({ id: 'pred-1' });
     expect(parsed.plan[0].spec?.kind).toBe('prediction.v0');
-    vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 
   it('--spec-file with unknown spec.kind emits invalid_invocation', async () => {
-    vi.resetModules();
-    vi.doMock('../../../src/cli/introspection-context.js', () => ({
-      gatherIntrospectionRaw: vi.fn(async () => mockRaw),
-    }));
     const { mkdtempSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -179,7 +179,7 @@ describe('submit-intent command', () => {
       spec: { kind: 'demo.v0', foo: 1 },
       eligibility: {},
     }));
-    const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
+    const cmd = createSubmitIntentCommand(makeFakeDeps());
     const { ctx, writes, exits } = makeCtx([
       '--id', 'x',
       '--description', 'y',
@@ -192,6 +192,5 @@ describe('submit-intent command', () => {
     expect(parsed.message).toMatch(/unknown intent kind: demo\.v0/);
     expect(parsed.message).toMatch(/known kinds:/);
     expect(exits).toEqual([11]);
-    vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 });
