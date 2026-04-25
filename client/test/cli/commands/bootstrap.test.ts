@@ -1,56 +1,84 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandContext } from '../../../src/cli/command.js';
+import { createBootstrapCommand, type BootstrapDeps } from '../../../src/cli/commands/bootstrap.js';
 
-const bootstrapReturn = vi.hoisted(() => ({
-  val: {
-    ok: false as boolean,
-    funding: {
-      master_address: '0xabc',
-      eth_required: '1000',
-      eth_balance: '500',
+type BootstrapResult = {
+  ok: boolean;
+  funding?: { master_address: string; eth_required: string; eth_balance: string };
+  message: string;
+  fleet_state: { master_address: string; services: Array<{ index: number; step: string; service_id?: number }> };
+};
+
+type RpcResult =
+  | { ok: true; network: string; expectedChainId: number; actualChainId: number; rpcHost: string; localDev?: boolean }
+  | { ok: false; network: string; expectedChainId: number; actualChainId: number; rpcHost: string; reason: string; message: string };
+
+const defaultRpcOk: RpcResult = {
+  ok: true,
+  network: 'testnet',
+  expectedChainId: 84532,
+  actualChainId: 84532,
+  rpcHost: '127.0.0.1:8545',
+};
+
+const defaultConfig = {
+  earningDir: '/tmp/earning',
+  network: 'testnet',
+  rpcUrl: 'http://127.0.0.1:8545',
+  stakingMode: 'standard',
+  targetServices: 1,
+  debug: false,
+  pollIntervalMs: 5000,
+};
+
+const defaultBootstrapResult: BootstrapResult = {
+  ok: false,
+  funding: {
+    master_address: '0xabc',
+    eth_required: '1000',
+    eth_balance: '500',
+  },
+  message: 'need more eth',
+  fleet_state: { master_address: '0xabc', services: [] },
+};
+
+function makeFakeDeps(
+  overrides: {
+    bootstrapResult?: BootstrapResult;
+    rpcResult?: RpcResult;
+    config?: Record<string, unknown>;
+    passwordOk?: boolean;
+    captureConstructorOptions?: (opts: Record<string, unknown>) => void;
+  } = {},
+): BootstrapDeps {
+  const {
+    bootstrapResult = defaultBootstrapResult,
+    rpcResult = defaultRpcOk,
+    config = defaultConfig,
+    passwordOk = true,
+    captureConstructorOptions,
+  } = overrides;
+
+  return {
+    loadConfig: () => config as any,
+    getConfigPathFromArgs: () => undefined,
+    checkRpcNetwork: async () => rpcResult as any,
+    rpcNetworkFailureHint: () => 'fix rpc',
+    logRpcLocalDevToStderr: () => {},
+    bootstrapperFactory: (cfg) => {
+      if (captureConstructorOptions) {
+        captureConstructorOptions(cfg as unknown as Record<string, unknown>);
+      }
+      return {
+        bootstrap: async () => ({ ...bootstrapResult }),
+      } as any;
     },
-    message: 'need more eth',
-    fleet_state: { master_address: '0xabc', services: [] as Array<{ index: number; step: string; service_id?: number }> },
-  },
-}));
-
-const passwordResult = vi.hoisted(() => ({
-  val:
-    { ok: true as const, password: 'test' } as
-      | { ok: true; password: string }
-      | { ok: false; message: string },
-}));
-
-const loadConfigMock = vi.fn();
-const checkRpcNetworkMock = vi.fn();
-const logRpcLocalDevToStderrMock = vi.hoisted(() => vi.fn());
-let constructorOptions: Record<string, unknown> | undefined;
-
-vi.mock('../../../src/config.js', () => ({
-  loadConfig: loadConfigMock,
-}));
-
-vi.mock('../../../src/preflight/rpc-network.js', () => ({
-  checkRpcNetwork: checkRpcNetworkMock,
-  logRpcLocalDevToStderr: logRpcLocalDevToStderrMock,
-  rpcNetworkFailureHint: () => 'fix rpc',
-}));
-
-vi.mock('../../../src/earning/bootstrap.js', () => ({
-  FleetBootstrapper: class {
-    constructor(options: Record<string, unknown>) {
-      constructorOptions = options;
-    }
-
-    async bootstrap() {
-      return { ...bootstrapReturn.val };
-    }
-  },
-}));
-
-vi.mock('../../../src/cli/password.js', () => ({
-  resolveCliPassword: vi.fn(() => passwordResult.val),
-}));
+    resolveCliPassword: () =>
+      passwordOk
+        ? { ok: true as const, password: 'test' }
+        : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
+  };
+}
 
 function makeCtx(
   env: Record<string, string> = { JINN_PASSWORD: 'test' },
@@ -70,44 +98,26 @@ function makeCtx(
   return { ctx, writes, exits };
 }
 
+let capturedConstructorOptions: Record<string, unknown> | undefined;
+
 describe('bootstrap command', () => {
   beforeEach(() => {
-    checkRpcNetworkMock.mockResolvedValue({
-      ok: true,
-      network: 'testnet',
-      expectedChainId: 84532,
-      actualChainId: 84532,
-      rpcHost: '127.0.0.1:8545',
-    });
-    loadConfigMock.mockReturnValue({
-      earningDir: '/tmp/earning',
-      network: 'testnet',
-      rpcUrl: 'http://127.0.0.1:8545',
-      stakingMode: 'standard',
-      targetServices: 1,
-      debug: false,
-      pollIntervalMs: 5000,
-    });
+    capturedConstructorOptions = undefined;
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
-    constructorOptions = undefined;
+    capturedConstructorOptions = undefined;
   });
 
   it('emits funding_required envelope and exits 10 when bootstrap returns funding', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    bootstrapReturn.val = {
-      ok: false,
-      funding: {
-        master_address: '0xabc',
-        eth_required: '1000',
-        eth_balance: '500',
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: false,
+        funding: { master_address: '0xabc', eth_required: '1000', eth_balance: '500' },
+        message: 'need more eth',
+        fleet_state: { master_address: '0xabc', services: [] },
       },
-      message: 'need more eth',
-      fleet_state: { master_address: '0xabc', services: [] },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    }));
     const { ctx, writes, exits } = makeCtx();
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -124,11 +134,7 @@ describe('bootstrap command', () => {
   });
 
   it('emits invalid_invocation exit 11 when password env is missing', async () => {
-    passwordResult.val = {
-      ok: false,
-      message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.',
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const bootstrap = createBootstrapCommand(makeFakeDeps({ passwordOk: false }));
     const { ctx, writes, exits } = makeCtx({});
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -139,18 +145,14 @@ describe('bootstrap command', () => {
   });
 
   it('accepts --password-fd when password env is missing', async () => {
-    passwordResult.val = { ok: true, password: 'from-fd' };
-    bootstrapReturn.val = {
-      ok: false,
-      funding: {
-        master_address: '0xabc',
-        eth_required: '1000',
-        eth_balance: '500',
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: false,
+        funding: { master_address: '0xabc', eth_required: '1000', eth_balance: '500' },
+        message: 'need more eth',
+        fleet_state: { master_address: '0xabc', services: [] },
       },
-      message: 'need more eth',
-      fleet_state: { master_address: '0xabc', services: [] },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    }));
     const { ctx, writes, exits } = makeCtx({}, { argv: ['--password-fd', '0'] });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -159,16 +161,16 @@ describe('bootstrap command', () => {
   });
 
   it('emits JSON success on non-TTY even without --json', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    bootstrapReturn.val = {
-      ok: true,
-      message: 'ok',
-      fleet_state: {
-        master_address: '0xmaster',
-        services: [{ index: 0, step: 'complete', service_id: 7 }],
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: true,
+        message: 'ok',
+        fleet_state: {
+          master_address: '0xmaster',
+          services: [{ index: 0, step: 'complete', service_id: 7 }],
+        },
       },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    }));
     const { ctx, writes, exits } = makeCtx();
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -179,32 +181,28 @@ describe('bootstrap command', () => {
   });
 
   it('does not write local-dev preflight notice to stdout; uses logRpcLocalDevToStderr', async () => {
-    checkRpcNetworkMock.mockResolvedValueOnce({
-      ok: true,
-      network: 'testnet',
-      expectedChainId: 84532,
-      actualChainId: 31337,
-      rpcHost: '127.0.0.1:8545',
-      localDev: true,
+    let logRpcCalledWith: unknown;
+    const bootstrap = createBootstrapCommand({
+      ...makeFakeDeps({
+        bootstrapResult: {
+          ok: true,
+          message: 'ok',
+          fleet_state: { master_address: '0xmaster', services: [] },
+        },
+        rpcResult: {
+          ok: true,
+          network: 'testnet',
+          expectedChainId: 84532,
+          actualChainId: 31337,
+          rpcHost: '127.0.0.1:8545',
+          localDev: true,
+        },
+      }),
+      logRpcLocalDevToStderr: (result) => { logRpcCalledWith = result; },
     });
-    passwordResult.val = { ok: true, password: 'test' };
-    bootstrapReturn.val = {
-      ok: true,
-      message: 'ok',
-      fleet_state: {
-        master_address: '0xmaster',
-        services: [],
-      },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
     const { ctx, writes, exits } = makeCtx();
     await bootstrap.run(ctx);
-    expect(logRpcLocalDevToStderrMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        localDev: true,
-        actualChainId: 31337,
-      }),
-    );
+    expect(logRpcCalledWith).toMatchObject({ localDev: true, actualChainId: 31337 });
     expect(writes).toHaveLength(1);
     expect(JSON.parse(writes[0]).schemaVersion).toBe(1);
     expect(writes[0].trimStart().startsWith('{')).toBe(true);
@@ -212,16 +210,16 @@ describe('bootstrap command', () => {
   });
 
   it('emits JSON success on TTY without flags', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    bootstrapReturn.val = {
-      ok: true,
-      message: 'ok',
-      fleet_state: {
-        master_address: '0xmaster',
-        services: [{ index: 0, step: 'complete', service_id: 7 }],
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: true,
+        message: 'ok',
+        fleet_state: {
+          master_address: '0xmaster',
+          services: [{ index: 0, step: 'complete', service_id: 7 }],
+        },
       },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    }));
     const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true });
     await bootstrap.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]);
@@ -230,16 +228,13 @@ describe('bootstrap command', () => {
   });
 
   it('emits human success summary on TTY when --human is set', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    bootstrapReturn.val = {
-      ok: true,
-      message: 'ok',
-      fleet_state: {
-        master_address: '0xaaa',
-        services: [],
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: true,
+        message: 'ok',
+        fleet_state: { master_address: '0xaaa', services: [] },
       },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    }));
     const { ctx, writes, exits } = makeCtx(undefined, { stdoutIsTty: true, argv: ['--human'] });
     await bootstrap.run(ctx);
     const out = writes[writes.length - 1];
@@ -249,16 +244,14 @@ describe('bootstrap command', () => {
   });
 
   it('passes the command env into FleetBootstrapper', async () => {
-    passwordResult.val = { ok: true, password: 'test-password' };
-    bootstrapReturn.val = {
-      ok: true,
-      message: 'ok',
-      fleet_state: {
-        master_address: '0xmaster',
-        services: [],
+    const bootstrap = createBootstrapCommand(makeFakeDeps({
+      bootstrapResult: {
+        ok: true,
+        message: 'ok',
+        fleet_state: { master_address: '0xmaster', services: [] },
       },
-    };
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+      captureConstructorOptions: (opts) => { capturedConstructorOptions = opts; },
+    }));
     const { ctx, exits } = makeCtx({
       JINN_PASSWORD: 'test-password',
       JINN_DISABLE_TESTNET_FAUCET: '1',
@@ -266,7 +259,7 @@ describe('bootstrap command', () => {
 
     await bootstrap.run(ctx);
 
-    expect(constructorOptions).toEqual(expect.objectContaining({
+    expect(capturedConstructorOptions).toEqual(expect.objectContaining({
       env: expect.objectContaining({
         JINN_PASSWORD: 'test-password',
         JINN_DISABLE_TESTNET_FAUCET: '1',
@@ -276,17 +269,25 @@ describe('bootstrap command', () => {
   });
 
   it('fails before constructing bootstrapper when rpc chain is mismatched', async () => {
-    passwordResult.val = { ok: true, password: 'test' };
-    checkRpcNetworkMock.mockResolvedValueOnce({
-      ok: false,
-      network: 'testnet',
-      expectedChainId: 84532,
-      actualChainId: 8453,
-      rpcHost: 'mainnet.base.org',
-      reason: 'chain_mismatch',
-      message: 'RPC chain mismatch for testnet',
+    let bootstrapperCreated = false;
+    const deps = makeFakeDeps({
+      rpcResult: {
+        ok: false,
+        network: 'testnet',
+        expectedChainId: 84532,
+        actualChainId: 8453,
+        rpcHost: 'mainnet.base.org',
+        reason: 'chain_mismatch',
+        message: 'RPC chain mismatch for testnet',
+      },
     });
-    const { default: bootstrap } = await import('../../../src/cli/commands/bootstrap.js');
+    const bootstrap = createBootstrapCommand({
+      ...deps,
+      bootstrapperFactory: (cfg) => {
+        bootstrapperCreated = true;
+        return deps.bootstrapperFactory(cfg);
+      },
+    });
     const { ctx, writes, exits } = makeCtx();
 
     await bootstrap.run(ctx);
@@ -300,7 +301,7 @@ describe('bootstrap command', () => {
       actualChainId: 8453,
       rpcHost: 'mainnet.base.org',
     });
-    expect(constructorOptions).toBeUndefined();
+    expect(bootstrapperCreated).toBe(false);
     expect(exits).toEqual([11]);
   });
 });
