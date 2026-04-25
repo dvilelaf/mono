@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Address } from 'viem';
 import { createPublicClient, http } from 'viem';
 import { baseSepolia } from 'viem/chains';
-import type { CommandContext, CommandModule } from '../command.js';
+import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -25,9 +25,7 @@ import {
 } from '../../preflight/rpc-network.js';
 import { SPEC_KINDS } from '../../intents/kinds/index.js';
 
-export interface DoctorDeps {
-  loadConfig: (path?: string) => JinnConfig;
-  getConfigPathFromArgs: (argv: string[]) => string | undefined;
+export interface DoctorDeps extends BaseCommandDeps {
   checkClaudeBinary: typeof defaultCheckClaudeBinary;
   checkRpcNetwork: typeof defaultCheckRpcNetwork;
   rpcNetworkFailureHint: typeof defaultRpcNetworkFailureHint;
