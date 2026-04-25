@@ -3,7 +3,7 @@
 **Version:** 0.1 (draft)
 **Date:** 2026-04-21
 **Author:** Ritsu Kai
-**Status:** Strategic thesis for internal discussion — one option for packaging Jinn into something valuable, not a decided direction
+**Status:** Superseded in framing by `spec/2026-04-25-jinn-as-live-substrate.md`. The data-substrate thesis is reinterpreted there as the **read-side** of the live cognitive substrate, not a standalone "data product." Tier 1 protocol changes below remain in scope. The v1 / v2 product framing (verified dataset → fine-tuned models) and the implied per-operator artefact-resale economics are dropped: under the live-substrate thesis Jinn is the sole requestee, pricing happens at the request layer (subscription / commission / attestation), not at downstream artefact resale, and labs that want training data participate as solvers + ve-JINN subscribers rather than as dataset buyers. Read this document for the post-training market context and the seven structural-defensibility properties (which all carry over); read the live-substrate spec for the mechanism and value-capture story.
 
 ## TL;DR
 

@@ -9,12 +9,15 @@
 
 Decentralised AI networks today score **outputs**. Validators vote on whether model A's answer looked better than model B's. That works for benchmarks. It doesn't describe the real world, where the only question that matters is whether the agent can cause the thing it was asked to cause.
 
-Jinn is a protocol for producing **verified solutions** to outcomes.
+Jinn is a **live cognitive substrate** for outcome fulfilment. A creator posts an outcome to Jinn; Jinn intermediates a competition among solvers; evaluators verify and rank the valid solutions; the protocol settles per a per-intent settlement rule. The unit of value is real-time access to the aggregate of (intent, attempt, verdict, ranking) tuples — not ownership of any single artefact.
 
-- A creator posts an **outcome** — a state of the world they want to be true.
-- **Solvers** produce solutions — a plan for achieving the outcome, plus evidence from running it.
-- Independent **evaluators** check the evidence.
-- Solutions that repeatedly work accumulate as the network's output.
+- A creator posts an **outcome** — a state of the world they want to be true — to Jinn.
+- **Solvers** produce solutions — a plan for achieving the outcome, plus evidence from running it. Multiple solvers attempt the same outcome; the protocol is the counterparty to each.
+- Independent **evaluators** verify the evidence and rank the valid solutions.
+- The protocol settles: winning solver(s) per the settlement rule, evaluators per verdict + ranking, treasury slice, optional participation reward.
+- Every attempt — winning and losing — joins the substrate. Subscribers query against it; new solvers train on it.
+
+**Jinn is the sole requestee.** Buyers do not contract with operators. They contract with Jinn (the protocol, expressed as the router contract). This is the structural rule that makes value-leakage worries collapse: an operator cannot disintermediate a buyer relationship they never had, and a stale copy of yesterday's artefact is dominated by access to today's substrate.
 
 How the solution is then executed is a separate axis. In the straightforward case the creator runs it locally — Jinn doesn't need to hold keys or move money to be useful. More-delegated execution modes, where a solver or a third party runs the solution for the creator under some trust assumption, are an open design space. The protocol's job is to make the solution trustworthy; the execution mode sits downstream and can vary by service.
 
@@ -40,14 +43,24 @@ This is the market that needs a protocol for scoring whether agents produced the
 
 ### The loop
 
-One loop, four roles:
+One loop, four roles, one mechanism:
 
-- **Creators** post outcomes and fund their realisation.
-- **Solvers** produce solutions — a plan for achieving the outcome, plus evidence that running the plan realised it.
-- **Evaluators** check, independently of the solver, whether the evidence supports the claim.
-- **Knowledge** accumulates as verified (solution, outcome) pairs — discoverable via ERC-8004, access-gated via x402.
+- **Creators** post outcomes to Jinn and fund their realisation. Each intent carries a settlement rule (best-of-N, first-at-or-below-P, sealed-bid auction, all-pay-with-tip — selectable per intent kind).
+- **Solvers** produce solutions — a plan for achieving the outcome, plus evidence that running the plan realised it. Many solvers attempt the same outcome; the protocol is the counterparty to each.
+- **Evaluators** verify the evidence (PASS / FAIL / INDETERMINATE) and rank the valid solutions per the settlement rule. At N=1 the assigned evaluator's ranking is canonical; at N>1 it is stake-weighted consensus over orderings.
+- **Substrate** accumulates: every attempt, every verdict, every ranking, all evidence. Discoverable via ERC-8004; queryable via the read rail; access-gated where appropriate.
 
 A delivered solution is then executed. The simple case is the creator running it locally against their own systems; more-delegated execution modes are an open design space and can be adopted by specific services without changing the protocol.
+
+### Pricing across the slope
+
+Every intent class has a lifecycle. The same mechanism handles all three regions, with different surfaces dominating:
+
+- **Emergence** — sparse solvers, high verdict-variance. ve-JINN gauge subscribers lock JINN to direct emissions toward the class while answers are scarce. Demand-side inelastic; subscription dominates. Treasury earns the subscription premium.
+- **Maturing** — many solvers, falling variance. Auction dynamics drive solver compensation toward marginal cost; commission dominates. Treasury earns the request fee.
+- **Commodity-with-attestation** — recipe diffused, thin solver margins, but the buyer is paying for stake-bonded evaluator-verified production. Chainlink-shape premium: anyone can read prices, you pay for *attested* prices. Treasury earns the attestation fee.
+
+Where on the slope an intent class sits is read out of gauge weight (subscription pressure) and verdict-variance (recipe maturity). No explicit switch — the gauge is the slope. ve-JINN is the **subscription primitive for capability streams**, not just gauge governance.
 
 ### Services
 
@@ -109,6 +122,7 @@ Monorepo: `github.com/jinn-network/mono`
 | Document | Path | Covers |
 |---|---|---|
 | Architecture | `CLAUDE.md` | Phase status, on-chain addresses, three-layer model |
+| Live-substrate thesis | `spec/2026-04-25-jinn-as-live-substrate.md` | Jinn-as-sole-requestee, settlement rules, ranking-consensus, emergence-to-commodity slope, value-capture |
 | Protocol spec | `spec/2026-03-23-jinn-protocol-spec-proposal.md` | The loop, roles, trust structure (uses older "restoration" terminology — catching up) |
 | Implementation spec | `spec/2026-03-23-jinn-implementation-spec-proposal.md` | Tokenomics, incentive channels |
 | Phase 1a design | `spec/2026-04-06-phase-1a-design.md` | Testnet JINN + Treasury + Dispenser |
