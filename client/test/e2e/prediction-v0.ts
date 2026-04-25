@@ -32,7 +32,7 @@ dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '
 
 import { spawnAnvilFork, jsonRpc as anvilJsonRpc, type AnvilHarness } from '../_support/chain/anvil.js';
 import { fundAddressWithOLAS } from '../_support/chain/olas-funding.js';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -447,10 +447,13 @@ async function main(): Promise<void> {
       const masterAddress = initialResult.funding.master_address;
       console.log(`    Master: ${masterAddress}`);
 
-      // Step 2: fund master with ETH + OLAS (× 3 services worth), then deposit into distributor
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']);
+      // Step 2: fund master with ETH + OLAS (× 3 services worth), then deposit into distributor.
+      // The two writes are independent — run concurrently.
       const eoaOlasAmount = 300000n * 10n ** 18n; // 3× what single-service needs
-      await fundAddressWithOLAS(chain!, getAddress(masterAddress) as Address, eoaOlasAmount);
+      await Promise.all([
+        anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']),
+        fundAddressWithOLAS(chain!, getAddress(masterAddress) as Address, eoaOlasAmount),
+      ]);
 
       const { encodeFunctionData } = await import('viem');
       await anvilJsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
@@ -620,8 +623,8 @@ async function main(): Promise<void> {
       ]);
       const maxTimeout = timeoutBounds.max;
 
-      // Mine fresh blocks to avoid stale nonce
-      for (let i = 0; i < 3; i++) { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); await sleep(100); }
+      // Mine 3 blocks to flush stale nonce state from bootstrap.
+      await chain!.mineBlocks(3);
 
       // CREATOR creates restoration job specifying RESTORER's mech as priorityMech
       // → increments creationCount[creatorSafe]
@@ -1298,6 +1301,7 @@ async function main(): Promise<void> {
     if (creatorRestorationWatcherAdapter) { try { creatorRestorationWatcherAdapter.stop(); } catch { /**/ } }
     if (creatorEvalWatcherAdapter) { try { creatorEvalWatcherAdapter.stop(); } catch { /**/ } }
     if (chain) { await chain.teardown(); console.log('\n  Anvil stopped'); }
+    if (tmpDir) { try { await rm(tmpDir, { recursive: true, force: true }); } catch { /**/ } }
   }
 
   // ── Summary ──────────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '..', '
 
 import { spawnAnvilFork, jsonRpc as anvilJsonRpc, type AnvilHarness } from '../_support/chain/anvil.js';
 import { fundAddressWithOLAS } from '../_support/chain/olas-funding.js';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -318,10 +318,12 @@ async function main(): Promise<void> {
       const masterAddress = initialResult.funding.master_address;
       console.log(`    Master: ${masterAddress}`);
 
-      // Fund master with ETH + OLAS for staking deposit
-      await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']);
+      // Fund master with ETH + OLAS for staking deposit — independent writes.
       const eoaOlasAmount = 100000n * 10n ** 18n;
-      await fundAddressWithOLAS(chain!, getAddress(masterAddress) as Address, eoaOlasAmount);
+      await Promise.all([
+        anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']),
+        fundAddressWithOLAS(chain!, getAddress(masterAddress) as Address, eoaOlasAmount),
+      ]);
 
       await anvilJsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
       await anvilJsonRpc(ANVIL_RPC, 'eth_sendTransaction', [{ from: masterAddress, to: OLAS_TOKEN, data: encodeFunctionData({ abi: parseAbi(['function approve(address,uint256) returns (bool)']), functionName: 'approve', args: [CHAIN_CONFIG.stakingContract as Address, eoaOlasAmount] }) }]);
@@ -404,8 +406,8 @@ async function main(): Promise<void> {
         eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
       };
 
-      // Mine fresh blocks to avoid stale nonce
-      for (let i = 0; i < 3; i++) { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); await sleep(100); }
+      // Mine 3 blocks to flush stale nonce state from bootstrap.
+      await chain!.mineBlocks(3);
 
       restorationRequestId = await adapter.postDesiredState(portfolioIntent);
       await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -733,6 +735,7 @@ async function main(): Promise<void> {
   } finally {
     if (adapter) { try { adapter.stop(); } catch { /**/ } }
     if (chain) { await chain.teardown(); console.log('\n  Anvil stopped'); }
+    if (tmpDir) { try { await rm(tmpDir, { recursive: true, force: true }); } catch { /**/ } }
   }
 
   // ── Summary ──────────────────────────────────────────────────────────────────

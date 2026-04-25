@@ -12,10 +12,11 @@ import {
 import { IntentState } from '@/restorer/engine/state.js';
 import type { Store } from '@/store/store.js';
 
+import { randomBytes } from 'node:crypto';
+
 const NOOP_REGISTRY: RestorerImplRegistry = { resolveImplName: () => null };
 
-let counter = 0;
-function nextId(): string { return `req-${++counter}`; }
+function nextId(): string { return `req-${randomBytes(4).toString('hex')}`; }
 
 /**
  * Canonical fixture replacing the ~5 ad-hoc `makeInput` helpers across engine tests.

@@ -595,19 +595,15 @@ async function main(): Promise<void> {
         const masterAddress = initialResult.funding.master_address;
         console.log(`    Master: ${masterAddress}`);
 
-        // Step 2: Fund accounts on Anvil
-
-        // Fund Master with enough ETH for bootstrap
-        await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
-          masterAddress,
-          '0x56BC75E2D63100000', // 100 ETH
-        ]);
-
-        // Note: Safe OLAS funding will be handled after Safe creation in bootstrap
-
-        // Fund staking contract with OLAS rewards via deposit() using master address
+        // Step 2: Fund accounts on Anvil — independent writes, run concurrently.
+        // (Note: Safe OLAS funding is handled later, after Safe creation in bootstrap.)
         const eoaOlasAmount = 100000n * 10n ** 18n;
-        await fundAddressWithOLAS(chain!, masterAddress as Address, eoaOlasAmount);
+        await Promise.all([
+          // Fund Master with enough ETH for bootstrap (100 ETH).
+          anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [masterAddress, '0x56BC75E2D63100000']),
+          // Fund staking contract with OLAS rewards via deposit() using master address.
+          fundAddressWithOLAS(chain!, masterAddress as Address, eoaOlasAmount),
+        ]);
 
         await anvilJsonRpc(ANVIL_RPC, 'anvil_impersonateAccount', [masterAddress]);
         const olasApprove = encodeFunctionData({
@@ -743,12 +739,9 @@ async function main(): Promise<void> {
       await runPhase('Phase 4: Creator posts desired state', async () => {
         if (!adapter) throw new Error('No adapter from Phase 3');
 
-        // Mine multiple blocks and wait to ensure RPC state is synchronized
-        // (nonce may be stale from bootstrap, especially with Anvil fork RPC delays)
-        for (let i = 0; i < 3; i++) {
-          await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
-          await sleep(100);
-        }
+        // Mine 3 blocks to flush any stale nonce state from bootstrap.
+        // anvil_mine returns synchronously after the blocks commit.
+        await chain.mineBlocks(3);
 
         restorationRequestId = await adapter.postDesiredState({
           id: 'e2e-test',

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { Address, Hex, WalletClient } from 'viem';
+import type { Address, Chain, Hex, WalletClient } from 'viem';
 import { createWalletClient, http, numberToHex } from 'viem';
-import { mainnet } from 'viem/chains';
+import { base } from 'viem/chains';
 import type { ChainTestHarness } from './interface.js';
 import { allocateAnvilPort } from './port-allocator.js';
 
@@ -14,6 +14,8 @@ export interface SpawnAnvilOpts {
   silent?: boolean;
   /** How long to wait for anvil readiness, ms. Default: 15_000. */
   readyTimeoutMs?: number;
+  /** Chain definition for the spawned wallet client (default: viem `base`). */
+  chain?: Chain;
 }
 
 export interface AnvilHarness extends ChainTestHarness {
@@ -29,6 +31,7 @@ export async function spawnAnvilFork(opts: SpawnAnvilOpts = {}): Promise<AnvilHa
   const forkUrl = opts.forkUrl ?? process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
   const silent = opts.silent ?? true;
   const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
+  const chain = opts.chain ?? base;
   const port = await allocateAnvilPort();
   const rpcUrl = `http://127.0.0.1:${port}`;
 
@@ -41,17 +44,29 @@ export async function spawnAnvilFork(opts: SpawnAnvilOpts = {}): Promise<AnvilHa
     detached: false,
   });
 
-  // Wait for anvil to accept RPC calls.
-  const deadline = Date.now() + readyTimeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      await jsonRpc(rpcUrl, 'eth_chainId', []);
-      break;
-    } catch { await sleep(100); }
-  }
-  if (Date.now() >= deadline) {
-    child.kill('SIGKILL');
+  // Race readiness against early process exit. Without the exit watcher, a
+  // crashing anvil (missing binary, bad fork url) burns the full timeout.
+  const exitPromise = new Promise<never>((_, reject) => {
+    child.once('error', (err) => reject(new Error(`anvil failed to spawn: ${err.message}`)));
+    child.once('exit', (code, signal) =>
+      reject(new Error(`anvil exited before becoming ready (code=${code}, signal=${signal})`)),
+    );
+  });
+  const readyPromise = (async () => {
+    const deadline = Date.now() + readyTimeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        await jsonRpc(rpcUrl, 'eth_chainId', []);
+        return;
+      } catch { await sleep(100); }
+    }
     throw new Error(`anvil did not become ready within ${readyTimeoutMs}ms on port ${port}`);
+  })();
+  try {
+    await Promise.race([readyPromise, exitPromise]);
+  } catch (err) {
+    if (!child.killed) child.kill('SIGKILL');
+    throw err;
   }
 
   const harness: AnvilHarness = {
@@ -64,7 +79,7 @@ export async function spawnAnvilFork(opts: SpawnAnvilOpts = {}): Promise<AnvilHa
       try {
         const client = createWalletClient({
           account: addr,
-          chain: mainnet,
+          chain,
           transport: http(rpcUrl),
         }) as WalletClient;
         return await fn(client);
