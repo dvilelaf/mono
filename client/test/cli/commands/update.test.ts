@@ -3,8 +3,7 @@ import { createUpdateCommand } from '@/cli/commands/update.js';
 import { runCommand } from '@test/cli.js';
 import type { CommandContext } from '@/cli/command.js';
 
-// MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; execSync is a syscall
-// and cannot be DI'd without a shim module we don't own.
+// MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; execSync is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
