@@ -11,16 +11,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
   NotImplementedError,
   type RestorationEngineOptions,
-  type RestorerImplRegistry,
 } from '../../../src/restorer/engine/engine.js';
-import { IntentPersistence, type PersistedIntentInput } from '../../../src/restorer/engine/persistence.js';
 import { IntentState } from '../../../src/restorer/engine/state.js';
+import { createStateMachineSpy, makeIntentInput } from '@test/engine.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+// MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafymock123'),
   cidToDigestHex: vi.fn().mockReturnValue('0xdeadbeef00000000000000000000000000000000000000000000000000000000' as `0x${string}`),
@@ -29,6 +28,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   digestHexToGatewayUrl: vi.fn(),
 }));
 
+// MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx' as `0x${string}`),
   claimDelivery: vi.fn().mockResolvedValue('0xclaimtx' as `0x${string}`),
@@ -49,38 +49,29 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
 
 const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
 
-const noopRegistry: RestorerImplRegistry = {
-  resolveImplName: () => null,
-};
-
 function mkTmp(): string {
   const dir = join(tmpdir(), `eng-pkg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-function makeInput(requestId: string, tmp: string): PersistedIntentInput {
+/** Packaging-test intent: window starts 1 second in the past so dataDrivenAdvance fires. */
+function makePackagingInput(requestId: string) {
   const now = Date.now() - 1000;
-  return {
+  return makeIntentInput({
     requestId,
+    windowStartTs: now,
+    windowEndTs: now + 86_400_000,
     intentCid: 'bafyintent123',
     onchainCreationTx: '0xdeadbeef',
     onchainCreationBlock: 100,
     specKind: 'portfolio.v0',
-    windowStartTs: now,
-    windowEndTs: now + 86_400_000,
     desiredState: { id: requestId, description: 'test' },
-  };
+  });
 }
 
-function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
+function makePackagingOpts(tmp: string): Pick<RestorationEngineOptions, 'packagingDeps' | 'manifestDeps' | 'deliveryDeps'> {
   return {
-    store,
-    registry: noopRegistry,
-    paths: {
-      workingDirRoot: join(tmp, 'restorations'),
-      implStateDirRoot: join(tmp, 'impls'),
-    },
     packagingDeps: {
       ipfsRegistryUrl: 'http://ipfs.test',
       registerArtifact: vi.fn(),
@@ -101,25 +92,15 @@ function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
   };
 }
 
-// ── TestEngine subclass ───────────────────────────────────────────────────────
-
-class TestEngine extends RestorationEngine {
-  get testPersistence(): IntentPersistence {
-    return this.persistence;
-  }
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('Engine packaging integration', () => {
   let store: Store;
   let tmp: string;
-  let engine: TestEngine;
 
   beforeEach(() => {
     store = new Store(':memory:');
     tmp = mkTmp();
-    engine = new TestEngine(makeOpts(store, tmp));
   });
 
   afterEach(() => {
@@ -128,7 +109,12 @@ describe('Engine packaging integration', () => {
   });
 
   it('takePreSnapshot provisions workingDir and advances state', async () => {
-    await engine.observe(makeInput('req-001', tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput('req-001'));
     // Advance to CLAIMED → WAITING (window started in the past)
     engine.testPersistence.transition('req-001', IntentState.CLAIMED);
     engine.testPersistence.transition('req-001', IntentState.WAITING);
@@ -149,7 +135,12 @@ describe('Engine packaging integration', () => {
     // Per jinn-mono-sae, process() re-dispatches against the post-transition
     // state so RUNNING fires in the same pass; with no impl registered the
     // re-dispatch hits runImpl → NotImplementedError → FAILED.
-    await engine.observe(makeInput('req-001', tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput('req-001'));
     engine.testPersistence.transition('req-001', IntentState.CLAIMED);
     engine.testPersistence.transition('req-001', IntentState.WAITING);
     engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
@@ -161,13 +152,12 @@ describe('Engine packaging integration', () => {
   });
 
   it('pack() throws NotImplementedError when packagingDeps absent', async () => {
-    const optsNoPackaging: RestorationEngineOptions = {
+    const { engine: eng } = createStateMachineSpy({
       store,
-      registry: noopRegistry,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
-    };
-    const eng = new TestEngine(optsNoPackaging);
-    await eng.observe(makeInput('req-002', tmp));
+      // No packagingDeps — pack() should throw NotImplementedError
+    });
+    await eng.observe(makePackagingInput('req-002'));
     const p = eng.testPersistence;
     p.transition('req-002', IntentState.CLAIMED);
     p.transition('req-002', IntentState.WAITING);
@@ -187,7 +177,12 @@ describe('Engine packaging integration', () => {
     mkdirSync(join(workingDir, 'env'), { recursive: true });
     writeFileSync(join(workingDir, 'intent.json'), '{}');
 
-    await engine.observe(makeInput(requestId, tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput(requestId));
     const p = engine.testPersistence;
     p.transition(requestId, IntentState.CLAIMED);
     p.transition(requestId, IntentState.WAITING);
@@ -229,13 +224,12 @@ describe('Engine packaging integration', () => {
   });
 
   it('deliver() throws NotImplementedError when deliveryDeps absent', async () => {
-    const optsNoDelivery: RestorationEngineOptions = {
+    const { engine: eng } = createStateMachineSpy({
       store,
-      registry: noopRegistry,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
-    };
-    const eng = new TestEngine(optsNoDelivery);
-    await eng.observe(makeInput('req-004', tmp));
+      // No deliveryDeps — deliver() should throw NotImplementedError
+    });
+    await eng.observe(makePackagingInput('req-004'));
     const p = eng.testPersistence;
     p.transition('req-004', IntentState.CLAIMED);
     p.transition('req-004', IntentState.WAITING);
@@ -249,7 +243,12 @@ describe('Engine packaging integration', () => {
 
   it('deliver() succeeds with deliveryDeps and advances to COMPLETE', async () => {
     const requestId = 'req-005';
-    await engine.observe(makeInput(requestId, tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput(requestId));
     const p = engine.testPersistence;
     p.transition(requestId, IntentState.CLAIMED);
     p.transition(requestId, IntentState.WAITING);
@@ -271,13 +270,9 @@ describe('Engine packaging integration', () => {
 
   it('pack() throws when safeAddress is not configured', async () => {
     // Engine with manifestDeps missing safeAddress and no deliveryDeps
-    const optsNoSafe: RestorationEngineOptions = {
+    const { engine: eng } = createStateMachineSpy({
       store,
-      registry: noopRegistry,
-      paths: {
-        workingDirRoot: join(tmp, 'restorations'),
-        implStateDirRoot: join(tmp, 'impls'),
-      },
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
       packagingDeps: {
         ipfsRegistryUrl: 'http://ipfs.test',
       },
@@ -287,15 +282,14 @@ describe('Engine packaging integration', () => {
         // safeAddress intentionally absent
       },
       // deliveryDeps intentionally absent
-    };
-    const eng = new TestEngine(optsNoSafe);
+    });
     const requestId = 'req-nosafe';
     const workingDir = join(tmp, 'restorations', requestId);
     mkdirSync(join(workingDir, 'sessions'), { recursive: true });
     mkdirSync(join(workingDir, 'env'), { recursive: true });
     writeFileSync(join(workingDir, 'intent.json'), '{}');
 
-    await eng.observe(makeInput(requestId, tmp));
+    await eng.observe(makePackagingInput(requestId));
     const p = eng.testPersistence;
     p.transition(requestId, IntentState.CLAIMED);
     p.transition(requestId, IntentState.WAITING);
@@ -326,7 +320,12 @@ describe('Engine packaging integration', () => {
     mkdirSync(join(workingDir, 'env'), { recursive: true });
     writeFileSync(join(workingDir, 'intent.json'), '{}');
 
-    await engine.observe(makeInput(requestId, tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput(requestId));
     const p = engine.testPersistence;
     p.transition(requestId, IntentState.CLAIMED);
     p.transition(requestId, IntentState.WAITING);
@@ -367,7 +366,12 @@ describe('Engine packaging integration', () => {
     writeFileSync(join(workingDir, 'intent.json'), '{}');
     writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"stable"}');
 
-    await engine.observe(makeInput(requestId, tmp));
+    const { engine } = createStateMachineSpy({
+      store,
+      paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
+      ...makePackagingOpts(tmp),
+    });
+    await engine.observe(makePackagingInput(requestId));
     const p = engine.testPersistence;
     const baseTransitions = () => {
       p.transition(requestId, IntentState.CLAIMED);

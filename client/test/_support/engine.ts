@@ -60,6 +60,14 @@ export interface StateMachineSpyOpts {
   claimDeps?: RestorationEngineOptions['claimDeps'];
   /** When provided, wires the impl registry for claim-gate tests. */
   implRegistry?: RestorationEngineOptions['implRegistry'];
+  /**
+   * When provided, the real pack() implementation is used (via super.pack()).
+   * Also enables the real takePreSnapshot() (which has no external deps).
+   */
+  packagingDeps?: RestorationEngineOptions['packagingDeps'];
+  manifestDeps?: RestorationEngineOptions['manifestDeps'];
+  /** When provided, the real deliver() implementation is used (via super.deliver()). */
+  deliveryDeps?: RestorationEngineOptions['deliveryDeps'];
   onClaim?(intent: PersistedIntent): Promise<void>;
   onPreSnapshot?(intent: PersistedIntent): Promise<void>;
   onRunImpl?(intent: PersistedIntent): Promise<void>;
@@ -91,6 +99,9 @@ export class SpyEngine extends RestorationEngine {
       paths: opts.paths ?? { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
       claimDeps: opts.claimDeps,
       implRegistry: opts.implRegistry,
+      packagingDeps: opts.packagingDeps,
+      manifestDeps: opts.manifestDeps,
+      deliveryDeps: opts.deliveryDeps,
     });
     this.spyOpts = opts;
     // Replace the protected persistence with our TestPersistence subclass so
@@ -127,6 +138,11 @@ export class SpyEngine extends RestorationEngine {
   override async takePreSnapshot(intent: PersistedIntent): Promise<void> {
     this.record(intent, 'takePreSnapshot');
     if (this.spyOpts.onPreSnapshot) return this.spyOpts.onPreSnapshot(intent);
+    // takePreSnapshot has no external deps — always delegate to real impl when paths
+    // are configured (i.e. when packaging-style opts are injected).
+    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.manifestDeps !== undefined || this.spyOpts.deliveryDeps !== undefined) {
+      return super.takePreSnapshot(intent);
+    }
     throw new NotImplementedError('takePreSnapshot');
   }
   override async runImpl(intent: PersistedIntent): Promise<void> {
@@ -142,11 +158,19 @@ export class SpyEngine extends RestorationEngine {
   override async pack(intent: PersistedIntent): Promise<void> {
     this.record(intent, 'pack');
     if (this.spyOpts.onPack) return this.spyOpts.onPack(intent);
+    // When packagingDeps/manifestDeps are injected, delegate to the real implementation.
+    if (this.spyOpts.packagingDeps !== undefined || this.spyOpts.manifestDeps !== undefined) {
+      return super.pack(intent);
+    }
     throw new NotImplementedError('pack');
   }
   override async deliver(intent: PersistedIntent): Promise<void> {
     this.record(intent, 'deliver');
     if (this.spyOpts.onDeliver) return this.spyOpts.onDeliver(intent);
+    // When deliveryDeps are injected, delegate to the real implementation.
+    if (this.spyOpts.deliveryDeps !== undefined) {
+      return super.deliver(intent);
+    }
     throw new NotImplementedError('deliver');
   }
 }
