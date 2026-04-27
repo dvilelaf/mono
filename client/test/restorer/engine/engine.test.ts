@@ -70,28 +70,32 @@ describe('RestorationEngine', () => {
     });
 
     it('does not fail when a concurrent claim already advanced DISCOVERED → CLAIMED', async () => {
-      await engine.observe(makeInput());
-      const registry = {
-        weAlreadyClaimed: vi.fn().mockResolvedValue(true),
-        claimJob: vi.fn(),
-        releaseClaim: vi.fn(),
-      } as unknown as ClaimRegistryClient;
-      const marketplace = {
-        claimRequest: vi.fn().mockImplementation(async () => {
-          engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-        }),
-      } satisfies MarketplaceClaimer;
-      engine = new TestEngine({
-        ...makeOpts(store),
-        claimDeps: { registryClient: registry, marketplaceClaimer: marketplace },
+      await withTempStore(async (store) => {
+        const registry = {
+          weAlreadyClaimed: vi.fn().mockResolvedValue(true),
+          claimJob: vi.fn(),
+          releaseClaim: vi.fn(),
+        } as unknown as ClaimRegistryClient;
+        let engineRef: ReturnType<typeof createStateMachineSpy>['engine'] | undefined;
+        const marketplace = {
+          claimRequest: vi.fn().mockImplementation(async () => {
+            engineRef!.testPersistence.transition('req-001', IntentState.CLAIMED);
+          }),
+        } satisfies MarketplaceClaimer;
+        const { engine } = createStateMachineSpy({
+          store,
+          claimDeps: { registryClient: registry, marketplaceClaimer: marketplace },
+        });
+        engineRef = engine;
+
+        await engine.observe(makeIntentInput({ requestId: 'req-001' }));
+        await engine.process('req-001');
+
+        const intent = engine.testPersistence.getByRequestId('req-001');
+        expect(intent!.state).toBe(IntentState.CLAIMED);
+        expect(intent!.failureReason).toBeNull();
+        expect(marketplace.claimRequest).toHaveBeenCalledOnce();
       });
-
-      await engine.process('req-001');
-
-      const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.CLAIMED);
-      expect(intent!.failureReason).toBeNull();
-      expect(marketplace.claimRequest).toHaveBeenCalledOnce();
     });
   });
 
