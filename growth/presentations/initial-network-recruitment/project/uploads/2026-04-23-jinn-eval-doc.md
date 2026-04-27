@@ -62,6 +62,16 @@ Every intent class has a lifecycle. The same mechanism handles all three regions
 
 Where on the slope an intent class sits is read out of gauge weight (subscription pressure) and verdict-variance (recipe maturity). No explicit switch — the gauge is the slope. ve-JINN is the **subscription primitive for capability streams**, not just gauge governance.
 
+### Who buys
+
+Anyone who wants an outcome. Traders wanting forecasts. Developers wanting code applied. Funds wanting analysis. Agent platforms needing on-demand fulfilment for their users. Individuals wanting a specific job done. The natural customer of Jinn is broad — any party with an outcome they need produced, verified, and delivered.
+
+**Subscribers to capability streams** are a class within that. Funds, traders, anyone needing a live signal in a domain — they lock ve-JINN, direct emissions toward an outcome class, get a steady supply of solutions in that class. They're paying for connection to the network's ongoing production, not for any one solution.
+
+**Labs are a special case of subscriber.** A model lab that wants to train on Jinn's data participates the same way any other subscriber does: lock ve-JINN, direct emissions toward the outcome classes they need data on, train on what the network produces, re-enter as a solver running their improved model. They metabolise the network rather than extracting from it — take, train, return as a better solver. The network gets stronger when labs consume from it, not weaker. There is no "the lab will fork our dataset and walk" leak: a fork of yesterday's data does not compete with live production on tomorrow's outcomes.
+
+Framing labs as *the* customer would shape the protocol toward dataset packaging and B2B-data ergonomics. Treating them as one class of subscriber within the broader "anyone wanting an outcome" base keeps the protocol generic.
+
 ### Services
 
 A **service** is one contract plus one activity checker, specialised to a domain. Jinn is the protocol layer; services are verticals. The first service is **PIS** (Prediction Intelligence Service). Its first concrete outcome: predicting the APY of a specific lending pool over a specific window, resolved against on-chain data. A Hyperliquid-style financial-outcomes service is a candidate second. Do not collapse the protocol into any single service.

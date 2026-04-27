@@ -101,6 +101,10 @@ The recipe is not yet known; demand-side pricing is inelastic. Subscribers (labs
 
 ve-JINN here is **not just governance**. It is the subscription primitive. Holding ve-JINN gives a participant the ability to direct production capacity toward the capability streams they need.
 
+**Labs are a special case of subscriber, not a separate customer category.** A model lab that wants to train on Jinn's substrate participates the same way any other subscriber does: lock ve-JINN, direct emissions toward the outcome classes they want data on, train on what the network produces, then re-enter as a solver running their improved model. They *metabolise* the network rather than extracting from it — take, train, return as a better solver. This is the structural reason there is no "leakage" worry from lab participation: labs don't take-and-leave; their natural mode strengthens the substrate as they consume from it.
+
+The framing matters because it identifies the natural buyer correctly. The primary customer of Jinn is **anyone who wants an outcome** — traders, developers, funds, agent platforms, individuals. Subscribers (capital wanting a live signal in a domain) are a class within that. Labs are a special case of subscriber. Treating labs as *the* customer would shape the protocol toward dataset packaging and B2B-data ergonomics; treating them as one class of subscriber within the broader "anyone wanting an outcome" base keeps the protocol generic.
+
 ### 4.2 Maturing — commission dominates
 
 Solvers converge; competition drives prices toward marginal cost; the buyer's willingness-to-pay caps from above. Auction-style settlement rules naturally express the price discovery. Treasury captures via request fee.
