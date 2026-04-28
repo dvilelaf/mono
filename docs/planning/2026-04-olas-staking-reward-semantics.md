@@ -252,40 +252,126 @@ admin operations and is unsuitable as a work signal.
 
 ## Reframed JinnClaimEmitter
 
+**Where weights live: on the JinnDistributor (Ethereum), not the
+emitter.** The emitter on Base passes the four raw counter values
+in the ClaimTicket event; the distributor on Ethereum applies
+Governor-mutable weights at mint time. Same Governor-control
+mechanism as `operatorRatio` / `daoRatio` — `setWeights(...)` is
+a Timelock-gated call. No emitter redeploy or proxy upgrade
+required to change weights.
+
 ```solidity
 contract JinnClaimEmitter {
     IJinnRouter public immutable router;
     IServiceRegistry public immutable serviceRegistry;
-    // Per-counter weights set at deploy (or Governor-mutable later)
-    uint256 public immutable wCreation;
-    uint256 public immutable wRestorationDelivery;
-    uint256 public immutable wEvaluationCreation;
-    uint256 public immutable wEvaluationDelivery;
 
     event ClaimTicket(
         uint256 indexed serviceId,
-        uint256 snapshot,
+        uint256 creationCount,
+        uint256 restorationDeliveryCount,
+        uint256 evaluationCreationCount,
+        uint256 evaluationDeliveryCount,
         address indexed multisig,
         address indexed claimer
     );
 
     function emitClaim(uint256 serviceId) external {
         address multisig = serviceRegistry.mapServices(serviceId).multisig;
-        uint256[] memory nonces = router.getMultisigNonces(multisig);
-        uint256 snapshot =
-            wCreation             * nonces[1]
-          + wRestorationDelivery  * nonces[2]
-          + wEvaluationCreation   * nonces[3]
-          + wEvaluationDelivery   * nonces[4];
-        emit ClaimTicket(serviceId, snapshot, multisig, msg.sender);
+        emit ClaimTicket(
+            serviceId,
+            router.creationCount(multisig),
+            router.restorationDeliveryCount(multisig),
+            router.evaluationCreationCount(multisig),
+            router.evaluationDeliveryCount(multisig),
+            multisig,
+            msg.sender
+        );
     }
 }
 ```
 
-Stateless. ~25 lines. No operational invariants. Works identically
+Stateless. ~30 lines. No operational invariants. Works identically
 in standard mode and self-bond mode. Counters are monotonic by
 construction; the JinnDistributor's accumulator math is
-unconditionally safe.
+unconditionally safe under any weight choice.
+
+### Note on JinnRouter V1 vs V2
+
+The Base Sepolia JinnRouter is V2 (proxy
+`0x7c502a4288C4f4279edbb363d692f530200e22dC`, impl
+`0x3f1F4420E040C6667CDae0F7b77B71692f698938`). V2 removed the
+bundled `getMultisigNonces` function (now lives in the activity
+checker — see `JinnRouterV2.sol` line 62), but the four counter
+mappings (`creationCount`, `restorationDeliveryCount`,
+`evaluationCreationCount`, `evaluationDeliveryCount`) remain
+public state in V2. Read each via the auto-generated getter —
+four reads instead of one bundled call, negligible gas cost.
+
+## JinnDistributor weight handling (Ethereum side)
+
+The distributor stores the per-channel weights as Governor-mutable
+state and computes the snapshot at `claim()` time:
+
+```solidity
+contract JinnDistributor {
+    // Already-locked Governor-mutable parameters
+    uint256 public operatorRatio;
+    uint256 public daoRatio;
+    // New: per-channel weights (initial value = 1 each per captain decision 2026-04-28)
+    uint256 public wCreation;
+    uint256 public wRestorationDelivery;
+    uint256 public wEvaluationCreation;
+    uint256 public wEvaluationDelivery;
+
+    // Per-service monotonic accumulators
+    mapping(uint256 => uint256) public totalClaimedOperator;
+    mapping(uint256 => uint256) public totalClaimedDao;
+
+    function claim(bytes calldata proof) external {
+        (uint256 serviceId,
+         uint256 creation,
+         uint256 restorationDelivery,
+         uint256 evaluationCreation,
+         uint256 evaluationDelivery,
+         address multisig) = messenger.verifyClaim(proof);
+
+        uint256 weighted =
+              wCreation             * creation
+            + wRestorationDelivery  * restorationDelivery
+            + wEvaluationCreation   * evaluationCreation
+            + wEvaluationDelivery   * evaluationDelivery;
+
+        uint256 entitledOperator = (weighted * operatorRatio) / 1e18;
+        uint256 entitledDao      = (weighted * daoRatio)      / 1e18;
+        // ... rest unchanged: clamp owed at zero if accumulator > entitled, mint, update accumulators.
+    }
+
+    function setWeights(uint256 wC, uint256 wR, uint256 wEC, uint256 wED) external {
+        // Timelock-gated, Governor-controlled.
+    }
+}
+```
+
+Weight changes via Governor proposal: `Timelock → JinnDistributor.setWeights(...)`.
+Effect on previously-claimed services: if a weight decreases, a
+service's "entitled" total can drop below its already-claimed
+total. The accumulator math clamps `owed` at zero — no new mint
+until counters catch up. Same shape as `operatorRatio` /
+`daoRatio` decreases under §1. Defensible behavior, documented.
+
+### Locked initial values
+
+Per captain decision 2026-04-28:
+
+| Param | Initial | Rationale |
+|---|---|---|
+| `wCreation` | 1 | Equal weight across channels — simplest start |
+| `wRestorationDelivery` | 1 | Equal weight |
+| `wEvaluationCreation` | 1 | Equal weight |
+| `wEvaluationDelivery` | 1 | Equal weight |
+| Counter [0] (Safe nonce) | excluded | Not protocol work; admin operations only |
+
+Effective at v0 testnet: `snapshot = creation + restorationDelivery + evaluationCreation + evaluationDelivery`. Governor adjusts later if specific channels deserve different rates.
 
 ## What this collapses
 
