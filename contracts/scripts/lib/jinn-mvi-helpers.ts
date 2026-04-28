@@ -177,7 +177,12 @@ export interface CanonicalMessengerWiring {
   expectedEmitter: string;
   /** topic0 of the `ClaimTicket` event. */
   claimTicketTopic: string;
+  /** Authorised FaultDisputeGame type (e.g., 0 = permissioned, 1 = permissionless Cannon). */
+  authorisedGameType: number;
 }
+
+/** Default authorised FaultDisputeGame type — permissioned Cannon (0) on Sepolia. */
+export const DEFAULT_AUTHORISED_GAME_TYPE = 0;
 
 /** Canonical `JinnClaimEmitter.ClaimTicket` event topic — locked at deploy. */
 export const CLAIM_TICKET_TOPIC: string = ethers.id(
@@ -198,10 +203,16 @@ export function resolveCanonicalMessengerWiring(
   if (!optimismPortal || !disputeGameFactory || !expectedEmitter) {
     return null;
   }
+  const rawGameType = env.JINN_MVI_AUTHORISED_GAME_TYPE;
+  const authorisedGameType =
+    rawGameType !== undefined && rawGameType !== ""
+      ? Number(rawGameType)
+      : DEFAULT_AUTHORISED_GAME_TYPE;
   return {
     optimismPortal,
     disputeGameFactory,
     expectedEmitter,
     claimTicketTopic: env.JINN_MVI_CLAIM_TICKET_TOPIC ?? CLAIM_TICKET_TOPIC,
+    authorisedGameType,
   };
 }

@@ -274,6 +274,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
           disputeGameFactory: fakeFactory.address,
           expectedEmitter: fakeEmitter.address,
           claimTicketTopic: CLAIM_TICKET_TOPIC,
+          authorisedGameType: 0,
         },
       };
 

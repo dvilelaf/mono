@@ -112,6 +112,7 @@ async function deployMessenger(
     params.wiring.disputeGameFactory,
     params.wiring.expectedEmitter,
     params.wiring.claimTicketTopic,
+    params.wiring.authorisedGameType,
   );
   await messenger.waitForDeployment();
   return { address: await messenger.getAddress(), mode: "canonical" };
@@ -311,6 +312,7 @@ async function main() {
     console.log(`  disputeGameFactory: ${messengerParams.wiring.disputeGameFactory}`);
     console.log(`  expectedEmitter:    ${messengerParams.wiring.expectedEmitter}`);
     console.log(`  claimTicketTopic:   ${messengerParams.wiring.claimTicketTopic}`);
+    console.log(`  authorisedGameType: ${messengerParams.wiring.authorisedGameType}`);
   }
   console.log(`Distributor initial:`);
   console.log(`  operatorRatio:        ${distributorConfig.operatorRatio.toString()}`);
