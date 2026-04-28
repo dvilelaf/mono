@@ -23,7 +23,7 @@ This threat model covers the bespoke v0 contracts that will be deployed for the 
 | `JinnDistributor` | `cargo/contracts/src/jinn/distribution/JinnDistributor.sol` | Sole minter; weighted-snapshot per-channel + operator/DAO ratio + monotonic per-service accumulators |
 | `JinnGovernor` | `cargo/contracts/src/jinn/governance/JinnGovernor.sol` | OZ Governor module composition (Settings, CountingSimple, Votes, QuorumFraction, TimelockControl) |
 | `JinnClaimEmitter` | `cargo/contracts/src/jinn/cross-chain/JinnClaimEmitter.sol` | Stateless event emitter on Base; reads V2 checker + V2 router + ServiceRegistry |
-| `CanonicalOpStackMessenger` | `cargo/contracts/src/jinn/cross-chain/CanonicalOpStackMessenger.sol` | Fault Proof verification skeleton; 8 `TODO(7x5)` markers gate full coverage |
+| `CanonicalOpStackMessenger` | `cargo/contracts/src/jinn/cross-chain/CanonicalOpStackMessenger.sol` | Fault Proof verification: DisputeGameFactory lookup + finality airgap, output-root preimage check, MPT receipt-inclusion proof, log decode. Closed via bd `jinn-mono-7x5`, commit `fa1948e2`. |
 | `MockMessenger` | `cargo/contracts/src/jinn/cross-chain/MockMessenger.sol` | Owner-controlled fixture; insecure by design; testnet/dev only |
 | `IClaimMessenger` | `cargo/contracts/src/jinn/interfaces/IClaimMessenger.sol` | Interface contract for messenger implementations |
 | `RestorationActivityCheckerV2` | `cargo/contracts/src/staking/RestorationActivityCheckerV2.sol` | V2 hardening — `verifiedCreations` mapping, C4 access control, C1 circular buffer |
@@ -210,22 +210,21 @@ The cross-chain surface is the most novel piece of v0. It is also the surface mo
 
 - **Attack**: an adversary submits a `JinnDistributor.claim(proof)` with a forged `proof` that doesn't correspond to any real Base log, but recovers attacker-favourable counters.
 - **Severity**: **Critical** at mainnet; **High** at testnet.
-- **Pre-conditions**:
-    - On mainnet (post-7x5): the adversary needs to either (a) win a dispute game with an invalid output root (extremely expensive — exceeds OP-Stack security model assumption), or (b) find a flaw in the receipt-MPT verification logic.
-    - On testnet today (with 8 `TODO(7x5)` markers stubbed): the deeper checks are not yet enforced. The contract is in skeleton form.
+- **Pre-conditions** (post bd `jinn-mono-7x5`, commit `fa1948e2`):
+    - The adversary must either (a) win a dispute game with an invalid output root and survive the airgap (extremely expensive — exceeds OP-Stack security model assumption), or (b) find a flaw in the OZ 5.6.1 RLP / TrieProof library that lets a forged MPT proof verify against a real `receiptRoot`, or (c) find a flaw in the messenger's log-decoding / topic-binding logic.
 - **Mitigation in v0**:
-    - **Surface-level checks even today**:
-        - `proof.length > 0` enforced.
+    - **Cryptographic checks now in place** (per `7x5`):
+        - `IDisputeGameFactory.gameAtIndex(...)` lookup; assert `game.status() == DEFENDER_WINS`, `block.timestamp >= game.resolvedAt() + airgap` (airgap = `IOptimismPortal2.proofMaturityDelaySeconds()`), `game.gameType() == authorisedGameType`.
+        - Output-root preimage: recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from the proof's `OutputRootProof` struct, compare to `game.rootClaim()`; bind `receiptRoot` to `latestBlockHash` via the L2 block-header RLP.
+        - Receipt MPT verification: `TrieProof.verify(receiptRoot, rlp(txIndex), receiptProof)` returns the proven RLP; RLP-decode and extract `logs[logIndex]` directly from the proven receipt (no externally-trusted log struct).
+    - **Surface-level checks**:
         - `log.emitter == expectedEmitter` enforced (rejects logs from the wrong contract).
         - `log.topic0 == claimTicketTopic` enforced (rejects logs for a different event).
         - `log.topicMultisig != bytes32(0)` enforced via `if (multisig == address(0)) revert ZeroMultisig()` in the distributor.
-        - `_todoVerifyDisputeGame` — placeholder requires `disputeGameId != bytes32(0)`.
-        - `_todoVerifyOutputRoot`, `_todoVerifyReceiptInclusion` — each require non-empty proofs and non-zero root.
-    - **The 8 `TODO(7x5)` markers are tracked under bd `jinn-mono-7x5`** for follow-up. Until then, the testnet deployment is gated to use `MockMessenger` (where the owner is the deployer multisig, which is trusted to set fixtures honestly).
-    - **`MockMessenger` is a deliberate, documented stand-in** for the period before 7x5 closes. It is NOT a security claim; it is a development tool. The threat model when MockMessenger is wired is: "the messenger owner can mint at will" — which is the same as "the multisig can mint at will", which is the same trust we already grant the multisig pre-handover.
+    - **MockMessenger remains available** for testnet burn-in convenience and CI; it is testnet/dev only by deploy convention, never deployed on mainnet. The choice between MockMessenger and CanonicalOpStackMessenger on testnet is operational (finality timing per R-1) rather than security.
 - **Residual risk**:
-    - Until 7x5 closes, the canonical messenger does **not** provide any cryptographic guarantee against forged proofs. **It must not be wired into a production distributor** until the TODOs land. Phase A6 handover is gated on this — the deploy runbook MUST verify `JinnDistributor.messenger() == MockMessenger.address` pre-handover, and a Governor proposal post-7x5 swaps it to `CanonicalOpStackMessenger`.
-    - Even after 7x5, the contract's security depends on the OP-Stack dispute-game security model. If the OP-Stack canonical bridge is itself compromised (e.g. a successful invalid-output-root attack), JINN is exposed. This is the same trust assumption every OP-Stack-native rollup-bridge contract makes.
+    - The canonical messenger's security depends on OP-Stack dispute-game soundness. If the OP-Stack canonical bridge is itself compromised (e.g. a successful invalid-output-root attack that survives the airgap), JINN is exposed. This is the same trust assumption every OP-Stack-native rollup-bridge contract makes.
+    - The OZ 5.6.1 `TrieProof.sol` and `RLP.sol` libraries are used as-is; a flaw in those would propagate into the messenger. The libraries are upstream-audited; v0 does not re-audit them but acknowledges the dependency.
 
 ### 4.2 Replay attacks
 
@@ -287,22 +286,25 @@ The cross-chain surface is the most novel piece of v0. It is also the surface mo
 
 - See §5 for the activity-checker and router-side attack surface. From the cross-chain perspective: the v0 cross-chain pipeline is only as honest as the counters it reads. Any inflation there propagates linearly into mints. Section 5 is therefore the substance of the cross-chain mint integrity story.
 
-### 4.7 The 8 `TODO(7x5)` markers — what is missing today
+### 4.7 Fault Proof verification — closed via bd `jinn-mono-7x5`
 
-For audit completeness, here is each `TODO(7x5)` marker in `CanonicalOpStackMessenger.sol` and what it gates:
+The original 8 `TODO(7x5)` markers in `CanonicalOpStackMessenger.sol` were closed by commit `fa1948e2`. Audit-completeness summary of what each marker gated and how it was closed:
 
-| Line | Marker | What it does today | What it must do post-7x5 |
-|---|---|---|---|
-| 144 | Dispute-game lookup | Calls `_todoVerifyDisputeGame(p.disputeGameId)` which only requires `disputeGameId != bytes32(0)`. | `IDisputeGameFactory(disputeGameFactory).gameAtIndex(...)`; assert `game.status() == DEFENDER_WINS`, `block.timestamp >= game.resolvedAt() + airgap`, `game.gameType() == authorisedFaultProofType`. |
-| 154 | Output-root proof | `_todoVerifyOutputRoot` only requires `outputRootProof.length > 0` and `receiptRoot != 0`. | Verify the Merkle proof that `receiptRoot` is committed to under the dispute game's L2 output root. The output root is `hash(stateRoot, withdrawalsRoot, blockHash, ...)`. |
-| 161 | Receipt MPT proof | `_todoVerifyReceiptInclusion` only requires non-empty proof + non-zero root + non-empty RLP. | MPT-verify `receiptRLP` under `receiptRoot`, RLP-decode the receipt, extract `logs[logIndex]`, and recompute the topics + data from the proven log rather than the externally-passed struct. |
-| 168 | Drop separate log struct | The contract today accepts both an `OpStackProof p` and a separately-passed `ClaimTicketLog log`, trusting the latter. | Once the receipt-derived log is verified, remove `log` from the proof envelope and recover all fields from `receiptRLP[logIndex]`. |
-| 196 | `_todoVerifyDisputeGame` body | `require(disputeGameId != bytes32(0), ...)` | See line 144. |
-| 197 | (note marker) | Comment marker only. | n/a |
-| 201 | `_todoVerifyOutputRoot` body | `require(outputRootProof.length > 0, ...) && require(receiptRoot != 0, ...)` | See line 154. |
-| 211 | `_todoVerifyReceiptInclusion` body | three non-empty / non-zero requires. | See line 161. |
+| Original marker | Closed by |
+|---|---|
+| Dispute-game lookup | `IDisputeGameFactory.gameAtIndex(...)`; assert `game.status() == DEFENDER_WINS`, `block.timestamp >= game.resolvedAt() + airgap` (airgap from `IOptimismPortal2.proofMaturityDelaySeconds()`), `game.gameType() == authorisedGameType` (constructor arg). |
+| Output-root proof | Recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from `OutputRootProof` struct, compare to dispute game's `rootClaim()`; bind `receiptRoot` to `latestBlockHash` via the L2 block-header RLP. |
+| Receipt MPT proof | OZ 5.6.1 `TrieProof.sol` MPT-verifies `receiptRLP` under `receiptRoot` (key = `rlp(transactionIndex)`); OZ 5.6.1 `RLP.sol` decodes the receipt + `logs[logIndex]`; topics/data are recovered from the proven log rather than from a trusted external field. |
+| Drop separate log struct | The previous `ClaimTicketLog` field was removed from the proof envelope. The proof now carries `(disputeGameId, outputRootProof, receiptRoot, receiptProof[], receiptRLP, logIndex, txIndex, expectedTxHash)` and the messenger recovers all log fields from `receiptRLP[logIndex]`. |
+| `_todoVerifyDisputeGame` / `_todoVerifyOutputRoot` / `_todoVerifyReceiptInclusion` body stubs | All three TODO bodies replaced with the real verification described above. |
 
-**Cumulative effect today**: the canonical messenger validates *the surface shape* of a proof — the right emitter, the right topic, non-empty fields. It does NOT validate that the proof corresponds to a real Base log. **It is therefore not a production messenger today.** This is why the v0 testnet is wired through `MockMessenger` and the canonical messenger is deferred until 7x5 lands. There is no scenario in which the canonical messenger should be wired into a production distributor before 7x5 closes; the deploy runbook mandates `MockMessenger` for the testnet burn-in.
+**Cumulative effect now**: the canonical messenger cryptographically validates that a `ClaimTicket` event was emitted by the configured `JinnClaimEmitter` on Base, in a transaction included in an L2 block whose hash is committed to by a finalised + airgap-elapsed dispute game on L1. The trust model collapses to OP-Stack canonical security plus the OZ 5.6.1 RLP / TrieProof libraries.
+
+**Operational consequence**: testnet burn-in (`r5z`) can use either messenger:
+- **Canonical mode** end-to-end exercises the real Fault Proof pipeline. Operator latency = Base Sepolia dispute-game finality + airgap. Pending `R-1` finality measurement to confirm this is practical for CI iteration.
+- **Mock mode** (`MockMessenger` with daemon as owner) bypasses cross-chain finality for fast iteration. The mock is a development convenience, not a security claim.
+
+The old "MockMessenger only until 7x5 lands" gate is now lifted. Either messenger is acceptable for the testnet burn-in window; the choice is operational (finality timing) rather than security. **Mainnet still requires the canonical messenger** — `MockMessenger` is testnet/dev only by deploy convention, never deployed on mainnet.
 
 The post-7x5 invariant suite (under follow-up to bd `jinn-mono-sz0`) must include:
 
