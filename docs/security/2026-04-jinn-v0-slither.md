@@ -133,12 +133,12 @@ Slither reported **zero high or medium-severity actionable findings** across the
 - **Triage — accepted (ERC-5805 / ERC-6372 conformance)**: the function name is mandated by ERC-6372. Renaming would make the contract non-conformant. The same naming-convention findings appear (and are accepted) in OZ's `Votes.CLOCK_MODE`, `IERC6372.CLOCK_MODE`, `IERC20Permit.DOMAIN_SEPARATOR`, etc.
 - **Action**: none.
 
-### F-8: `CanonicalOpStackMessenger.sol#223` redundant `logIndex;` statement
+### F-8: Legacy `CanonicalOpStackMessenger` redundant statement finding
 
 - **Detector**: `redundant-statements` (informational)
-- **Location**: `src/jinn/cross-chain/CanonicalOpStackMessenger.sol#223`
-- **Slither summary**: the bare `logIndex;` line is a no-op.
-- **Triage — accepted (intentional unused-parameter silencer)**: the function is a placeholder under the `TODO(7x5)` markers; the bare `logIndex;` suppresses the unused-parameter warning until the receipt-MPT logic ships under bd `jinn-mono-7x5`. Once that lands the parameter will be consumed for real.
+- **Location**: superseded by the storage-proof rewrite.
+- **Slither summary**: the previous receipt-proof placeholder contained a bare `logIndex;` no-op.
+- **Triage — closed by design change**: the canonical messenger no longer verifies receipt/log inclusion. It verifies the stored `claimSnapshotHashes[claimId]` slot, so the unused `logIndex` placeholder and receipt-MPT path were removed.
 - **Action**: none.
 
 ### Filtered out as `informational`
@@ -149,4 +149,4 @@ The `--filter-paths node_modules` filter removed a large volume of OZ-internal f
 
 The v0 audit surface contains **no high- or medium-severity Slither findings**. All low-severity findings are accepted as documented design (CEI ordering for distributor, post-call sequencing where the request id is the marketplace's return value, intentional zero-address sentinel for disabled minter, intentional informational-only function-naming for ERC-6372 / proxy slot reservation).
 
-The next-phase invariant work (under follow-up to bd `jinn-mono-sz0`) should focus on dynamic properties Slither cannot see — accumulator monotonicity, mint-equals-delta, statelessness of `verifyClaim`, and post-7x5 dispute-game finality. The Foundry stubs added in this commit are wired and ready for that authoring pass.
+The next-phase invariant work (under follow-up to bd `jinn-mono-sz0`) should focus on dynamic properties Slither cannot see — accumulator monotonicity, mint-equals-delta, statelessness of `verifyClaim`, and post-rewrite dispute-game finality/storage-proof behavior. The Foundry stubs added in this commit are wired and ready for that authoring pass.

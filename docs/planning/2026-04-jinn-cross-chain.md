@@ -2,7 +2,7 @@
 
 > Status: **Locked 2026-04-28**
 > Date: 2026-04-28
-> Branch: `jinn-mono/jinn-mono-1bo`
+> Branch: land via PR from Azul-compatible cross-chain work (fork/worktrees vary; treat Git history as source of truth)
 > Phase A2 of the Jinn v0 MVI implementation plan
 > bd task: `jinn-mono-l6b`
 > Reference: `docs/planning/2026-04-jinn-mvi-on-olas.md` (proposal, on `main`) +
@@ -51,16 +51,20 @@ everything the Ethereum-side distributor needs.
 
 ```solidity
 event ClaimTicket(
+    uint256 indexed claimId,
     uint256 indexed serviceId,
     uint256 verifiedCreations,
     uint256 noveltyWeightedRestorationDeliveries,
     uint256 evaluationDeliveryCount,
     address indexed multisig,
-    address indexed claimer
+    address claimer
 );
 ```
 
 Fields:
+- `claimId` — monotonically increasing snapshot id assigned by
+  `JinnClaimEmitter`; used as the canonical proof identity and as
+  the `MockMessenger` fixture key.
 - `serviceId` — OLAS service id; indexed for log filtering.
 - `verifiedCreations` — current value of
   `checker.verifiedCreations(multisig)` at emit time.
@@ -76,8 +80,11 @@ Fields:
 The values are 256-bit unsigned. Under B-multi the distributor
 applies channel weights (`wCreation`, `wRestorationDelivery`,
 `wEvaluationDelivery`) to the snapshot at mint time. The event
-itself is unweighted — the source of truth for what was measured
-on Base at the time of emission.
+itself is unweighted and discovery-oriented. The canonical proof
+source is the stored snapshot hash written in the same transaction:
+`claimSnapshotHashes[claimId] = keccak256(abi.encode(claimId,
+serviceId, verifiedCreations, noveltyWeightedRestorationDeliveries,
+evaluationDeliveryCount, multisig))`.
 
 ## Contract: `JinnClaimEmitter`
 
@@ -88,14 +95,17 @@ contract JinnClaimEmitter {
     IRestorationActivityCheckerV2 public immutable checker;
     IJinnRouterV2 public immutable router;
     IServiceRegistry public immutable serviceRegistry;
+    uint256 public nextClaimId;
+    mapping(uint256 => bytes32) public claimSnapshotHashes;
 
     event ClaimTicket(
+        uint256 indexed claimId,
         uint256 indexed serviceId,
         uint256 verifiedCreations,
         uint256 noveltyWeightedRestorationDeliveries,
         uint256 evaluationDeliveryCount,
         address indexed multisig,
-        address indexed claimer
+        address claimer
     );
 
     constructor(address _checker, address _router, address _registry) {
@@ -104,14 +114,23 @@ contract JinnClaimEmitter {
         serviceRegistry = IServiceRegistry(_registry);
     }
 
-    function emitClaim(uint256 serviceId) external {
+    function emitClaim(uint256 serviceId) external returns (uint256 claimId) {
         address multisig = serviceRegistry.mapServices(serviceId).multisig;
         require(multisig != address(0), "JinnClaimEmitter: unknown service");
+        claimId = nextClaimId + 1;
+        nextClaimId = claimId;
+        uint256 verifiedCreations = checker.verifiedCreations(multisig);
+        uint256 novelty = checker.noveltyWeightedCounts(multisig);
+        uint256 evalDelivery = router.evaluationDeliveryCount(multisig);
+        claimSnapshotHashes[claimId] = keccak256(abi.encode(
+            claimId, serviceId, verifiedCreations, novelty, evalDelivery, multisig
+        ));
         emit ClaimTicket(
+            claimId,
             serviceId,
-            checker.verifiedCreations(multisig),
-            checker.noveltyWeightedCounts(multisig),
-            router.evaluationDeliveryCount(multisig),
+            verifiedCreations,
+            novelty,
+            evalDelivery,
             multisig,
             msg.sender
         );
@@ -120,7 +139,8 @@ contract JinnClaimEmitter {
 ```
 
 Properties:
-- **Stateless.** No storage, no admin, no upgrade path needed.
+- **Append-only snapshot storage.** No admin or upgrade path; each
+  call writes one immutable snapshot hash keyed by `claimId`.
 - **Permissionless.** Anyone can call `emitClaim` for any
   serviceId. Spamming the event costs the caller gas; doesn't
   affect the on-chain values being read.
@@ -178,43 +198,50 @@ flow.
 
 ### Proof shape
 
-The proof contains a Base-chain transaction receipt + the canonical
-output-root commitment chain to L1, plus the FaultDisputeGame
-reference for finality.
+The proof contains a Base-chain storage proof for
+`JinnClaimEmitter.claimSnapshotHashes[claimId]` plus the canonical
+output-root commitment chain to L1 and the dispute-game reference
+for finality. Events are used for discovery; L1 validates the stored
+snapshot hash against the finalized L2 state root.
 
 Concrete `bytes proof` ABI:
 ```
 (
-    bytes32 disputeGameId,           // Identifier for the resolved game
-    bytes outputRootProof,           // Merkle proof to the L2 output root
-    bytes32 receiptRoot,             // L2 block's receipt root
-    bytes receiptProof,              // Merkle-Patricia proof of the receipt
-    bytes receiptRLP,                // RLP-encoded receipt
-    uint256 logIndex,                // Index of the ClaimTicket log in the receipt
-    bytes32 expectedTxHash           // L2 tx that emitted the event
+    bytes32 disputeGameId,
+    bytes outputRootProof,           // version, stateRoot, msgPasserRoot, latestBlockHash
+    bytes[] accountProof,            // emitter account proof under stateRoot
+    bytes[] storageProof,            // mapping-slot proof under emitter storageRoot
+    uint256 claimId,
+    uint256 serviceId,
+    uint256 verifiedCreations,
+    uint256 noveltyWeightedRestorationDeliveries,
+    uint256 evaluationDeliveryCount,
+    address multisig
 )
 ```
 
-This format is exactly what viem's `op-stack` actions can
-construct. The messenger validates each piece in order:
+The messenger validates each piece in order:
 
 1. **DisputeGame is resolved + finalized.** Look up
-   `DisputeGameFactory.gameAtIndex(...)` → `FaultDisputeGame`.
-   Confirm the game's resolution status is `DEFENDER_WINS` and the
-   finality window has elapsed. Reject otherwise.
-2. **Output root matches.** The dispute game commits to a specific
-   L2 output root. Validate `outputRootProof` against it.
-3. **Receipt is included in the L2 block.** Validate `receiptProof`
-   against `receiptRoot` (which itself is committed via the output
-   root). Decode `receiptRLP`.
-4. **The receipt contains the ClaimTicket log.** Look up
-   `receipt.logs[logIndex]`. Verify `topic[0] == ClaimTicket
-   selector` and the emitter address matches the deployed
-   `JinnClaimEmitter` on Base.
-5. **Decode the log.** Extract `serviceId`, `verifiedCreations`,
-   `noveltyWeightedRestorationDeliveries`,
-   `evaluationDeliveryCount`, `multisig`, `claimer`.
-6. **Return** the recovered values.
+   `DisputeGameFactory.gameAtIndex(...)` and the generic game proxy.
+   Confirm factory/proxy game-type agreement,
+   `wasRespectedGameTypeWhenCreated()` or current portal-respected
+   type, `status() == DEFENDER_WINS`, and both portal finality delays.
+2. **Output root matches.** Recompute the OP output root from
+   `(version, stateRoot, messagePasserStorageRoot, latestBlockHash)`
+   and compare to the game's `rootClaim()`.
+3. **Emitter account is included in state.** Validate `accountProof`
+   for the deployed `JinnClaimEmitter` and extract its `storageRoot`.
+4. **Snapshot slot is included in storage.** Validate `storageProof`
+   for `keccak256(abi.encode(claimId, uint256(1)))`, the storage slot
+   of `claimSnapshotHashes[claimId]`.
+5. **Snapshot hash matches.** Recompute
+   `keccak256(abi.encode(claimId, serviceId, verifiedCreations,
+   noveltyWeightedRestorationDeliveries, evaluationDeliveryCount,
+   multisig))` and compare to the proven storage value.
+6. **Return** `(serviceId, verifiedCreations,
+   noveltyWeightedRestorationDeliveries, evaluationDeliveryCount,
+   multisig)`.
 
 If any step fails, the messenger reverts. No state writes; no
 seen-proof registry. The same proof can be submitted multiple
@@ -227,7 +254,8 @@ times — the JinnDistributor handles replay via accumulators.
 - Expected JinnClaimEmitter address on Base (so we reject logs
   emitted by some impostor contract that happens to use the same
   event signature).
-- Expected `ClaimTicket` topic[0] (event signature hash).
+- Expected `ClaimTicket` topic[0] (event signature hash; deployment
+  metadata for canary tooling).
 
 ### Trust assumptions
 
@@ -238,10 +266,12 @@ times — the JinnDistributor handles replay via accumulators.
 
 ### Latency
 
-**Mainnet:** ~7-day Fault Proof challenge period.
-**Base Sepolia:** TBD — see "Open research items" below. Likely
-seconds to hours per Optimism Sepolia precedent, but Base Sepolia's
-specific config has not been measured.
+**Mainnet today:** current Base mainnet uses legacy gameType `0`
+with the standard challenge/finality window.
+**Base Sepolia / Azul preview:** current Base Sepolia uses
+AggregateVerifier gameType `621`. R-1 measured the observed slow
+path at ~7 days because sampled games had one proof; the Azul fast
+path can be ~1 day when both TEE and ZK proofs are present.
 
 ## Contract: `MockMessenger` (testnet/dev only)
 
@@ -253,6 +283,7 @@ contract MockMessenger is IClaimMessenger {
     address public owner;
 
     struct Fixture {
+        uint256 serviceId;
         uint256 verifiedCreations;
         uint256 noveltyWeightedRestorationDeliveries;
         uint256 evaluationDeliveryCount;
@@ -264,9 +295,9 @@ contract MockMessenger is IClaimMessenger {
         owner = _owner;
     }
 
-    function setFixture(uint256 serviceId, Fixture calldata f) external {
+    function setFixture(uint256 claimId, Fixture calldata f) external {
         require(msg.sender == owner, "MockMessenger: not owner");
-        fixtures[serviceId] = f;
+        fixtures[claimId] = f;
     }
 
     function verifyClaim(bytes calldata proof)
@@ -278,11 +309,11 @@ contract MockMessenger is IClaimMessenger {
             address multisig
         )
     {
-        serviceId = abi.decode(proof, (uint256));
-        Fixture memory f = fixtures[serviceId];
+        uint256 claimId = abi.decode(proof, (uint256));
+        Fixture memory f = fixtures[claimId];
         require(f.multisig != address(0), "MockMessenger: no fixture");
         return (
-            serviceId,
+            f.serviceId,
             f.verifiedCreations,
             f.noveltyWeightedRestorationDeliveries,
             f.evaluationDeliveryCount,
@@ -299,12 +330,13 @@ Properties:
 - **Permissioned setFixture.** Only the deployer (or a
   test-fixture address) writes fixtures. `verifyClaim` is read-only
   for anyone.
-- **Permanent or testnet-only?** Pending finality research. If
-  Base Sepolia's challenge period is short enough for canonical
-  burn-in, MockMessenger remains a CI / dev-only convenience. If
-  too long, MockMessenger becomes the active messenger on Sepolia
-  during burn-in, with at least one canonical-path test before
-  Phase D completes.
+- **Fast mirror of canonical snapshot identity.** Fixtures are keyed
+  by `claimId`, not `serviceId`, so burn-in can exercise multiple
+  snapshots per service while skipping only the canonical wait.
+- **Testnet burn-in role.** R-1 found canonical Base Sepolia
+  finality is too slow for iteration, so MockMessenger is the
+  active Sepolia burn-in messenger. Canonical Base Sepolia is still
+  required as a verifier-only canary before Phase D completes.
 
 ## Operator UX (two-tx flow)
 
@@ -321,13 +353,16 @@ End-to-end:
    `JinnClaimEmitter.emitClaim(serviceId)` on Base / Base Sepolia.
    Snapshot is recorded in the event.
 
-3. **Daemon waits for L2→L1 finality.** The dispute game must
-   resolve and the challenge period must elapse. Mainnet: ~7
-   days. Testnet: TBD.
+3. **Daemon waits for L2→L1 finality in canonical mode.** The
+   dispute game must resolve and the portal finality windows must
+   elapse. Current Base Sepolia/Azul observations are ~7 days on
+   the slow path and potentially ~1 day when both proof types are
+   available. Mock mode skips this wait but uses the same `claimId`
+   snapshot identity.
 
-4. **Daemon constructs proof.** Once the snapshot's L2 block is
-   finalized, the daemon (via viem's `op-stack` helpers) builds
-   the `bytes proof` blob.
+4. **Daemon constructs proof.** Once the snapshot's stored hash is
+   covered by a finalized output root, the daemon builds the
+   account/storage proof for `claimSnapshotHashes[claimId]`.
 
 5. **Daemon submits proof on Sepolia.** Calls
    `JinnDistributor.claim(proof)`. Distributor calls
@@ -401,59 +436,76 @@ Different proof bytes, same recovered tuple. Idempotent.
 
 ## Open research items
 
-### R-1 — Measure Base Sepolia L2→L1 finality
+### R-1 — Measure Base Sepolia L2→L1 finality — Resolved
 
-Concrete data needed: when a transaction is included in a Base
-Sepolia block, how long until its corresponding output root is
-committed to Sepolia AND the FaultDisputeGame resolves AND the
-challenge period elapses?
+Result: [`2026-04-base-sepolia-finality.md`](./2026-04-base-sepolia-finality.md).
+Base Sepolia currently uses AggregateVerifier gameType `621`
+(Azul preview). Observed canonical finality is ~7 days on the
+single-proof slow path, with a possible ~1 day fast path when both
+TEE and ZK proofs are present. Therefore MockMessenger is the
+active `r5z` burn-in messenger, and canonical Base Sepolia is a
+verifier-only canary.
 
-Method:
-1. Submit a no-op transaction on Base Sepolia.
-2. Watch for the next output root submission on Sepolia
-   OptimismPortal2.
-3. Watch for the FaultDisputeGame creation + resolution.
-4. Measure total time from L2 inclusion to L1 finality.
+### R-2 — Verify viem op-stack/storage-proof action coverage for Azul — Resolved
 
-Repeat over a few periods to characterize variance. Document in
-a new note: `cargo/docs/planning/2026-04-base-sepolia-finality.md`.
+Result:
+[`2026-04-azul-storage-proof-tooling.md`](./2026-04-azul-storage-proof-tooling.md).
 
-This research determines:
-- Whether canonical OP-Stack messaging is practical for testnet
-  burn-in (Phase D `r5z`).
-- Whether MockMessenger's role in v0 is "CI / dev convenience
-  only" or "active testnet messenger during burn-in."
+The current client stack has the primitives needed for the
+Azul-compatible canary:
 
-### R-2 — Verify viem op-stack action coverage for Fault Proof
+- `viem/op-stack#getGames` finds Base Sepolia dispute games.
+- `DisputeGameFactory.gameAtIndex(index)` must be read directly to
+  recover the game proxy because viem does not return it.
+- Generic AggregateVerifier-compatible selectors are available on the
+  proxy: `gameType`, `status`, `resolvedAt`, `rootClaim`,
+  `wasRespectedGameTypeWhenCreated`, `l2SequenceNumber`, and
+  `proofCount`.
+- Core viem `getProof` can request account/storage proofs for
+  `JinnClaimEmitter.claimSnapshotHashes[claimId]`.
 
-Confirm that viem's `viem/op-stack` exposes:
-- `getProof` / `buildProveWithdrawal` for OptimismPortal2.
-- DisputeGame resolution + readiness checks.
-- Receipt + event log extraction in the proof format we need.
+The gap is not contract compatibility; it is daemon durability.
+Viem's stock OP withdrawal actions are withdrawal-hash oriented, so
+the daemon still needs a custom builder for arbitrary emitter storage
+proofs. The builder must use a reliable proof/archive Base Sepolia
+RPC for historical `eth_getProof`; the public Base Sepolia RPC
+failed the game-block proof probe on 2026-04-28, while the main
+worktree Tenderly endpoint served one sampled game-block proof but
+failed another. Treat proof RPC reliability as part of the canonical
+canary gate.
 
-If gaps exist, fill them with hand-rolled proof construction in
-the daemon (per `7x5` task scope).
+### R-3 — Confirm Phase 0 / Phase 1a JinnRouter on Base Sepolia exposes evaluationDeliveryCount as public state — Resolved
 
-### R-3 — Confirm Phase 0 / Phase 1a JinnRouter on Base Sepolia exposes evaluationDeliveryCount as public state
+Result:
+`cd client && JINN_LIVE_RPC_TESTS=1 yarn test test/live/r3-router-surface.live.test.ts`.
 
-Earlier reads of `JinnRouterV2.sol` show `evaluationDeliveryCount`
-is public state with auto-generated getter. Confirm against the
-deployed implementation at
-`0x3f1F4420E040C6667CDae0F7b77B71692f698938` via Blockscout to
-ensure the storage layout hasn't changed.
+The deployed Base Sepolia router surface matches the emitter
+assumption:
+
+- Implementation:
+  `0x3f1F4420E040C6667CDae0F7b77B71692f698938`.
+- Proxy: `0x7c502a4288C4f4279edbb363d692f530200e22dC`.
+- The proxy implementation slot resolves to the expected
+  implementation address.
+- Both implementation and proxy expose
+  `evaluationDeliveryCount(address) view returns (uint256)`.
+
+Therefore `JinnClaimEmitter` can safely read
+`router.evaluationDeliveryCount(multisig)` on current Base Sepolia.
 
 ## Test strategy
 
 ### Unit tests (Hardhat, in `cargo/contracts/test/jinn/cross-chain/`)
 
-- **JinnClaimEmitter.test.ts** — emit event with correct values
-  given mocked checker + router; revert on unknown serviceId.
-- **MockMessenger.test.ts** — setFixture/verifyClaim round-trip;
-  access control on setFixture; revert when no fixture set.
-- **CanonicalOpStackMessenger.test.ts** — proof validation against
-  fixture proofs (mock OptimismPortal2 + DisputeGameFactory);
-  reject malformed proofs; reject not-yet-resolved games; reject
-  proofs from wrong emitter address.
+- **JinnClaimEmitter.test.ts** — emit `claimId`, store the correct
+  snapshot hash, increment monotonically, revert on unknown
+  serviceId.
+- **MockMessenger.test.ts** — setFixture/verifyClaim by `claimId`;
+  multiple claims per service; access control; missing fixture.
+- **CanonicalOpStackMessenger.test.ts** — storage proof validation
+  against mock OptimismPortal2 + DisputeGameFactory; accept gameType
+  `0` and `621`; reject unresolved/immature/unrespected games and
+  bad account/storage proofs.
 - **Distributor + Messenger integration.test.ts** — full mint flow
   with MockMessenger; weight changes apply correctly; replay
   protection works; messenger swap preserves accumulator state.
@@ -469,12 +521,15 @@ ensure the storage layout hasn't changed.
 
 ### Burn-in (Phase D, in `cargo/docs/runbooks/`)
 
-- Real Base Sepolia → Sepolia end-to-end via canonical messenger,
-  conditional on R-1 finality being practical.
-- MockMessenger end-to-end if canonical isn't practical during
-  burn-in window.
-- At least one canonical-path test required before Phase D
-  completes.
+- MockMessenger end-to-end is required for active Sepolia burn-in.
+- Automated daemon ticks use **`jinnMessengerMode=mock`** only; scheduled
+  `runOnce` skips **`canonical`** so operators do not spam `emitClaim`
+  while waiting days for OP dispute-game finality.
+- One Base Sepolia canonical verifier-only canary is required before
+  Phase D completes: after finality, run
+  `tsx scripts/verify-canonical-canary.ts` from `client/` or call
+  `CanonicalOpStackMessenger.verifyClaim` via `eth_call` manually.
+  Do not swap the active distributor messenger during burn-in.
 
 ## Effects on the implementation plan
 
@@ -489,24 +544,25 @@ ensure the storage layout hasn't changed.
   counter + `creators` mapping needed for ε. Unchanged from the
   bd description; this spec just confirms the surface area.
 - **`7x5`** daemon claim-loop + L1 proof construction: implements
-  the canonical proof construction against OP-Stack tooling (viem)
-  + the MockMessenger fallback path. Driven by `jinnMessengerMode`
+  the storage-proof canonical path against OP-Stack tooling (viem)
+  + the MockMessenger fast path. Driven by `jinnMessengerMode`
   config flag.
-- **`r5z`** testnet deploy + burn-in: includes R-1 finality
-  measurement as a Phase D acceptance-criteria item.
+- **`r5z`** testnet deploy + burn-in: active burn-in uses
+  MockMessenger; canonical Base Sepolia runs as a verifier-only
+  canary after finality.
 
 ## Decisions table
 
 | # | Decision | Status |
 |---|---|---|
-| 1 | ClaimTicket event shape (3 counters + multisig + claimer + serviceId) | Locked |
-| 2 | JinnClaimEmitter is stateless ~30 lines, permissionless | Locked |
+| 1 | ClaimTicket event shape (claimId + 3 counters + multisig + claimer + serviceId) | Locked |
+| 2 | JinnClaimEmitter stores snapshot hashes keyed by claimId, permissionless | Locked |
 | 3 | IClaimMessenger interface signature (returns 5-tuple, stateless) | Locked |
-| 4 | CanonicalOpStackMessenger validates against OptimismPortal2 + Fault Proof | Locked |
-| 5 | MockMessenger included in v0 (testnet/dev only); lifecycle pending R-1 | Locked |
+| 4 | CanonicalOpStackMessenger validates storage proofs against OptimismPortal2 + respected dispute games | Locked |
+| 5 | MockMessenger is active testnet burn-in path, keyed by claimId | Locked |
 | 6 | Daemon submits both txs by default; redeem permissionless | Locked |
 | 7 | Replay protection lives in JinnDistributor accumulators only | Locked |
 | 8 | Future β2/β3 messenger swaps via Governor proposal; same interface | Locked |
-| R-1 | Measure Base Sepolia L2→L1 finality | Open research |
-| R-2 | Verify viem op-stack coverage for Fault Proof | Open research |
-| R-3 | Confirm V2 router public state on Base Sepolia | Open research |
+| R-1 | Measure Base Sepolia L2→L1 finality | Resolved |
+| R-2 | Verify viem op-stack/storage-proof coverage for Azul | Resolved |
+| R-3 | Confirm V2 router public state on Base Sepolia | Resolved |

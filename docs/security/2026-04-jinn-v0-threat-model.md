@@ -23,7 +23,7 @@ This threat model covers the bespoke v0 contracts that will be deployed for the 
 | `JinnDistributor` | `cargo/contracts/src/jinn/distribution/JinnDistributor.sol` | Sole minter; weighted-snapshot per-channel + operator/DAO ratio + monotonic per-service accumulators |
 | `JinnGovernor` | `cargo/contracts/src/jinn/governance/JinnGovernor.sol` | OZ Governor module composition (Settings, CountingSimple, Votes, QuorumFraction, TimelockControl) |
 | `JinnClaimEmitter` | `cargo/contracts/src/jinn/cross-chain/JinnClaimEmitter.sol` | Stateless event emitter on Base; reads V2 checker + V2 router + ServiceRegistry |
-| `CanonicalOpStackMessenger` | `cargo/contracts/src/jinn/cross-chain/CanonicalOpStackMessenger.sol` | Fault Proof verification: DisputeGameFactory lookup + finality airgap, output-root preimage check, MPT receipt-inclusion proof, log decode. Closed via bd `jinn-mono-7x5`, commit `fa1948e2`. |
+| `CanonicalOpStackMessenger` | `cargo/contracts/src/jinn/cross-chain/CanonicalOpStackMessenger.sol` | OP-Stack storage-proof verification: DisputeGameFactory lookup + finality airgap, output-root preimage check, emitter account proof, `claimSnapshotHashes[claimId]` storage proof, and snapshot tuple binding. |
 | `MockMessenger` | `cargo/contracts/src/jinn/cross-chain/MockMessenger.sol` | Owner-controlled fixture; insecure by design; testnet/dev only |
 | `IClaimMessenger` | `cargo/contracts/src/jinn/interfaces/IClaimMessenger.sol` | Interface contract for messenger implementations |
 | `RestorationActivityCheckerV2` | `cargo/contracts/src/staking/RestorationActivityCheckerV2.sol` | V2 hardening — `verifiedCreations` mapping, C4 access control, C1 circular buffer |
@@ -92,7 +92,7 @@ For each attack we record:
                           │ │ Messenger  │ (testnet)  │ │
                           │ └────────────┴────────────┘ │
                           └────────────┬────────────────┘
-                                       │ derives claim from L2 log
+                                       │ verifies OP storage snapshot vs dispute game
                                        ▼
                           ┌─────────────────────────────┐
                           │   JinnClaimEmitter (Base)   │
@@ -208,20 +208,21 @@ The cross-chain surface is the most novel piece of v0. It is also the surface mo
 
 ### 4.1 Forged proofs
 
-- **Attack**: an adversary submits a `JinnDistributor.claim(proof)` with a forged `proof` that doesn't correspond to any real Base log, but recovers attacker-favourable counters.
+- **Attack**: an adversary submits a `JinnDistributor.claim(proof)` with a forged `proof` that doesn't correspond to any real Base snapshot, but recovers attacker-favourable counters.
 - **Severity**: **Critical** at mainnet; **High** at testnet.
 - **Pre-conditions** (post bd `jinn-mono-7x5`, commit `fa1948e2`):
-    - The adversary must either (a) win a dispute game with an invalid output root and survive the airgap (extremely expensive — exceeds OP-Stack security model assumption), or (b) find a flaw in the OZ 5.6.1 RLP / TrieProof library that lets a forged MPT proof verify against a real `receiptRoot`, or (c) find a flaw in the messenger's log-decoding / topic-binding logic.
+    - The adversary must either (a) win a dispute game with an invalid output root and survive the portal finality windows (extremely expensive — exceeds OP-Stack security model assumption), or (b) find a flaw in the OZ 5.6.1 RLP / TrieProof library that lets a forged account/storage MPT proof verify against a real L2 state root, or (c) find a flaw in the messenger's snapshot-hash binding logic.
 - **Mitigation in v0**:
     - **Cryptographic checks now in place** (per `7x5`):
-        - `IDisputeGameFactory.gameAtIndex(...)` lookup; assert `game.status() == DEFENDER_WINS`, `block.timestamp >= game.resolvedAt() + airgap` (airgap = `IOptimismPortal2.proofMaturityDelaySeconds()`), `game.gameType() == authorisedGameType`.
-        - Output-root preimage: recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from the proof's `OutputRootProof` struct, compare to `game.rootClaim()`; bind `receiptRoot` to `latestBlockHash` via the L2 block-header RLP.
-        - Receipt MPT verification: `TrieProof.verify(receiptRoot, rlp(txIndex), receiptProof)` returns the proven RLP; RLP-decode and extract `logs[logIndex]` directly from the proven receipt (no externally-trusted log struct).
+        - `IDisputeGameFactory.gameAtIndex(...)` lookup; assert factory/proxy game-type agreement, `game.wasRespectedGameTypeWhenCreated()` or current portal-respected type, `game.status() == DEFENDER_WINS`, and elapsed `proofMaturityDelaySeconds()` plus `disputeGameFinalityDelaySeconds()`.
+        - Output-root preimage: recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from the proof's `OutputRootProof` struct and compare to `game.rootClaim()`.
+        - Account/storage MPT verification: prove the configured `JinnClaimEmitter` account under `stateRoot`, extract its `storageRoot`, then prove `claimSnapshotHashes[claimId]`.
+        - Snapshot binding: recompute `keccak256(abi.encode(claimId, serviceId, verifiedCreations, noveltyWeightedRestorationDeliveries, evaluationDeliveryCount, multisig))` and compare to the proven storage value.
     - **Surface-level checks**:
-        - `log.emitter == expectedEmitter` enforced (rejects logs from the wrong contract).
-        - `log.topic0 == claimTicketTopic` enforced (rejects logs for a different event).
-        - `log.topicMultisig != bytes32(0)` enforced via `if (multisig == address(0)) revert ZeroMultisig()` in the distributor.
-    - **MockMessenger remains available** for testnet burn-in convenience and CI; it is testnet/dev only by deploy convention, never deployed on mainnet. The choice between MockMessenger and CanonicalOpStackMessenger on testnet is operational (finality timing per R-1) rather than security.
+        - Account proof is keyed to `expectedEmitter` (rejects storage proofs from the wrong contract).
+        - `claimTicketTopic` remains pinned deploy metadata for event discovery/canary tooling.
+        - `multisig != address(0)` enforced via `if (multisig == address(0)) revert ZeroMultisig()` in the distributor.
+    - **MockMessenger remains available** for testnet burn-in convenience and CI; it is testnet/dev only by deploy convention, never deployed on mainnet. Fixtures are keyed by `claimId` and mirror the same tuple the canonical messenger returns. The choice between MockMessenger and CanonicalOpStackMessenger on testnet is operational (finality timing per R-1) rather than security.
 - **Residual risk**:
     - The canonical messenger's security depends on OP-Stack dispute-game soundness. If the OP-Stack canonical bridge is itself compromised (e.g. a successful invalid-output-root attack that survives the airgap), JINN is exposed. This is the same trust assumption every OP-Stack-native rollup-bridge contract makes.
     - The OZ 5.6.1 `TrieProof.sol` and `RLP.sol` libraries are used as-is; a flaw in those would propagate into the messenger. The libraries are upstream-audited; v0 does not re-audit them but acknowledges the dependency.
@@ -251,7 +252,7 @@ The cross-chain surface is the most novel piece of v0. It is also the surface mo
 - **Severity**: **High** at mainnet; **Medium** at testnet.
 - **Pre-conditions**:
     - For `MockMessenger`: attacker controls the messenger owner (multisig pre-handover, Timelock post-handover).
-    - For `CanonicalOpStackMessenger`: attacker has found a bug in the Fault Proof verification logic post-7x5, OR the canonical OP-Stack contracts have been compromised upstream.
+    - For `CanonicalOpStackMessenger`: attacker has found a bug in the OP-Stack storage-proof / dispute-game verification logic post-7x5, OR the canonical OP-Stack contracts have been compromised upstream.
 - **Mitigation in v0**:
     - **Governor-driven messenger swap** is the recovery path. `setMessenger(newMessenger)` is one Governor proposal away. The 48h timelock delay applies; during that window, no further mints happen if the attacker is detected and the operator multisig pauses by setting weights to zero (a faster proposal).
     - **Weights-to-zero is the immediate mitigation.** `setWeights(0, 0, 0)` (or `setRatios(0, 0)`) halts future mints from any messenger. This is a one-line proposal and can be queued in parallel with the messenger swap.
@@ -286,29 +287,27 @@ The cross-chain surface is the most novel piece of v0. It is also the surface mo
 
 - See §5 for the activity-checker and router-side attack surface. From the cross-chain perspective: the v0 cross-chain pipeline is only as honest as the counters it reads. Any inflation there propagates linearly into mints. Section 5 is therefore the substance of the cross-chain mint integrity story.
 
-### 4.7 Fault Proof verification — closed via bd `jinn-mono-7x5`
+### 4.7 Canonical storage-proof verification
 
-The original 8 `TODO(7x5)` markers in `CanonicalOpStackMessenger.sol` were closed by commit `fa1948e2`. Audit-completeness summary of what each marker gated and how it was closed:
+The old receipt/log-proof design has been replaced by storage-proof verification. Audit-completeness summary of the canonical checks:
 
 | Original marker | Closed by |
 |---|---|
-| Dispute-game lookup | `IDisputeGameFactory.gameAtIndex(...)`; assert `game.status() == DEFENDER_WINS`, `block.timestamp >= game.resolvedAt() + airgap` (airgap from `IOptimismPortal2.proofMaturityDelaySeconds()`), `game.gameType() == authorisedGameType` (constructor arg). |
-| Output-root proof | Recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from `OutputRootProof` struct, compare to dispute game's `rootClaim()`; bind `receiptRoot` to `latestBlockHash` via the L2 block-header RLP. |
-| Receipt MPT proof | OZ 5.6.1 `TrieProof.sol` MPT-verifies `receiptRLP` under `receiptRoot` (key = `rlp(transactionIndex)`); OZ 5.6.1 `RLP.sol` decodes the receipt + `logs[logIndex]`; topics/data are recovered from the proven log rather than from a trusted external field. |
-| Drop separate log struct | The previous `ClaimTicketLog` field was removed from the proof envelope. The proof now carries `(disputeGameId, outputRootProof, receiptRoot, receiptProof[], receiptRLP, logIndex, txIndex, expectedTxHash)` and the messenger recovers all log fields from `receiptRLP[logIndex]`. |
-| `_todoVerifyDisputeGame` / `_todoVerifyOutputRoot` / `_todoVerifyReceiptInclusion` body stubs | All three TODO bodies replaced with the real verification described above. |
+| Dispute-game lookup | `IDisputeGameFactory.gameAtIndex(...)`; assert factory/proxy type agreement, respected game type at creation or current portal type, `DEFENDER_WINS`, and elapsed portal finality delays. |
+| Output-root proof | Recompute `keccak256(version, stateRoot, messagePasserStorageRoot, latestBlockHash)` from `OutputRootProof` struct and compare to dispute game's `rootClaim()`. |
+| Account/storage MPT proof | OZ 5.6.1 `TrieProof.sol` proves the emitter account under `stateRoot`, then proves `claimSnapshotHashes[claimId]` under the account storage root. |
+| Snapshot tuple binding | The proof carries `(claimId, serviceId, counters, multisig)` and the messenger accepts it only if it hashes to the proven storage value. |
+| Legacy receipt/log proof path | Removed from the canonical source of truth. Events remain discovery-only; the proof validates the stored snapshot hash. |
 
-**Cumulative effect now**: the canonical messenger cryptographically validates that a `ClaimTicket` event was emitted by the configured `JinnClaimEmitter` on Base, in a transaction included in an L2 block whose hash is committed to by a finalised + airgap-elapsed dispute game on L1. The trust model collapses to OP-Stack canonical security plus the OZ 5.6.1 RLP / TrieProof libraries.
+**Cumulative effect now**: the canonical messenger cryptographically validates that a `ClaimTicket` snapshot hash was stored by the configured `JinnClaimEmitter` on Base and is covered by a finalised dispute game on L1. The trust model collapses to OP-Stack canonical security plus the OZ 5.6.1 RLP / TrieProof libraries.
 
-**Operational consequence**: testnet burn-in (`r5z`) can use either messenger:
-- **Canonical mode** end-to-end exercises the real Fault Proof pipeline. Operator latency = Base Sepolia dispute-game finality + airgap. Pending `R-1` finality measurement to confirm this is practical for CI iteration.
-- **Mock mode** (`MockMessenger` with daemon as owner) bypasses cross-chain finality for fast iteration. The mock is a development convenience, not a security claim.
+**Operational consequence**: testnet burn-in (`r5z`) uses MockMessenger as the active messenger. Canonical Base Sepolia still exercises the real OP output/dispute-game pipeline, but only as a verifier-only canary via `eth_call` against `CanonicalOpStackMessenger.verifyClaim`.
 
-The old "MockMessenger only until 7x5 lands" gate is now lifted. Either messenger is acceptable for the testnet burn-in window; the choice is operational (finality timing) rather than security. **Mainnet still requires the canonical messenger** — `MockMessenger` is testnet/dev only by deploy convention, never deployed on mainnet.
+MockMessenger is accepted for active testnet burn-in because it mirrors the same `claimId` snapshot identity and tuple shape that canonical verification proves. **Mainnet still requires the canonical messenger** — `MockMessenger` is testnet/dev only by deploy convention, never deployed on mainnet.
 
 The post-7x5 invariant suite (under follow-up to bd `jinn-mono-sz0`) must include:
 
-- A negative test that mutates any byte of `receiptRLP` and asserts revert.
+- A negative test that mutates the account/storage proof or snapshot tuple and asserts revert.
 - A negative test that mutates `disputeGameId` to point at an `IN_PROGRESS` or `CHALLENGER_WINS` game and asserts revert.
 - A negative test that constructs an output-root proof against the wrong root and asserts revert.
 - A positive test that uses real proofs harvested via `viem`'s `op-stack` actions on Base Sepolia.
@@ -490,7 +489,7 @@ These are not contract-level threats but failure modes that affect the security 
 |---|---|
 | Governance compromise (§3) | Mitigated for testnet. Quorum and timelock parameters are conservative; voting-delay window gives operators 96h to organise. |
 | Cross-chain replay (§4.2) | Structurally impossible by per-service accumulator design. |
-| Cross-chain forged proofs (§4.1) | **Gated on bd `jinn-mono-7x5`** — full Fault Proof verification not yet implemented. v0 testnet uses `MockMessenger` until 7x5 lands. |
+| Cross-chain forged proofs (§4.1) | Canonical contract verification implemented against storage proofs; active testnet burn-in uses MockMessenger, and canonical Base Sepolia is verifier-only until the durable daemon proof builder passes canary. |
 | C4 permissionless pumping (§5.1) | **Already addressed** in V2 hardening (78bfeac4). |
 | ε creation gating (§5.3) | **Already addressed** in V2 hardening; tunable on testnet. |
 | Eval delivery ungated (§5.2) | **Accepted** by design (deterministic evals). Distributor weight is the lever. |
@@ -501,7 +500,7 @@ These are not contract-level threats but failure modes that affect the security 
 
 These do not block testnet deploy but must be tracked:
 
-1. **bd `jinn-mono-7x5` — Fault Proof verification** must close before any mainnet messenger swap. Owner: cross-chain workstream.
+1. **Canonical verifier-only daemon builder** must pass a real Base Sepolia canary before any mainnet messenger swap. Owner: cross-chain workstream.
 2. **Off-chain alerting runbook** must cover `MessengerUpdated`, `WeightsUpdated`, `RatiosUpdated`, `MinterUpdated`, `OwnershipTransferStarted`, abnormal `Claimed` magnitudes. Owner: operations.
 3. **Foundry invariant authoring** for the three stubs added in this commit (`JINN.invariant.t.sol`, `JinnDistributor.invariant.t.sol`, `CanonicalOpStackMessenger.invariant.t.sol`). Owner: contracts.
 4. **`DeployL1Stack.test.ts:234` fast-test profile fix** (§7.1). Owner: contracts.
@@ -547,7 +546,7 @@ function claim(bytes calldata proof) external {
 if (multisig == address(0)) revert ZeroMultisig();
 ```
 
-This guards against a buggy messenger that returns the zero address. `MockMessenger` already enforces a non-zero multisig at fixture-set time (`MockMessenger.sol#45`), so this revert is defensive double-checking. After 7x5 closes, the canonical messenger will derive `multisig` from the topic of a real log, and `JinnClaimEmitter.emitClaim` already enforces `require(multisig != address(0))` when reading from the OLAS ServiceRegistry — so the zero-check at the distributor is in fact triple-belt-and-braces.
+This guards against a buggy messenger that returns the zero address. `MockMessenger` already enforces a non-zero multisig at fixture-set time, so this revert is defensive double-checking. In canonical mode, `multisig` is bound into the proven `claimSnapshotHashes[claimId]` value, and `JinnClaimEmitter.emitClaim` already enforces `require(multisig != address(0))` when reading from the OLAS ServiceRegistry — so the zero-check at the distributor is in fact triple-belt-and-braces.
 
 ### A.3 Snapshot weighting
 
@@ -667,20 +666,20 @@ Relayer (Base)            JinnClaimEmitter (Base)        OLAS ServiceRegistry (B
    │                              ├──checker.noveltyWeightedCounts(ms)──► (read)
    │                              ├──router.evaluationDeliveryCount(ms)──► (read)
    │                              │
-   │                       ... ClaimTicket log emitted on Base ...
+   │                       ... ClaimTicket log emitted + snapshot hash stored on Base ...
    │                              ▼
    │                       (waits for OP-Stack finality —
    │                        7-day default fault-proof window)
    │                              │
 Relayer (Sepolia)         CanonicalOpStackMessenger (Sepolia)        JinnDistributor (Sepolia)
    │                              │                                          │
-   │                              │     (post-7x5 only;                       │
-   │                              │      pre-7x5 uses MockMessenger)          │
+   │                              │     (canonical canary;                    │
+   │                              │      burn-in uses claimId MockMessenger)  │
    │                              │                                          │
    ├──claim(proof)───────────────────────────────────────────────────────────►│
    │                              │                                          ├──verifyClaim(proof)──►
    │                              │  (validates dispute game, output root,   │
-   │                              │   receipt MPT, log topics + data)        │
+   │                              │   account/storage MPT + snapshot hash)   │
    │                              │                                          │◄─tuple──────────────
    │                              │                                          ├──update accumulators
    │                              │                                          ├──jinn.mint(multisig, owedOperator)
@@ -689,7 +688,7 @@ Relayer (Sepolia)         CanonicalOpStackMessenger (Sepolia)        JinnDistrib
    │                              │                                          │
 ```
 
-This diagram is informative for incident response — at any point, if you observe a `Claimed` event with abnormal magnitude, you can walk back: was the `ClaimTicket` legitimate (check the Base log)? Was the proof legitimate (check the dispute game id post-7x5)? Were the underlying counters legitimate (check the V2 checker / router state at the emit block)?
+This diagram is informative for incident response — at any point, if you observe a `Claimed` event with abnormal magnitude, you can walk back: was the `ClaimTicket` legitimate (check the Base log and stored snapshot hash)? Was the proof legitimate (check the dispute game id and storage proof)? Were the underlying counters legitimate (check the V2 checker / router state at the emit block)?
 
 ---
 
@@ -708,7 +707,7 @@ This diagram is informative for incident response — at any point, if you obser
 | 4.3 | Messenger compromise | Medium | High |
 | 4.4 | MockMessenger on mainnet | (testnet n/a) | Critical |
 | 4.5 | Emitter manipulation | None | None |
-| 4.7 | TODO(7x5) gap | (gated; testnet uses MockMessenger) | Critical until closed |
+| 4.7 | Canonical daemon proof-builder gap | Mock active for burn-in; canonical verifier-only canary required before mainnet | High until canary passes |
 | 5.1 | C4 permissionless pumping | Critical (already mitigated) | Critical (already mitigated) |
 | 5.2 | Eval delivery ungated | Medium (accepted) | Medium (accepted) |
 | 5.3 | Creation channel | Medium | Low |
