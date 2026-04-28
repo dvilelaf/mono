@@ -12,6 +12,10 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 /// @notice ERC20Votes governance token for the Jinn protocol. A single minter
 ///         (typically the JinnDistributor) is authorised to mint; ownership is
 ///         held by an OZ Timelock and managed via two-step transfers.
+///
+/// @dev v0 minimum-viable token. Inflation logic from the OLAS-vendored JINN
+///      is intentionally omitted at this layer — the JinnDistributor is the
+///      sole minter and is the right place to enforce supply policy.
 contract JINN is ERC20, ERC20Permit, ERC20Votes, Ownable2Step {
     /// @notice Address authorised to mint new JINN; zero disables minting.
     address public minter;
@@ -60,5 +64,23 @@ contract JINN is ERC20, ERC20Permit, ERC20Votes, Ownable2Step {
         returns (uint256)
     {
         return super.nonces(owner);
+    }
+
+    // -------------------------------------------------------------------------
+    // ERC-6372 clock — timestamp mode
+    // -------------------------------------------------------------------------
+    //
+    // The v0 governance plan locks Governor parameters in seconds (e.g.
+    // 172,800 s voting delay), so we anchor checkpoints + voting to
+    // {block.timestamp} rather than block numbers. Governors that read
+    // {IERC5805} will pick this up via {CLOCK_MODE}.
+
+    function clock() public view override returns (uint48) {
+        return uint48(block.timestamp);
+    }
+
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public pure override returns (string memory) {
+        return "mode=timestamp";
     }
 }
