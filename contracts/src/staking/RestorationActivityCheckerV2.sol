@@ -71,9 +71,25 @@ contract RestorationActivityCheckerV2 {
     ///      1 fully novel activity = 1e18 added. Similar evidence adds less (or zero).
     mapping(address => uint256) public noveltyWeightedCounts;
 
+    /// @dev Novelty-weighted creator credit per address (1e18 scale).
+    ///      ε creation gating: a creator is credited only when a delivery they posted
+    ///      passes the V2 checker's Hamming/SimHash novelty test. The credit equals
+    ///      the same `weight` granted to the deliverer, so creator credit decays in
+    ///      lockstep with farmed deliveries.
+    ///      Cross-chain JinnClaimEmitter reads this for ε creation rewards.
+    mapping(address => uint256) public verifiedCreations;
+
     /// @dev SimHash of evidence for each recorded activity, per multisig.
-    ///      Used by _computeNoveltyWeight to detect similarity.
+    ///      Stored as a fixed-size circular buffer of length `comparisonWindow`,
+    ///      indexed via `_evidenceWriteIndex`. New evidences overwrite the oldest
+    ///      entry once the window is full, so storage is bounded per multisig.
+    ///      Use `getEvidenceHashCount` and `getEvidenceHash(multisig, i)` to read
+    ///      back stored hashes (i indexes oldest..newest within the window).
     mapping(address => bytes32[]) public evidenceHashes;
+
+    /// @dev Next write slot for the circular buffer of evidence hashes per multisig.
+    ///      Always satisfies `_evidenceWriteIndex[multisig] < comparisonWindow`.
+    mapping(address => uint256) private _evidenceWriteIndex;
 
     // ============ Anti-farming parameters (owner-settable) ============
 
@@ -104,6 +120,18 @@ contract RestorationActivityCheckerV2 {
         uint8 indexed activityType,
         bytes32 evidenceHash,
         uint256 noveltyWeight
+    );
+
+    /// @dev Emitted when a creator is credited (ε creation gating). Fires from
+    ///      `recordRestorationEvidence` whenever the deliverer's evidence passes
+    ///      the novelty test (`weight > 0`). The creator receives credit equal to
+    ///      `weight` so creator credit aligns with the V2 checker's anti-farming
+    ///      decision.
+    event CreationCredited(
+        address indexed creator,
+        address indexed deliverer,
+        bytes32 evidenceHash,
+        uint256 weight
     );
 
     event AntifarmingParametersUpdated(
@@ -146,6 +174,10 @@ contract RestorationActivityCheckerV2 {
     // ============ Activity Recording ============
 
     /// @notice Record activity with evidence hash for anti-farming novelty checking.
+    ///         Only the authorized router can call this — the V2 checker is a single
+    ///         gate for "is this real work" (Architecture B), so unsanctioned writers
+    ///         cannot inflate the activity counts that drive OLAS rewards and JINN
+    ///         minting (audit finding C4).
     /// @param multisig The service multisig (Safe) address
     /// @param activityType 0=CREATE, 1=DELIVER, 2=EVALUATE
     /// @param evidenceHash SimHash of the evidence checkpoint data (computed off-chain)
@@ -154,14 +186,15 @@ contract RestorationActivityCheckerV2 {
         uint8 activityType,
         bytes32 evidenceHash
     ) external {
+        if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
         require(activityType <= uint8(ActivityType.EVALUATE), "RestorationActivityCheckerV2: invalid type");
 
         // Compute novelty weight by comparing against recent hashes
         uint256 weight = _computeNoveltyWeight(multisig, evidenceHash);
 
-        // Store the hash for future comparisons
-        evidenceHashes[multisig].push(evidenceHash);
+        // Store the hash for future comparisons (circular buffer of size comparisonWindow)
+        _writeEvidenceHash(multisig, evidenceHash);
 
         // Increment raw count (for backward compat / off-chain inspection)
         activityCounts[multisig] += 1;
@@ -175,24 +208,50 @@ contract RestorationActivityCheckerV2 {
 
     /// @notice Called by the JinnRouter when a restoration delivery is claimed with evidence.
     ///         Only the authorized router can call this.
-    /// @param multisig The service multisig (Safe) address
+    ///
+    ///         ε creation gating: when `weight > 0` (evidence passes the V2 Hamming
+    ///         test), the `creator` who posted the originating restoration job is
+    ///         credited with the same weight in `verifiedCreations[creator]`. This
+    ///         ties creator credit to the V2 checker's anti-farming decision —
+    ///         creators of cheap/repeat tasks accumulate decayed credit. Pass
+    ///         `address(0)` for `creator` to skip creator crediting.
+    /// @param multisig The deliverer's service multisig (Safe) address
+    /// @param creator  The original creator of the restoration job (looked up by
+    ///                 the router from `creators[requestId]`). May be `address(0)`
+    ///                 to skip ε creation crediting (e.g. legacy / unknown creator).
     /// @param evidenceHash SimHash of the restoration evidence
-    function recordRestorationEvidence(address multisig, bytes32 evidenceHash) external {
+    function recordRestorationEvidence(
+        address multisig,
+        address creator,
+        bytes32 evidenceHash
+    ) external {
         if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
 
         uint256 weight = _computeNoveltyWeight(multisig, evidenceHash);
-        evidenceHashes[multisig].push(evidenceHash);
+        _writeEvidenceHash(multisig, evidenceHash);
         noveltyWeightedCounts[multisig] += weight;
 
         emit ActivityRecordedWithEvidence(multisig, uint8(ActivityType.DELIVER), evidenceHash, weight);
+
+        // ε creation gating: credit the creator with the same weight when the
+        // delivery passes the novelty test (weight > 0). Skip when creator is
+        // unknown (address(0)) to keep this backward-compatible for callers
+        // that don't track creators.
+        if (weight > 0 && creator != address(0)) {
+            verifiedCreations[creator] += weight;
+            emit CreationCredited(creator, multisig, evidenceHash, weight);
+        }
     }
 
     /// @notice Record activity without evidence (backward compatible with V1).
     ///         Full weight is granted since we cannot assess novelty without evidence.
+    ///         Only the authorized router can call this — same Architecture B
+    ///         single-gate property as `recordActivityWithEvidence` (audit C4).
     /// @param multisig The service multisig (Safe) address
     /// @param activityType 0=CREATE, 1=DELIVER, 2=EVALUATE
     function recordActivity(address multisig, uint8 activityType) external {
+        if (msg.sender != authorizedRouter) revert UnauthorizedRouter(msg.sender, authorizedRouter);
         require(multisig != address(0), "RestorationActivityCheckerV2: zero multisig");
         require(activityType <= uint8(ActivityType.EVALUATE), "RestorationActivityCheckerV2: invalid type");
 
@@ -254,18 +313,60 @@ contract RestorationActivityCheckerV2 {
     // ============ View helpers ============
 
     /// @notice Get the number of stored evidence hashes for a multisig.
+    ///         Caps at `comparisonWindow` (circular buffer).
     function getEvidenceHashCount(address multisig) external view returns (uint256) {
         return evidenceHashes[multisig].length;
     }
 
-    /// @notice Get a specific evidence hash by index.
+    /// @notice Get a stored evidence hash by index. Index 0 returns the oldest
+    ///         hash currently in the window, the last valid index returns the
+    ///         newest. The buffer holds at most `comparisonWindow` entries.
     function getEvidenceHash(address multisig, uint256 index) external view returns (bytes32) {
-        return evidenceHashes[multisig][index];
+        bytes32[] storage hashes = evidenceHashes[multisig];
+        uint256 len = hashes.length;
+        require(index < len, "RestorationActivityCheckerV2: index out of bounds");
+
+        // Once full, the slot at `_evidenceWriteIndex` is the oldest entry
+        // (it's where the next write will go, overwriting the oldest). Before
+        // the buffer fills up the array is still being appended in order.
+        if (len < comparisonWindow) {
+            return hashes[index];
+        }
+        uint256 oldest = _evidenceWriteIndex[multisig];
+        return hashes[(oldest + index) % len];
+    }
+
+    // ============ Internal: Evidence buffer ============
+
+    /// @dev Write `newHash` into the per-multisig circular buffer of evidence
+    ///      hashes. Until the buffer reaches `comparisonWindow` entries we
+    ///      append; afterwards we overwrite the oldest slot. The write pointer
+    ///      `_evidenceWriteIndex[multisig]` always points at the next slot to
+    ///      overwrite, which (once full) is also the oldest entry.
+    function _writeEvidenceHash(address multisig, bytes32 newHash) internal {
+        bytes32[] storage hashes = evidenceHashes[multisig];
+        uint256 window = comparisonWindow;
+
+        if (hashes.length < window) {
+            // Pre-full: append. Write index stays 0 (default) and only takes
+            // effect once the buffer fills up — at which point slot 0 is the
+            // oldest entry and the next write should overwrite it.
+            hashes.push(newHash);
+            return;
+        }
+
+        // Buffer full — overwrite the oldest slot.
+        uint256 idx = _evidenceWriteIndex[multisig];
+        hashes[idx] = newHash;
+        unchecked {
+            _evidenceWriteIndex[multisig] = (idx + 1) % window;
+        }
     }
 
     // ============ Internal: Novelty computation ============
 
-    /// @dev Compare a new evidence hash against the multisig's recent hashes.
+    /// @dev Compare a new evidence hash against the multisig's stored hashes
+    ///      (already capped at `comparisonWindow` by the circular buffer).
     ///      Returns 1e18 for novel evidence, or similarDecayMultiplier for similar evidence.
     function _computeNoveltyWeight(address multisig, bytes32 newHash) internal view returns (uint256) {
         bytes32[] storage hashes = evidenceHashes[multisig];
@@ -276,11 +377,9 @@ contract RestorationActivityCheckerV2 {
             return 1e18;
         }
 
-        // Compare against the last `comparisonWindow` hashes
-        uint256 start = len > comparisonWindow ? len - comparisonWindow : 0;
+        // The buffer stores at most `comparisonWindow` hashes — compare against all of them.
         uint256 minDistance = 256; // Max possible Hamming distance
-
-        for (uint256 i = start; i < len; i++) {
+        for (uint256 i = 0; i < len; i++) {
             uint256 dist = _hammingDistance(newHash, hashes[i]);
             if (dist < minDistance) {
                 minDistance = dist;

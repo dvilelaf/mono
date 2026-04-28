@@ -715,11 +715,11 @@ describe("JinnRouterV2 + RestorationActivityCheckerV2 Integration", function () 
 
   describe("Unauthorized router rejected", function () {
     it("recordRestorationEvidence reverts when called by non-router address", async function () {
-      const routerAddress = await routerProxy.getAddress();
-
-      // attacker tries to directly call recordRestorationEvidence
+      // attacker tries to directly call recordRestorationEvidence (3-arg signature
+      // with the new ε creation-gating creator parameter).
       await expect(
         checker.connect(attacker).recordRestorationEvidence(
+          deployerAddress,
           deployerAddress,
           ethers.id("malicious-evidence")
         )
@@ -730,8 +730,24 @@ describe("JinnRouterV2 + RestorationActivityCheckerV2 Integration", function () 
       await expect(
         checker.recordRestorationEvidence(
           deployerAddress,
+          deployerAddress,
           ethers.id("owner-trying-to-record")
         )
+      ).to.be.revertedWithCustomError(checker, "UnauthorizedRouter");
+    });
+
+    it("recordActivity reverts when called by non-router address (C4 fix)", async function () {
+      const dummyMultisig = ethers.Wallet.createRandom().address;
+      // Direct call by deployer (NOT the authorized router) must revert.
+      await expect(
+        checker.recordActivity(dummyMultisig, 0)
+      ).to.be.revertedWithCustomError(checker, "UnauthorizedRouter");
+    });
+
+    it("recordActivityWithEvidence reverts when called by non-router address (C4 fix)", async function () {
+      const dummyMultisig = ethers.Wallet.createRandom().address;
+      await expect(
+        checker.recordActivityWithEvidence(dummyMultisig, 0, ethers.id("ev"))
       ).to.be.revertedWithCustomError(checker, "UnauthorizedRouter");
     });
   });

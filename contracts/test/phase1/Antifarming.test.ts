@@ -21,6 +21,7 @@ async function deployV2Checker(
     similarityThreshold?: bigint;
     similarDecayMultiplier?: bigint;
     comparisonWindow?: bigint;
+    authorizedRouter?: string; // address treated as the trusted router
   },
 ) {
   const deployerAddress = await deployer.getAddress();
@@ -33,6 +34,15 @@ async function deployV2Checker(
     overrides?.comparisonWindow ?? DEFAULT_COMPARISON_WINDOW,
   );
   await checker.waitForDeployment();
+
+  // Wire deployer (or override) as the authorized router so unit tests can
+  // exercise recordActivity / recordActivityWithEvidence directly. The C4 fix
+  // gates these on authorizedRouter; without this wiring every direct call
+  // would revert with UnauthorizedRouter.
+  const authorizedRouter = overrides?.authorizedRouter ?? deployerAddress;
+  // setRouterAddresses requires both addresses non-zero; reuse authorizedRouter
+  // as jinnRouter (the read-only counter source) — fine for unit tests.
+  await (await checker.setRouterAddresses(authorizedRouter, authorizedRouter)).wait();
   return checker;
 }
 
@@ -293,6 +303,8 @@ describe("RestorationActivityCheckerV2 — Anti-Farming", function () {
         DEFAULT_COMPARISON_WINDOW,
       );
       await checker.waitForDeployment();
+      // Authorize the deployer as the router so direct calls go through (C4 gate).
+      await (await checker.setRouterAddresses(deployerAddress, deployerAddress)).wait();
 
       const multisig = ethers.Wallet.createRandom().address;
       const hash = ethers.id("same-thing");
