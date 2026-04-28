@@ -11,7 +11,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   JinnClaimLoop,
-  CanonicalProofNotYetImplementedError,
   type JinnClaimLoopConfig,
 } from '../../src/daemon/jinn-claim-loop.js';
 import { CLAIM_TICKET_TOPIC0 } from '../../src/earning/contracts.js';
@@ -25,6 +24,7 @@ const DISTRIBUTOR = '0x2222222222222222222222222222222222222222' as const;
 const MESSENGER = '0x3333333333333333333333333333333333333333' as const;
 const OPTIMISM_PORTAL = '0x4444444444444444444444444444444444444444' as const;
 const DGF = '0x5555555555555555555555555555555555555555' as const;
+const CLAIM_ID = 101n;
 
 function fleetStoreWithService(opts: { step?: 'complete' | 'mech_deployed' | 'awaiting_stake' } = {}) {
   return {
@@ -82,8 +82,16 @@ function mockL2Client(opts: { emitTxHash?: `0x${string}`; emitBlock?: bigint } =
       logs: [
         {
           address: CLAIM_EMITTER,
-          topics: [CLAIM_TICKET_TOPIC0, '0x' + SERVICE_ID.toString(16).padStart(64, '0')],
-          data: '0x',
+          topics: [
+            CLAIM_TICKET_TOPIC0,
+            '0x' + CLAIM_ID.toString(16).padStart(64, '0'),
+            '0x' + SERVICE_ID.toString(16).padStart(64, '0'),
+            '0x' + MULTISIG.slice(2).padStart(64, '0'),
+          ],
+          data: '0x' + (3n).toString(16).padStart(64, '0')
+                + (5n).toString(16).padStart(64, '0')
+                + (2n).toString(16).padStart(64, '0')
+                + MASTER.slice(2).padStart(64, '0'),
           logIndex: 0,
           blockNumber: block,
           transactionHash: txHash,
@@ -97,12 +105,13 @@ function mockL2Client(opts: { emitTxHash?: `0x${string}`; emitBlock?: bigint } =
         // synthetic decoded payload via the abi.
         data: '0x' + (3n).toString(16).padStart(64, '0')      // verifiedCreations = 3
               + (5n).toString(16).padStart(64, '0')           // novelty
-              + (2n).toString(16).padStart(64, '0'),          // eval
+              + (2n).toString(16).padStart(64, '0')           // eval
+              + MASTER.slice(2).padStart(64, '0'),            // claimer
         topics: [
           CLAIM_TICKET_TOPIC0,
+          '0x' + CLAIM_ID.toString(16).padStart(64, '0'),
           '0x' + SERVICE_ID.toString(16).padStart(64, '0'),
           '0x' + MULTISIG.slice(2).padStart(64, '0'),
-          '0x' + MASTER.slice(2).padStart(64, '0'),
         ],
         logIndex: 0,
         blockNumber: block,
@@ -189,12 +198,13 @@ describe('JinnClaimLoop', () => {
           address: CLAIM_EMITTER,
           data: '0x' + (3n).toString(16).padStart(64, '0')
                 + (5n).toString(16).padStart(64, '0')
-                + (2n).toString(16).padStart(64, '0'),
+                + (2n).toString(16).padStart(64, '0')
+                + MASTER.slice(2).padStart(64, '0'),
           topics: [
             CLAIM_TICKET_TOPIC0,
+            '0x' + CLAIM_ID.toString(16).padStart(64, '0'),
             '0x' + SERVICE_ID.toString(16).padStart(64, '0'),
             '0x' + otherMultisig.slice(2).padStart(64, '0'),
-            '0x' + MASTER.slice(2).padStart(64, '0'),
           ],
           logIndex: 0,
           blockNumber: 100n,
@@ -231,7 +241,7 @@ describe('JinnClaimLoop', () => {
   });
 
   describe('canonical mode', () => {
-    it('emits on L2, then throws CanonicalProofNotYetImplemented on Step B', async () => {
+    it('runOnce skips automated canonical ticks without emitting', async () => {
       const cfg = baseConfig({
         messengerMode: 'canonical',
         optimismPortalAddress: OPTIMISM_PORTAL,
@@ -240,24 +250,49 @@ describe('JinnClaimLoop', () => {
       const loop = new JinnClaimLoop(cfg);
       const result = await loop.runOnce();
 
-      // L2 emit succeeds — canonical proof construction throws.
-      expect(result).toMatchObject({ ticks: 1, emits: 1, submits: 0, errors: 1 });
-      expect(cfg.l2Client.simulateContract).toHaveBeenCalledTimes(1);
-      // No L1 calls — proof step bailed.
+      expect(result).toEqual({ ticks: 0, emits: 0, submits: 0, errors: 0 });
+      expect(cfg.l2Client.simulateContract).not.toHaveBeenCalled();
       expect(cfg.l1Client.simulateContract).not.toHaveBeenCalled();
     });
 
-    it('refuses to start canonical mode without portal/DGF wiring', async () => {
-      const cfg = baseConfig({ messengerMode: 'canonical' });
+    it('tickService still emits on L2 then fails before L1 when canonical proof is not ready', async () => {
+      const cfg = baseConfig({
+        messengerMode: 'canonical',
+        optimismPortalAddress: OPTIMISM_PORTAL,
+        disputeGameFactoryAddress: DGF,
+      });
       const loop = new JinnClaimLoop(cfg);
-      const result = await loop.runOnce();
-      expect(result.errors).toBe(1);
+      const acc = { ticks: 0, emits: 0, submits: 0, errors: 0 };
+
+      await expect(
+        loop.tickService({
+          serviceId: SERVICE_ID,
+          displayIndex: 1,
+          multisig: MULTISIG,
+        }, acc),
+      ).rejects.toThrow();
+
+      expect(acc.ticks).toBe(0);
+      expect(acc.emits).toBe(1);
+      expect(acc.submits).toBe(0);
+      expect(cfg.l2Client.simulateContract).toHaveBeenCalledTimes(1);
+      expect(cfg.l1Client.simulateContract).not.toHaveBeenCalled();
     });
 
-    it('exposes CanonicalProofNotYetImplementedError as a named class', () => {
-      const err = new CanonicalProofNotYetImplementedError('test');
-      expect(err.name).toBe('CanonicalProofNotYetImplementedError');
-      expect(err.message).toContain('test');
+    it('tickService refuses canonical submit without portal/DGF wiring', async () => {
+      const cfg = baseConfig({ messengerMode: 'canonical' });
+      const loop = new JinnClaimLoop(cfg);
+      const acc = { ticks: 0, emits: 0, submits: 0, errors: 0 };
+
+      await expect(
+        loop.tickService({
+          serviceId: SERVICE_ID,
+          displayIndex: 1,
+          multisig: MULTISIG,
+        }, acc),
+      ).rejects.toThrow(/optimismPortalAddress/);
+
+      expect(acc.emits).toBe(1);
     });
   });
 

@@ -11,6 +11,7 @@ export type LifecycleKind =
   | 'balance_topup'
   | 'jinn_claim_emitted'
   | 'jinn_claim_submitted'
+  | 'jinn_claim_canonical_skip'
   | 'engine_transition'
   | 'tick_error'
   | 'startup'

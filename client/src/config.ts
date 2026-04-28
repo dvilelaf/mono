@@ -40,6 +40,13 @@ export const JinnConfigSchema = z.object({
    */
   rpcUrl: z.string().optional(),
   archiveRpcUrl: z.string().optional(),
+  /**
+   * Optional L2 proof/archive RPC endpoint for canonical cross-chain canaries.
+   * The daemon can use its normal rpcUrl for writes while proof construction
+   * uses this endpoint for historical eth_getProof at OP dispute-game blocks.
+   * Env: JINN_L2_PROOF_RPC_URL.
+   */
+  l2ProofRpcUrl: z.string().url().optional(),
 
   /** Earning state directory */
   earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
@@ -190,9 +197,12 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * Messenger mode driving proof construction. 'canonical' constructs
-   * OP-Stack Fault Proof proofs; 'mock' submits MockMessenger fixtures and is
-   * intended for testnet burn-in convenience or CI. Defaults to 'canonical'.
+   * Messenger mode driving proof construction. `mock` submits MockMessenger
+   * fixtures — required for automated Sepolia burn-in (`runOnce`). `canonical`
+   * builds OP-Stack storage proofs for verifier-only checks; scheduled daemon
+   * ticks **skip** canonical mode (multi-day finality) — use
+   * `tsx scripts/verify-canonical-canary.ts` after finality instead. Defaults
+   * to `canonical`.
    * Env: JINN_MESSENGER_MODE.
    */
   jinnMessengerMode: z.enum(['canonical', 'mock']).default('canonical'),
@@ -340,6 +350,7 @@ export function loadConfig(configPath?: string): JinnConfig {
   const merged: Record<string, unknown> = { ...fileValues };
 
   if (env['JINN_NETWORK'])           merged.network = env['JINN_NETWORK'];
+  if (env['JINN_L2_PROOF_RPC_URL'])  merged.l2ProofRpcUrl = env['JINN_L2_PROOF_RPC_URL'];
   if (env['JINN_EARNING_DIR'])       merged.earningDir = env['JINN_EARNING_DIR'];
   if (env['JINN_DB_PATH'])           merged.dbPath = env['JINN_DB_PATH'];
   if (env['JINN_POLL_INTERVAL_MS'])  merged.pollIntervalMs = parseInt(env['JINN_POLL_INTERVAL_MS'], 10);

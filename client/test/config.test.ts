@@ -10,6 +10,7 @@ describe('loadConfig RPC override handling', () => {
   const originalBaseSepoliaRpcUrl = process.env['BASE_SEPOLIA_RPC_URL'];
   const originalJinnRpcUrl = process.env['JINN_RPC_URL'];
   const originalJinnNetwork = process.env['JINN_NETWORK'];
+  const originalJinnL2ProofRpcUrl = process.env['JINN_L2_PROOF_RPC_URL'];
   const originalTestnetL2Deployment = process.env['JINN_TESTNET_L2_DEPLOYMENT'];
   const originalTestnetTokenDeployment = process.env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   const originalTestnetClaimRegistryDeployment = process.env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
@@ -37,6 +38,12 @@ describe('loadConfig RPC override handling', () => {
       delete process.env['JINN_NETWORK'];
     } else {
       process.env['JINN_NETWORK'] = originalJinnNetwork;
+    }
+
+    if (originalJinnL2ProofRpcUrl === undefined) {
+      delete process.env['JINN_L2_PROOF_RPC_URL'];
+    } else {
+      process.env['JINN_L2_PROOF_RPC_URL'] = originalJinnL2ProofRpcUrl;
     }
 
     if (originalTestnetL2Deployment === undefined) {
@@ -276,6 +283,19 @@ describe('loadConfig RPC override handling', () => {
     } finally {
       delete process.env['JINN_ETHEREUM_RPC_URL'];
     }
+  });
+
+  it('loads optional L2 proof RPC from env for canonical canaries', async () => {
+    const configPath = await writeConfigFile({ network: 'testnet' });
+
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+    delete process.env['JINN_NETWORK'];
+    process.env['JINN_L2_PROOF_RPC_URL'] = 'https://base-sepolia-proof.example/rpc';
+
+    const config = loadConfig(configPath);
+    expect(config.l2ProofRpcUrl).toBe('https://base-sepolia-proof.example/rpc');
   });
 
   it('rejects malformed jinnDistributorAddress', async () => {

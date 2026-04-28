@@ -9,8 +9,8 @@
  *      (`verifiedCreations`, `noveltyWeightedCounts`, `evaluationDeliveryCount`)
  *      atomically at one block.
  *   2. Step B — wait for finality. In `canonical` mode, wait for the
- *      FaultDisputeGame to resolve and the airgap to elapse, then build the
- *      OP-Stack proof. In `mock` mode, plant the matching fixture on the L1
+ *      OP dispute game to resolve and portal finality to elapse, then build
+ *      the OP-Stack storage proof. In `mock` mode, plant the matching fixture on the L1
  *      MockMessenger.
  *   3. Step C — submit on L1. Call `JinnDistributor.claim(proof)` on
  *      Sepolia / Ethereum. The distributor verifies, applies channel
@@ -25,10 +25,17 @@
  * Configuration: `jinnClaimLoopIntervalMs` (default 1h), `jinnMessengerMode`
  * (`canonical` | `mock`). The `mock` path requires the daemon's L1 wallet to
  * be the MockMessenger's owner (set at deploy).
+ *
+ * Automated `run()` / `runOnce()` **only execute mock-mode** emit→fixture→claim.
+ * When `jinnMessengerMode === 'canonical'`, scheduled ticks **skip** emitting:
+ * canonical OP-Stack finality is multi-day (see R-1); operators should use mock
+ * for burn-in and run `tsx scripts/verify-canonical-canary.ts` for
+ * verifier-only proofs after an intentional L2 emit.
  */
 
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { getAddress } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
 import type { FleetStateStore } from '../earning/store.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
@@ -43,8 +50,8 @@ import {
 } from './jinn-claim-loop-mock.js';
 import {
   buildCanonicalProof,
-  submitCanonicalClaim,
-  CanonicalProofNotYetImplementedError,
+  decodeClaimTicketFromReceipt,
+  verifyCanonicalClaimCanary,
 } from './jinn-claim-loop-canonical.js';
 
 export type JinnMessengerMode = 'canonical' | 'mock';
@@ -53,6 +60,12 @@ export interface JinnClaimLoopConfig {
   intervalMs: number;
   /** PublicClient bound to the L2 measurement chain (Base / Base Sepolia). */
   l2Client: PublicClient;
+  /**
+   * Optional archive/proof RPC client for canonical mode. Historical
+   * `eth_getProof` at the dispute game's L2 block can require a stronger
+   * endpoint than the daemon's normal L2 RPC.
+   */
+  l2ProofClient?: PublicClient;
   /** WalletClient bound to L2 — pays gas for `emitClaim`. */
   l2Wallet: WalletClient;
   /** PublicClient bound to the L1 governance chain (Ethereum / Sepolia). */
@@ -105,6 +118,24 @@ export class JinnClaimLoop {
    */
   async runOnce(): Promise<JinnClaimTickResult> {
     const result: JinnClaimTickResult = { ticks: 0, emits: 0, submits: 0, errors: 0 };
+
+    // Spec / Phase D: MockMessenger drives automated Sepolia burn-in; canonical
+    // verification is verifier-only and must not spam emitClaim each interval.
+    if (this.config.messengerMode === 'canonical') {
+      const detail =
+        '[jinn-claim] Automated runOnce skips messengerMode=canonical (multi-day OP finality). ' +
+        'Set jinnMessengerMode=mock for Sepolia burn-in, or run `tsx scripts/verify-canonical-canary.ts` ' +
+        'after finality with an existing L2 ClaimTicket tx.';
+      console.warn(detail);
+      if (this.config.jinnStore) {
+        emitEvent(this.config.jinnStore, {
+          kind: 'jinn_claim_canonical_skip',
+          outcome: 'warn',
+          detail,
+        }, 'jinn-claim');
+      }
+      return result;
+    }
 
     const state = await this.config.store.load(this.config.chain);
     for (const svc of state.services) {
@@ -236,7 +267,7 @@ export class JinnClaimLoop {
       this.config.l1Client,
       this.config.l1Wallet,
       this.config.distributorAddress,
-      args.serviceId,
+      snapshot.claimId,
     );
     await waitForTransactionReceiptWithRetry(this.config.l1Client, claimTx);
     return claimTx;
@@ -246,44 +277,43 @@ export class JinnClaimLoop {
   async submitCanonical(args: { serviceId: bigint; emitTxHash: Hex }): Promise<Hex> {
     if (!this.config.optimismPortalAddress || !this.config.disputeGameFactoryAddress) {
       throw new Error(
-        '[jinn-claim] canonical mode requires optimismPortalAddress + disputeGameFactoryAddress',
+        '[jinn-claim-loop] canonical mode requires optimismPortalAddress + disputeGameFactoryAddress',
       );
     }
 
-    // Resolve the L2 receipt to get the block + log index for the proof.
     const receipt = await this.config.l2Client.getTransactionReceipt({ hash: args.emitTxHash });
-    const expectedEmitter = this.config.claimEmitterAddress.toLowerCase();
-    const expectedTopic = CLAIM_TICKET_TOPIC0.toLowerCase();
     const claimLog = receipt.logs.find((log) =>
-      log.address.toLowerCase() === expectedEmitter
-      && log.topics[0]?.toLowerCase() === expectedTopic,
+      log.address.toLowerCase() === this.config.claimEmitterAddress.toLowerCase()
+      && log.topics[0]?.toLowerCase() === CLAIM_TICKET_TOPIC0.toLowerCase(),
     );
     if (!claimLog) {
-      throw new Error(`[jinn-claim] no ClaimTicket log in receipt ${args.emitTxHash}`);
+      throw new Error(`[jinn-claim-loop] no ClaimTicket log in receipt ${args.emitTxHash}`);
     }
+    const snapshot = decodeClaimTicketFromReceipt(
+      receipt.logs,
+      this.config.claimEmitterAddress,
+      claimLog.logIndex ?? 0,
+    );
 
-    const proof = await buildCanonicalProof(
+    const result = await buildCanonicalProof(
       {
         l1Client: this.config.l1Client,
-        l2Client: this.config.l2Client,
+        l2ProofClient: this.config.l2ProofClient ?? this.config.l2Client,
+        targetChain: this.config.chain === 'base-sepolia' ? baseSepolia : base,
         optimismPortal: this.config.optimismPortalAddress,
         disputeGameFactory: this.config.disputeGameFactoryAddress,
+        claimEmitter: this.config.claimEmitterAddress,
       },
-      {
-        l2TxHash: args.emitTxHash,
-        l2LogIndex: claimLog.logIndex ?? 0,
-        l2BlockNumber: receipt.blockNumber,
-      },
+      { snapshot, l2BlockNumber: receipt.blockNumber },
     );
 
-    const hash = await submitCanonicalClaim(
+    await verifyCanonicalClaimCanary(
       this.config.l1Client,
-      this.config.l1Wallet,
-      this.config.distributorAddress,
-      proof,
+      this.config.messengerAddress,
+      result.proof,
     );
-    await waitForTransactionReceiptWithRetry(this.config.l1Client, hash);
-    return hash;
+    // Verifier-only canary path: no L1 transaction submitted; return the L2 emit tx.
+    return args.emitTxHash;
   }
 
   /**
@@ -335,5 +365,3 @@ export class JinnClaimLoop {
     }
   }
 }
-
-export { CanonicalProofNotYetImplementedError };

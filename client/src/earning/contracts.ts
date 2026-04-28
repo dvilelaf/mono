@@ -791,25 +791,26 @@ export const JINN_CLAIM_EMITTER_ABI = [
     type: 'event',
     name: 'ClaimTicket',
     inputs: [
+      { name: 'claimId', type: 'uint256', indexed: true },
       { name: 'serviceId', type: 'uint256', indexed: true },
       { name: 'verifiedCreations', type: 'uint256', indexed: false },
       { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256', indexed: false },
       { name: 'evaluationDeliveryCount', type: 'uint256', indexed: false },
       { name: 'multisig', type: 'address', indexed: true },
-      { name: 'claimer', type: 'address', indexed: true },
+      { name: 'claimer', type: 'address', indexed: false },
     ],
   },
   {
     inputs: [{ name: 'serviceId', type: 'uint256' }],
     name: 'emitClaim',
-    outputs: [],
+    outputs: [{ name: 'claimId', type: 'uint256' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },
 ] as const;
 
 export const CLAIM_TICKET_TOPIC0 = keccak256(
-  stringToBytes('ClaimTicket(uint256,uint256,uint256,uint256,address,address)'),
+  stringToBytes('ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)'),
 );
 
 export const JINN_DISTRIBUTOR_ABI = [
@@ -843,6 +844,22 @@ export const JINN_DISTRIBUTOR_ABI = [
   },
 ] as const;
 
+export const CLAIM_MESSENGER_ABI = [
+  {
+    inputs: [{ name: 'proof', type: 'bytes' }],
+    name: 'verifyClaim',
+    outputs: [
+      { name: 'serviceId', type: 'uint256' },
+      { name: 'verifiedCreations', type: 'uint256' },
+      { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
+      { name: 'evaluationDeliveryCount', type: 'uint256' },
+      { name: 'multisig', type: 'address' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
 /**
  * Mock messenger ABI — admin setFixture path used by burn-in to plant
  * fixtures on Sepolia. The verifyClaim path matches IClaimMessenger.
@@ -850,11 +867,12 @@ export const JINN_DISTRIBUTOR_ABI = [
 export const MOCK_MESSENGER_ABI = [
   {
     inputs: [
-      { name: 'serviceId', type: 'uint256' },
+      { name: 'claimId', type: 'uint256' },
       {
         name: 'f',
         type: 'tuple',
         components: [
+          { name: 'serviceId', type: 'uint256' },
           { name: 'verifiedCreations', type: 'uint256' },
           { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
           { name: 'evaluationDeliveryCount', type: 'uint256' },
@@ -868,9 +886,10 @@ export const MOCK_MESSENGER_ABI = [
     type: 'function',
   },
   {
-    inputs: [{ name: 'serviceId', type: 'uint256' }],
+    inputs: [{ name: 'claimId', type: 'uint256' }],
     name: 'fixtures',
     outputs: [
+      { name: 'serviceId', type: 'uint256' },
       { name: 'verifiedCreations', type: 'uint256' },
       { name: 'noveltyWeightedRestorationDeliveries', type: 'uint256' },
       { name: 'evaluationDeliveryCount', type: 'uint256' },

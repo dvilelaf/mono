@@ -9,10 +9,10 @@
  * Flow:
  *   1. Read the latest ClaimTicket event from the JinnClaimEmitter on L2.
  *   2. Plant the matching fixture on the L1 MockMessenger via `setFixture`.
- *   3. Submit `JinnDistributor.claim(abi.encode(serviceId))`.
+ *   3. Submit `JinnDistributor.claim(abi.encode(claimId))`.
  *
- * The MockMessenger encodes the proof as `abi.encode(uint256 serviceId)` —
- * the messenger looks up the planted fixture and returns it. The
+ * The MockMessenger encodes the proof as `abi.encode(uint256 claimId)` —
+ * the messenger looks up the planted snapshot fixture and returns it. The
  * distributor's per-service accumulator handles replay; resubmitting the
  * same `proof` mints zero on the second call.
  */
@@ -34,6 +34,7 @@ import {
 } from '../earning/contracts.js';
 
 export interface MockClaimSnapshot {
+  claimId: bigint;
   serviceId: bigint;
   verifiedCreations: bigint;
   noveltyWeightedRestorationDeliveries: bigint;
@@ -86,6 +87,7 @@ export async function fetchLatestClaimTicket(
     eventName: 'ClaimTicket',
   });
   const args = decoded.args as unknown as {
+    claimId: bigint;
     serviceId: bigint;
     verifiedCreations: bigint;
     noveltyWeightedRestorationDeliveries: bigint;
@@ -95,6 +97,7 @@ export async function fetchLatestClaimTicket(
   };
 
   return {
+    claimId: args.claimId,
     serviceId: args.serviceId,
     verifiedCreations: args.verifiedCreations,
     noveltyWeightedRestorationDeliveries: args.noveltyWeightedRestorationDeliveries,
@@ -125,8 +128,9 @@ export async function plantMockFixture(
     abi: MOCK_MESSENGER_ABI,
     functionName: 'setFixture',
     args: [
-      snapshot.serviceId,
+      snapshot.claimId,
       {
+        serviceId: snapshot.serviceId,
         verifiedCreations: snapshot.verifiedCreations,
         noveltyWeightedRestorationDeliveries: snapshot.noveltyWeightedRestorationDeliveries,
         evaluationDeliveryCount: snapshot.evaluationDeliveryCount,
@@ -139,11 +143,11 @@ export async function plantMockFixture(
 }
 
 /**
- * Encode the MockMessenger proof: `abi.encode(uint256 serviceId)`. The
- * messenger looks up the previously planted fixture by serviceId.
+ * Encode the MockMessenger proof: `abi.encode(uint256 claimId)`. The
+ * messenger looks up the previously planted fixture by claimId.
  */
-export function encodeMockProof(serviceId: bigint): Hex {
-  return encodeAbiParameters([{ type: 'uint256' }], [serviceId]);
+export function encodeMockProof(claimId: bigint): Hex {
+  return encodeAbiParameters([{ type: 'uint256' }], [claimId]);
 }
 
 /**
@@ -156,12 +160,12 @@ export async function submitMockClaim(
   l1Client: PublicClient,
   l1Wallet: WalletClient,
   distributor: Address,
-  serviceId: bigint,
+  claimId: bigint,
 ): Promise<Hex> {
   const account = l1Wallet.account;
   if (!account) throw new Error('L1 wallet has no account configured');
 
-  const proof = encodeMockProof(serviceId);
+  const proof = encodeMockProof(claimId);
   const { request } = await l1Client.simulateContract({
     address: distributor,
     abi: JINN_DISTRIBUTOR_ABI,
