@@ -1,18 +1,30 @@
 # Restorer Architecture: Substrate-First vs Specialists-First — ADR
 
-> Version: 1
-> Date: 2026-04-28
+> Version: 1.1
+> Date: 2026-04-28 (rev 2026-04-28: vocabulary retarget — "plug-in" → "external impl"; renamed file ref)
 > Author: Captain (opus, dispatched on jinn-mono-bea)
 > Status: Proposed (not yet adopted)
-> Supersedes: none
+> Supersedes: v1 (vocabulary-only retarget; conclusion unchanged)
 > Audit: surfaced 2026-04-27 from PR #38 review session
 > Sibling specs:
-> `spec/2026-05-restorer-plugins.md`,
+> `spec/2026-05-external-restorer-impls.md`,
 > `spec/2026-05-executor-trust-boundary.md`,
 > `spec/2026-05-schema-versioning.md`,
 > `spec/2026-05-registry-discovery.md`,
 > `spec/2026-04-21-agentic-data-substrate.md`,
 > `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`
+
+## Vocabulary note (2026-04-28)
+
+v1.1 retargets "plug-in" → "external impl" throughout (matching the
+other extension-model specs on this branch and the codebase's
+established `RestorerImpl` / `impl` vocabulary; avoiding collision
+with the unrelated existing `jinn plugin install` verb that installs
+the Jinn MCP server / skill into AI hosts). The two literal references
+to `client/plugins/default-learner/` and "the Claude plugin" in §7
+step 5 are NOT renamed — those name a real Claude Code plugin, a
+distinct surface from the operator-supplied `RestorerImpl` flow this
+ADR composes with.
 
 ## 1. Purpose and scope
 
@@ -42,7 +54,8 @@ ADR picks specialists-first and routes learning as a per-impl service.
 - The high-level architecture choice between substrate-first,
   specialists-first, and hybrid.
 - The constraints the choice imposes on the engine's impl-resolution
-  rule, the trust boundary, the plug-in loader, and kind-versioning.
+  rule, the trust boundary, the external-impl loader, and
+  kind-versioning.
 - The disposition of PR #38's wrapper code given the choice.
 - The composition story for operator-supplied restorers
   (`jinn-mono-7zz`) under the chosen model.
@@ -64,7 +77,7 @@ ADR picks specialists-first and routes learning as a per-impl service.
 - This is not a replacement for the default-learner design spec. It
   scopes where the learner sits; it does not redesign its internals.
 - This is not a Phase 2 spec. The decision below holds the seams the
-  trust-boundary spec already opened (out-of-process plug-ins), but
+  trust-boundary spec already opened (out-of-process impls), but
   does not pre-commit Phase 2 mechanics.
 
 ## 2. The fork (recap)
@@ -76,7 +89,7 @@ or acceptance lines up with the contracts those specs already define.
 ### 2.1 Option 1 — substrate-first
 
 A learning loop is the universal envelope around restoration.
-Specialists become Execute-step plugins inside the loop
+Specialists become Execute-step impls inside the loop
 (Orient → Strategize → Plan → Execute → Debrief → Improve → Memory).
 The learning loop holds protocol-visible identity; specialists are
 selected by the substrate and invoked via an internal handoff.
@@ -95,8 +108,8 @@ layer: an impl can use a learner library or call out to a learning
 service, but it owns its own `run(ctx)` semantics and identity.
 
 A learner-style impl is one impl among many in `buildRestorerImpls`
-(or an operator-supplied plug-in via `restorers.plugins`); it does
-**not** sit between the engine and other specialists.
+(or an operator-supplied external impl via `restorers.externalImpls`);
+it does **not** sit between the engine and other specialists.
 
 ### 2.3 Option 3 — hybrid
 
@@ -118,9 +131,10 @@ as a first-match envelope across every kind.
 
 The status quo registration shape in
 `client/src/restorer/impls/index.ts` continues — a flat list of
-impls, each declaring `supports({ kind, type })`. The plug-in loader
-extends this list at boot from `restorers.plugins` per
-`spec/2026-05-restorer-plugins.md`. There is no second engine path.
+impls, each declaring `supports({ kind, type })`. The external-impl
+loader extends this list at boot from `restorers.externalImpls` per
+`spec/2026-05-external-restorer-impls.md`. There is no second engine
+path.
 
 ## 4. Rationale
 
@@ -158,9 +172,9 @@ wrapper does not delegate gates to specialists, and its `supports()`
 is asymmetric across restoration / evaluation. Both symptoms are the
 trust-boundary mismatch surfacing.
 
-### 4.2 Plug-in loader is per-impl
+### 4.2 External-impl loader is per-impl
 
-`spec/2026-05-restorer-plugins.md` §3.4 lifecycle:
+`spec/2026-05-external-restorer-impls.md` §3.4 lifecycle:
 
 > 6. **Validate identity.** The returned `RestorerImpl.name` MUST
 >    equal `manifest.name`; `RestorerImpl.version` MUST equal
@@ -178,18 +192,18 @@ under §2 of the schema-versioning spec, which requires explicit
 manifest exists separately is two manifests for one runtime path —
 the loader has no model for that.
 
-The plug-in loader is the integration point an operator-supplied
-restorer goes through (`jinn-mono-7zz`). Forcing every plug-in
-through a substrate wrapper at the engine level either:
+The external-impl loader is the integration point an operator-
+supplied restorer goes through (`jinn-mono-7zz`). Forcing every
+external impl through a substrate wrapper at the engine level either:
 
 - Pre-installs the substrate as a first-party impl outside the
-  plug-in flow (privileges first-party over third-party — exactly
-  what `jinn-mono-7zz`'s "first-class" goal disallows), or
-- Requires every plug-in to declare itself substrate-compatible
+  external-impl flow (privileges first-party over third-party —
+  exactly what `jinn-mono-7zz`'s "first-class" goal disallows), or
+- Requires every external impl to declare itself substrate-compatible
   (couples third-party authors to one substrate's vocabulary).
 
 Both outcomes are worse than treating the substrate as one more
-opt-in plug-in.
+opt-in impl.
 
 ### 4.3 Kind-versioning is per-kind
 
@@ -290,19 +304,19 @@ form Option 2 already names.
 This section spells out, per spec, what changes and what does not
 under Option 2.
 
-### 5.1 With `spec/2026-05-restorer-plugins.md`
+### 5.1 With `spec/2026-05-external-restorer-impls.md`
 
-No changes. The plug-in flow already assumes one impl per manifest,
-one identity per signer, one `supportedKinds` per impl. A learner is
-just one more plug-in (or one more in-repo entry in
+No changes. The external-impl flow already assumes one impl per
+manifest, one identity per signer, one `supportedKinds` per impl. A
+learner is just one more external impl (or one more in-repo entry in
 `buildRestorerImpls`).
 
-A plug-in author writing a learning-flavoured restorer publishes
-their own `RestorerImpl`. They MAY internally use a learner
+An external-impl author writing a learning-flavoured restorer
+publishes their own `RestorerImpl`. They MAY internally use a learner
 library — Pi, OTel-instrumented session manager, a constitutional
-snapshot helper — and the SDK package (§3.6 of the plug-in spec) MAY
-re-export those helpers for convenience. The library is opt-in at
-the impl-author level, not enforced at the engine level.
+snapshot helper — and the SDK package (§3.6 of the external-impl
+spec) MAY re-export those helpers for convenience. The library is
+opt-in at the impl-author level, not enforced at the engine level.
 
 ### 5.2 With `spec/2026-05-executor-trust-boundary.md`
 
@@ -334,8 +348,9 @@ know an impl is learner-flavoured.
 ### 5.4 With `spec/2026-05-registry-discovery.md`
 
 No changes. Source A (in-repo `buildRestorerImpls`) and Source B
-(`restorers.plugins`) continue to be the only two boot-time sources
-of impl candidates (§4.3). A learner is one entry in either source.
+(`restorers.externalImpls`) continue to be the only two boot-time
+sources of impl candidates (§4.3). A learner is one entry in either
+source.
 
 The `restorers.disabled` field (§4.1) lets an operator turn off the
 in-repo learner if they want to run the bare specialists; they do
@@ -353,8 +368,8 @@ trust boundary. None creates a second engine code path.
 An impl imports a learner library (Pi-based session manager + OTel
 correlation + promotion gate, the shape from the default-learning
 design spec) and calls it inside `run(ctx)`. The library is
-re-exported by `@jinn-network/restorer-sdk` (`spec/2026-05-restorer-plugins.md`
-§3.6).
+re-exported by `@jinn-network/restorer-sdk`
+(`spec/2026-05-external-restorer-impls.md` §3.6).
 
 **Trust:** library code runs with the impl's capabilities, not its
 own. Library bugs are impl bugs.
@@ -368,9 +383,9 @@ The impl chooses the sub-dir layout.
 
 ### 6.2 Learner as kind-specific specialist
 
-An operator publishes a learner-flavoured plug-in for a specific
-kind: `prediction-v0-learner`, `lending-health-v0-learner`. It
-declares `supportedKinds: ["prediction.v0>=1.0.0"]` (or whatever)
+An operator publishes a learner-flavoured external impl for a
+specific kind: `prediction-v0-learner`, `lending-health-v0-learner`.
+It declares `supportedKinds: ["prediction.v0>=1.0.0"]` (or whatever)
 in its manifest, and it runs alongside the baseline / claude-mcp
 specialists for the same kind.
 
@@ -461,12 +476,12 @@ declared per impl as it always was.
 
 ## 8. How operator-supplied restorers (jinn-mono-7zz) compose
 
-`jinn-mono-7zz` already shipped `spec/2026-05-restorer-plugins.md`
-on the assumption that each plug-in is a self-contained impl. That
-assumption is what this ADR confirms.
+`jinn-mono-7zz` already shipped `spec/2026-05-external-restorer-impls.md`
+on the assumption that each external impl is a self-contained impl.
+That assumption is what this ADR confirms.
 
 Concretely, a third-party operator publishing a learning-flavoured
-plug-in does the same things they would for any plug-in:
+external impl does the same things they would for any external impl:
 
 1. Implement the `RestorerImpl` interface
    (`client/src/restorer/types.ts`).
@@ -475,15 +490,15 @@ plug-in does the same things they would for any plug-in:
 3. Sign their `jinn.manifest.json` with their ed25519 key, declare
    `supportedKinds`, declare `capabilities`, pin the tarball CID.
 4. Publish; operators trust the signer, install the manifest, and
-   the plug-in lights up alongside the in-repo impls.
+   the impl lights up alongside the in-repo impls.
 
 There is no "second route" they pick depending on whether they want
 learning. Learning is something the impl does internally, not
 something the protocol surface enforces.
 
 The naming pass before public ship (`jinn-mono-juw` / GH#43,
-restorer-plugins spec §7.2 step 9) applies normally; this ADR adds
-no new public-surface vocabulary.
+external-restorer-impls spec §7.2 step 9) applies normally; this ADR
+adds no new public-surface vocabulary.
 
 ## 9. Acceptance and downstream impact
 
@@ -493,8 +508,9 @@ This ADR is accepted when:
 
 1. It is merged under `spec/`.
 2. `jinn-mono-7zz` description is updated to note that this ADR
-   confirms the per-impl assumption the plug-in spec already made,
-   and to point at this file as the architectural decision input.
+   confirms the per-impl assumption the external-impl spec already
+   made, and to point at this file as the architectural decision
+   input.
 3. `jinn-mono-bea` is closed.
 
 ### 9.2 Downstream tasks (informational, not committed by this ADR)
@@ -517,7 +533,7 @@ Suggested filing order if the Captain elects to land the ADR:
    `RestorationOutput` boundary, kind-shaped.
 4. **SDK learner-library re-exports** — once the per-impl learner
    shape stabilises, the SDK package
-   (`spec/2026-05-restorer-plugins.md` §3.6) re-exports the
+   (`spec/2026-05-external-restorer-impls.md` §3.6) re-exports the
    learner helpers (Pi session manager, OTel correlation,
    promotion gate). Optional; impl authors can copy the helpers
    if the SDK lags.
@@ -543,14 +559,14 @@ Suggested filing order if the Captain elects to land the ADR:
 
 ## 10. References
 
-- `spec/2026-05-restorer-plugins.md` — plug-in loader; per-impl
-  identity, manifest, lifecycle.
+- `spec/2026-05-external-restorer-impls.md` — external-impl loader;
+  per-impl identity, manifest, lifecycle.
 - `spec/2026-05-executor-trust-boundary.md` — per-impl credentials,
   filesystem, provenance, revocation, out-of-process seams.
 - `spec/2026-05-schema-versioning.md` — kind grammar,
   `supportedKinds` advertisement, consumer compatibility policy.
 - `spec/2026-05-registry-discovery.md` — Source A (in-repo) +
-  Source B (`restorers.plugins`) discovery model.
+  Source B (`restorers.externalImpls`) discovery model.
 - `spec/2026-04-21-agentic-data-substrate.md` — corpus thesis;
   Tier 1.1 canonical trajectory schema is engine-level under this
   ADR.
