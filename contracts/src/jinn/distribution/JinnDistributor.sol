@@ -87,6 +87,23 @@ contract JinnDistributor is Ownable2Step {
     uint256 public wEvaluationDelivery;
 
     // -------------------------------------------------------------------------
+    // Bounds on governance-mutable parameters
+    // -------------------------------------------------------------------------
+
+    /// @notice Hard ceiling on either side of the operator/DAO ratio split.
+    ///         10x the 1e18 baseline — comfortably above any plausible
+    ///         tuning, low enough to bound mint scaling so a bad
+    ///         governance proposal cannot inflate per-claim mints by an
+    ///         arbitrary factor.
+    uint256 public constant MAX_RATIO = 10e18;
+
+    /// @notice Hard ceiling on each per-channel weight. 1M JINN per
+    ///         counter unit — generous headroom over the v0 default of 1
+    ///         while still bounding the largest possible single-claim
+    ///         mint from a runaway governance update.
+    uint256 public constant MAX_WEIGHT = 1e24;
+
+    // -------------------------------------------------------------------------
     // Per-service monotonic accumulators
     // -------------------------------------------------------------------------
 
@@ -97,6 +114,16 @@ contract JinnDistributor is Ownable2Step {
     /// @notice High-water mark of DAO-share entitlement minted for
     ///         `serviceId`. Monotonically non-decreasing.
     mapping(uint256 => uint256) public totalClaimedDao;
+
+    /// @notice First-observed multisig for `serviceId`. Bound on the
+    ///         first {claim} for that serviceId; subsequent claims for
+    ///         the same serviceId MUST recover the same multisig.
+    ///         Prevents accumulator-replay across operator-multisig
+    ///         rotations: the OLAS ServiceRegistry permits the multisig
+    ///         field to change, and without this binding the new
+    ///         multisig would inherit the entitlement high-water mark
+    ///         already minted to the previous multisig.
+    mapping(uint256 => address) public serviceMultisig;
 
     // -------------------------------------------------------------------------
     // Events
@@ -147,6 +174,24 @@ contract JinnDistributor is Ownable2Step {
 
     /// @notice Messenger returned `multisig == address(0)`.
     error ZeroMultisig();
+
+    /// @notice {claim} recovered a `multisig` for `serviceId` that
+    ///         differs from the one bound on the first observation.
+    /// @dev    Guards against accumulator-replay following an OLAS
+    ///         ServiceRegistry multisig rotation.
+    error ServiceMultisigChanged(uint256 serviceId, address expected, address actual);
+
+    /// @notice {setRatios} given an operator or DAO ratio above
+    ///         {MAX_RATIO}.
+    error RatioOutOfBounds();
+
+    /// @notice {setWeights} given any per-channel weight above
+    ///         {MAX_WEIGHT}.
+    error WeightOutOfBounds();
+
+    /// @notice {setMessenger} target had no deployed bytecode at the
+    ///         supplied address (post-zero-address check).
+    error MessengerNotContract();
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -200,6 +245,21 @@ contract JinnDistributor is Ownable2Step {
         ) = messenger.verifyClaim(proof);
 
         if (multisig == address(0)) revert ZeroMultisig();
+
+        // Bind the operator multisig to the first observation for this
+        // serviceId. If the OLAS ServiceRegistry later rotates the
+        // multisig, the new address would otherwise inherit the
+        // high-water mark already minted to the old address — the new
+        // operator could claim accumulated entitlement that never
+        // belonged to them. We pin the recipient here once and then
+        // require all future claims for the same serviceId to recover
+        // the same multisig.
+        address bound = serviceMultisig[serviceId];
+        if (bound == address(0)) {
+            serviceMultisig[serviceId] = multisig;
+        } else if (bound != multisig) {
+            revert ServiceMultisigChanged(serviceId, bound, multisig);
+        }
 
         // Snapshot weighted by current per-channel weights.
         uint256 weighted = wCreation * vCreations
@@ -264,8 +324,12 @@ contract JinnDistributor is Ownable2Step {
     /// @notice Swap the cross-chain messenger. Future-proofs for
     ///         β2 (OP Succinct) and β3 (third-party bridge)
     ///         implementations.
+    /// @dev    The new address must contain deployed bytecode. This
+    ///         catches the most common governance footgun (typo'd EOA
+    ///         address) without try/catch overhead on every {claim}.
     function setMessenger(IClaimMessenger newMessenger) external onlyOwner {
         if (address(newMessenger) == address(0)) revert ZeroAddress();
+        if (address(newMessenger).code.length == 0) revert MessengerNotContract();
         messenger = newMessenger;
         emit MessengerUpdated(address(newMessenger));
     }
@@ -275,10 +339,16 @@ contract JinnDistributor is Ownable2Step {
     ///         intentionally unconstrained per the §2 = B (uncapped)
     ///         lock in the Phase A spec. Decreases never unmint;
     ///         the accumulator high-water marks are sticky.
+    /// @dev    Each side is bounded by {MAX_RATIO} so a runaway
+    ///         governance proposal cannot inflate per-claim mints by
+    ///         an arbitrary factor.
     function setRatios(uint256 newOperatorRatio, uint256 newDaoRatio)
         external
         onlyOwner
     {
+        if (newOperatorRatio > MAX_RATIO || newDaoRatio > MAX_RATIO) {
+            revert RatioOutOfBounds();
+        }
         operatorRatio = newOperatorRatio;
         daoRatio = newDaoRatio;
         emit RatiosUpdated(newOperatorRatio, newDaoRatio);
@@ -287,11 +357,21 @@ contract JinnDistributor is Ownable2Step {
     /// @notice Update per-channel weights. Each weight is
     ///         independent. As with ratios, decreases never unmint —
     ///         only future {claim} calls observe the new weights.
+    /// @dev    Each weight is bounded by {MAX_WEIGHT} for the same
+    ///         reason {setRatios} caps each side: bound the largest
+    ///         possible per-claim mint.
     function setWeights(
         uint256 _wCreation,
         uint256 _wRestorationDelivery,
         uint256 _wEvaluationDelivery
     ) external onlyOwner {
+        if (
+            _wCreation > MAX_WEIGHT
+                || _wRestorationDelivery > MAX_WEIGHT
+                || _wEvaluationDelivery > MAX_WEIGHT
+        ) {
+            revert WeightOutOfBounds();
+        }
         wCreation = _wCreation;
         wRestorationDelivery = _wRestorationDelivery;
         wEvaluationDelivery = _wEvaluationDelivery;

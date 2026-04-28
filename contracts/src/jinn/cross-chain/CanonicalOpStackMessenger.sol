@@ -222,7 +222,10 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
         bytes memory accountKey = abi.encodePacked(keccak256(abi.encodePacked(expectedEmitter)));
         bytes memory accountRlp = TrieProof.traverse(stateRoot, accountKey, accountProof);
         Memory.Slice[] memory fields = accountRlp.decodeList();
-        if (fields.length < 3) revert AccountMPTInvalid();
+        // Canonical Ethereum accounts are exactly 4 fields:
+        // [nonce, balance, storageRoot, codeHash]. Reject anything
+        // else as malformed up front — keeps the proof shape pinned.
+        if (fields.length != 4) revert AccountMPTInvalid();
 
         storageRoot = fields[2].readBytes32();
         if (storageRoot == bytes32(0)) revert StorageRootMissing();
@@ -238,7 +241,13 @@ contract CanonicalOpStackMessenger is IClaimMessenger {
 
         bytes32 mappingSlot = keccak256(abi.encode(claimId, CLAIM_SNAPSHOT_HASHES_SLOT));
         bytes memory storageKey = abi.encodePacked(keccak256(abi.encode(mappingSlot)));
-        bytes memory expectedValue = RLP.encode(expectedSnapshotHash);
+        // Geth stores storage values in the trie with leading zero
+        // bytes stripped (see geth's `TrimLeftZeroes`). RLP.encode of
+        // a `uint256` performs the same scalar encoding, while
+        // RLP.encode of a `bytes32` keeps all 32 bytes verbatim. We
+        // must encode as a scalar to match the on-chain leaf for any
+        // snapshot hash whose high bytes happen to be zero.
+        bytes memory expectedValue = RLP.encode(uint256(expectedSnapshotHash));
         if (!TrieProof.verify(expectedValue, storageRoot, storageKey, storageProof)) {
             revert SnapshotHashMismatch();
         }

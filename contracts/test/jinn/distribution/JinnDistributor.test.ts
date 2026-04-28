@@ -690,6 +690,185 @@ describe("JinnDistributor (Phase A3)", function () {
     });
   });
 
+  describe("ServiceId ↔ multisig binding (audit fix)", function () {
+    it("first claim binds the multisig in serviceMultisig[serviceId]", async function () {
+      const { distributor, messenger, alice } = await loadFixture(deployFixture);
+      const SERVICE_ID = 51n;
+
+      await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
+        verifiedCreations: 10n,
+        noveltyWeightedRestorationDeliveries: 20n,
+        evaluationDeliveryCount: 5n,
+        multisig: alice.address,
+      });
+
+      expect(await distributor.serviceMultisig(SERVICE_ID)).to.equal(
+        ethers.ZeroAddress,
+      );
+      await distributor.claim(encodeProof(SERVICE_ID));
+      expect(await distributor.serviceMultisig(SERVICE_ID)).to.equal(alice.address);
+    });
+
+    it("second claim with the same multisig succeeds (mints the delta)", async function () {
+      const { distributor, messenger, jinn, alice } = await loadFixture(deployFixture);
+      const SERVICE_ID = 52n;
+
+      await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
+        verifiedCreations: 10n,
+        noveltyWeightedRestorationDeliveries: 20n,
+        evaluationDeliveryCount: 5n,
+        multisig: alice.address,
+      });
+      await distributor.claim(encodeProof(SERVICE_ID));
+
+      // Same multisig, growing snapshot — should mint the delta and
+      // leave the binding unchanged.
+      await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
+        verifiedCreations: 30n,
+        noveltyWeightedRestorationDeliveries: 50n,
+        evaluationDeliveryCount: 20n,
+        multisig: alice.address,
+      });
+      await distributor.claim(encodeProof(SERVICE_ID));
+
+      expect(await distributor.serviceMultisig(SERVICE_ID)).to.equal(alice.address);
+      const weighted = 100n;
+      expect(await jinn.balanceOf(alice.address)).to.equal(
+        (weighted * RATIO_OPERATOR) / ONE,
+      );
+    });
+
+    it("second claim with a rotated multisig reverts with ServiceMultisigChanged", async function () {
+      const { distributor, messenger, alice, bob } = await loadFixture(deployFixture);
+      const SERVICE_ID = 53n;
+
+      await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
+        verifiedCreations: 10n,
+        noveltyWeightedRestorationDeliveries: 20n,
+        evaluationDeliveryCount: 5n,
+        multisig: alice.address,
+      });
+      await distributor.claim(encodeProof(SERVICE_ID));
+
+      // Operator rotates the OLAS multisig from alice → bob. The
+      // messenger now reports `multisig=bob` for the same serviceId.
+      await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
+        verifiedCreations: 30n,
+        noveltyWeightedRestorationDeliveries: 50n,
+        evaluationDeliveryCount: 20n,
+        multisig: bob.address,
+      });
+
+      await expect(distributor.claim(encodeProof(SERVICE_ID)))
+        .to.be.revertedWithCustomError(distributor, "ServiceMultisigChanged")
+        .withArgs(SERVICE_ID, alice.address, bob.address);
+    });
+
+    it("does not bind the multisig when the recovered multisig is zero", async function () {
+      // The ZeroMultisig revert fires BEFORE the binding write. This
+      // keeps a poisoned messenger from accidentally pinning a
+      // serviceId to address(0) (which would then forever revert
+      // future legitimate claims).
+      const [deployer, dao] = await ethers.getSigners();
+      const ZeroMsgFactory = await ethers.getContractFactory(
+        "ZeroMultisigMessenger",
+      );
+      const zeroMsg = await ZeroMsgFactory.deploy();
+      await zeroMsg.waitForDeployment();
+
+      const Jinn = await ethers.getContractFactory(JINN_FQN);
+      const jinn = await Jinn.deploy(deployer.address);
+      const Distributor = await ethers.getContractFactory(DISTRIBUTOR_FQN);
+      const distributor = await Distributor.deploy(
+        deployer.address,
+        await jinn.getAddress(),
+        dao.address,
+        await zeroMsg.getAddress(),
+        RATIO_OPERATOR,
+        RATIO_DAO,
+        1n,
+        1n,
+        1n,
+      );
+
+      await expect(distributor.claim("0x")).to.be.revertedWithCustomError(
+        distributor,
+        "ZeroMultisig",
+      );
+      // No state change — the binding remains unset.
+      expect(await distributor.serviceMultisig(0n)).to.equal(ethers.ZeroAddress);
+    });
+  });
+
+  describe("Parameter bounds (audit fix)", function () {
+    it("setRatios reverts when operatorRatio > MAX_RATIO", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      const max = await distributor.MAX_RATIO();
+      await expect(
+        distributor.connect(deployer).setRatios(max + 1n, 0n),
+      ).to.be.revertedWithCustomError(distributor, "RatioOutOfBounds");
+    });
+
+    it("setRatios reverts when daoRatio > MAX_RATIO", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      const max = await distributor.MAX_RATIO();
+      await expect(
+        distributor.connect(deployer).setRatios(0n, max + 1n),
+      ).to.be.revertedWithCustomError(distributor, "RatioOutOfBounds");
+    });
+
+    it("setRatios accepts values exactly at MAX_RATIO", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      const max = await distributor.MAX_RATIO();
+      await distributor.connect(deployer).setRatios(max, max);
+      expect(await distributor.operatorRatio()).to.equal(max);
+      expect(await distributor.daoRatio()).to.equal(max);
+    });
+
+    it("setWeights reverts when any weight > MAX_WEIGHT", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      const max = await distributor.MAX_WEIGHT();
+      await expect(
+        distributor.connect(deployer).setWeights(max + 1n, 0n, 0n),
+      ).to.be.revertedWithCustomError(distributor, "WeightOutOfBounds");
+      await expect(
+        distributor.connect(deployer).setWeights(0n, max + 1n, 0n),
+      ).to.be.revertedWithCustomError(distributor, "WeightOutOfBounds");
+      await expect(
+        distributor.connect(deployer).setWeights(0n, 0n, max + 1n),
+      ).to.be.revertedWithCustomError(distributor, "WeightOutOfBounds");
+    });
+
+    it("setWeights accepts values exactly at MAX_WEIGHT", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      const max = await distributor.MAX_WEIGHT();
+      await distributor.connect(deployer).setWeights(max, max, max);
+      expect(await distributor.wCreation()).to.equal(max);
+      expect(await distributor.wRestorationDelivery()).to.equal(max);
+      expect(await distributor.wEvaluationDelivery()).to.equal(max);
+    });
+
+    it("setMessenger reverts when target has no deployed bytecode (EOA)", async function () {
+      const { distributor, deployer, alice } = await loadFixture(deployFixture);
+      // alice is an EOA — code.length == 0.
+      await expect(
+        distributor.connect(deployer).setMessenger(alice.address),
+      ).to.be.revertedWithCustomError(distributor, "MessengerNotContract");
+    });
+
+    it("setMessenger still rejects address(0) before the code-presence check", async function () {
+      const { distributor, deployer } = await loadFixture(deployFixture);
+      await expect(
+        distributor.connect(deployer).setMessenger(ethers.ZeroAddress),
+      ).to.be.revertedWithCustomError(distributor, "ZeroAddress");
+    });
+  });
+
   describe("End-to-end JINN integration", function () {
     it("real JINN.setMinter + claim mints to the recovered multisig", async function () {
       const { distributor, messenger, jinn, alice, dao } =

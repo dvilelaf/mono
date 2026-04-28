@@ -12,7 +12,10 @@ const { ethers } = require('hardhat');
 import {
   CLAIM_TICKET_TOPIC,
   buildOutputRootArtifacts,
+  buildOutputRootArtifactsWithStoredHash,
+  claimSnapshotStorageSlot,
   encodeProof,
+  snapshotHash,
   type ClaimSnapshotFields,
 } from './_op-stack-fixture';
 
@@ -344,6 +347,160 @@ describe('CanonicalOpStackMessenger (storage proof path)', function () {
       await expect(messenger.verifyClaim(tampered)).to.be.revertedWithCustomError(
         messenger,
         'SnapshotHashMismatch',
+      );
+    });
+  });
+
+  describe('audit hardening', function () {
+    it('accepts a snapshot hash whose high byte is 0x00 (geth scalar storage encoding)', async function () {
+      // Regression for the RLP scalar-encoding fix: geth strips leading
+      // zero bytes from storage values via TrimLeftZeroes. If the
+      // messenger encoded with `RLP.encode(bytes32)` (full 32 bytes) it
+      // would mismatch the on-chain leaf for any snapshot hash that
+      // happens to have a zero high byte. We forge such a snapshot
+      // here: reuse the snapshotHash recipe but override the storage
+      // value with a hash whose first byte is 0x00.
+      const fields: ClaimSnapshotFields = {
+        claimId: CLAIM_ID,
+        serviceId: SERVICE_ID,
+        verifiedCreations: VERIFIED_CREATIONS,
+        novelty: NOVELTY,
+        evalDelivery: EVAL_DELIVERY,
+        multisig: multisig.address,
+      };
+      // Force the high byte to 0x00 by zeroing the leftmost byte of
+      // the canonical snapshot hash. The proof here decouples the
+      // *stored* hash from the field-derived hash so we can test the
+      // pure storage-trie path. We then pass the fields so the
+      // messenger recomputes a snapshot hash that matches the stored
+      // one.
+      const baseHash = snapshotHash(fields);
+      const forcedHigh = '0x00' + baseHash.slice(4);
+      // Patch the snapshot inputs so keccak(fields) == forcedHigh:
+      // build the fixture two ways. Easiest: deploy a custom emitter
+      // address and use the override builder, then submit the claim
+      // with fields that the messenger will re-hash to forcedHigh.
+      // Since we can't invert keccak, we instead use a custom
+      // messenger entry-point: encode `multisig` as a value that
+      // makes keccak(fields) start with 0x00.
+      //
+      // Pragmatic approach: brute-force search a small number of
+      // multisig low-byte mutations until keccak(fields) starts with
+      // 0x00. This costs only a few dozen iterations on average.
+      let probedFields = { ...fields };
+      let probedHash = baseHash;
+      const baseAddr = BigInt(multisig.address);
+      let found = false;
+      for (let i = 0n; i < 4096n; i++) {
+        const candidateAddr = ethers.getAddress(
+          '0x' + ((baseAddr ^ i) & ((1n << 160n) - 1n)).toString(16).padStart(40, '0'),
+        );
+        const candidate = { ...fields, multisig: candidateAddr };
+        const h = snapshotHash(candidate);
+        if (h.startsWith('0x00')) {
+          probedFields = candidate;
+          probedHash = h;
+          found = true;
+          break;
+        }
+      }
+      expect(found, 'failed to find a leading-zero-byte snapshot hash').to.equal(true);
+      expect(probedHash.startsWith('0x00')).to.equal(true);
+
+      const artifacts = buildOutputRootArtifactsWithStoredHash(
+        emitter.address,
+        probedFields.claimId,
+        probedHash,
+      );
+      const resolvedAt = BigInt((await ethers.provider.getBlock('latest'))!.timestamp) - AIRGAP - 1n;
+      await game.configure(STATUS_DEFENDER_WINS, GAME_TYPE_AZUL, resolvedAt, artifacts.outputRoot);
+      await game.setWasRespectedGameTypeWhenCreated(true);
+      await factory.setGame(DISPUTE_GAME_INDEX, GAME_TYPE_AZUL, resolvedAt, await game.getAddress());
+
+      const proofBytes = encodeProof({
+        disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
+        outputRootProofBytes: artifacts.outputRootProofBytes,
+        accountProof: artifacts.accountProof,
+        storageProof: artifacts.storageProof,
+        fields: probedFields,
+      });
+      const result = await messenger.verifyClaim(proofBytes);
+      expect(result.serviceId).to.equal(probedFields.serviceId);
+      expect(result.multisig).to.equal(probedFields.multisig);
+      // Storage slot wiring is exercised end-to-end here.
+      expect(claimSnapshotStorageSlot(probedFields.claimId)).to.match(/^0x[0-9a-f]{64}$/);
+    });
+
+    it('reverts AccountMPTInvalid on a 3-field account RLP (canonical accounts have 4 fields)', async function () {
+      // Forge an account leaf with only 3 fields. Real Ethereum
+      // accounts are [nonce, balance, storageRoot, codeHash]; the
+      // tightened check rejects any other arity to prevent malformed
+      // proofs from short-circuiting field selection.
+      const fields: ClaimSnapshotFields = {
+        claimId: CLAIM_ID,
+        serviceId: SERVICE_ID,
+        verifiedCreations: VERIFIED_CREATIONS,
+        novelty: NOVELTY,
+        evalDelivery: EVAL_DELIVERY,
+        multisig: multisig.address,
+      };
+
+      // Reuse the storage trie + output-root machinery from the
+      // canonical fixture, but rebuild the account trie with a
+      // 3-field RLP.
+      const slot = claimSnapshotStorageSlot(fields.claimId);
+      const storageTrieKey = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [slot]),
+      );
+      const sHash = snapshotHash(fields);
+      const storedValue = ethers.encodeRlp(
+        BigInt(sHash) === 0n ? '0x' : ethers.toBeHex(BigInt(sHash)),
+      );
+      const storageLeaf = ethers.encodeRlp([
+        `0x20${storageTrieKey.slice(2)}`,
+        storedValue,
+      ]);
+      const storageRoot = ethers.keccak256(storageLeaf);
+
+      const accountKey = ethers.keccak256(emitter.address);
+      // Malformed: only 3 fields. Drop the codeHash.
+      const accountRlp = ethers.encodeRlp([
+        '0x',
+        '0x',
+        storageRoot,
+      ]);
+      const accountLeaf = ethers.encodeRlp([
+        `0x20${accountKey.slice(2)}`,
+        accountRlp,
+      ]);
+      const stateRoot = ethers.keccak256(accountLeaf);
+
+      const version = ethers.id('output-root-version-v1');
+      const messagePasserStorageRoot = ethers.id('mock-msg-passer-root');
+      const latestBlockHash = ethers.id('mock-latest-block-hash');
+      const outputRoot = ethers.keccak256(
+        ethers.concat([version, stateRoot, messagePasserStorageRoot, latestBlockHash]),
+      );
+      const outputRootProofBytes = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['(bytes32,bytes32,bytes32,bytes32)'],
+        [[version, stateRoot, messagePasserStorageRoot, latestBlockHash]],
+      );
+
+      const resolvedAt = BigInt((await ethers.provider.getBlock('latest'))!.timestamp) - AIRGAP - 1n;
+      await game.configure(STATUS_DEFENDER_WINS, GAME_TYPE_AZUL, resolvedAt, outputRoot);
+      await game.setWasRespectedGameTypeWhenCreated(true);
+      await factory.setGame(DISPUTE_GAME_INDEX, GAME_TYPE_AZUL, resolvedAt, await game.getAddress());
+
+      const proofBytes = encodeProof({
+        disputeGameId: ethers.zeroPadValue(ethers.toBeHex(DISPUTE_GAME_INDEX), 32),
+        outputRootProofBytes,
+        accountProof: [accountLeaf],
+        storageProof: [storageLeaf],
+        fields,
+      });
+      await expect(messenger.verifyClaim(proofBytes)).to.be.revertedWithCustomError(
+        messenger,
+        'AccountMPTInvalid',
       );
     });
   });
