@@ -144,7 +144,7 @@ export async function deployL1Stack(
   // -----------------------------------------------------------------------
   // Step 1: JINN token — no constructor params, deployer becomes owner+minter
   // -----------------------------------------------------------------------
-  const JINN = await ethers.getContractFactory("JINN", deployer);
+  const JINN = await ethers.getContractFactory("src/vendor/governance/JINN.sol:JINN", deployer);
   const jinn = await JINN.deploy();
   await jinn.waitForDeployment();
 
