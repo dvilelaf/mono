@@ -1,4 +1,4 @@
-# Operator-Supplied Restorer Plug-ins — Technical Spec
+# External Restorer Impls — Technical Spec
 
 > Version: 1
 > Date: 2026-04-28
@@ -11,11 +11,34 @@
 > `spec/2026-05-executor-trust-boundary.md`
 > Predecessor bead: `jinn-mono-y6w` (closed as merged into jinn-mono-7zz)
 
+## Vocabulary note
+
+The audit (`jinn-mono-j75`) and earlier draft language called this surface
+"plug-ins." This spec drops that word for two reasons:
+
+1. The codebase has been on `RestorerImpl` / `impl` since day one
+   (`client/src/restorer/types.ts`, `buildRestorerImpls`,
+   `client/src/restorer/impls/`, the `jinn impls *` CLI verbs proposed
+   in `spec/2026-05-executor-trust-boundary.md` §7.2 / §5.6). "Impl" is
+   the established term; "plug-in" was the audit's gloss, not the
+   codebase's.
+2. `jinn plugin install` already exists in the CLI
+   (`client/src/cli/commands/plugin-install.ts`) for a different surface
+   — it installs the Jinn MCP server / skill into AI hosts (Claude
+   Code, Codex, Cursor). Reusing "plug-in" for operator-supplied
+   restorer impls would collide with an unrelated existing verb.
+
+This spec therefore uses **"external restorer impl"** (or, where
+context disambiguates, just "external impl") for what the audit called
+a "plug-in," and **`restorers.externalImpls`** as the config field
+formerly drafted as `restorers.plugins`. Sibling specs on the same
+branch (`spec/extension-model`) carry the rename in the same merge.
+
 ## 1. Purpose and scope
 
 This spec records the **Phase 1 loader and execution model** for an
 operator-supplied `RestorerImpl` (or `EvaluatorImpl`) — i.e. the
-mechanism the daemon uses to take a config-declared plug-in entry
+mechanism the daemon uses to take a config-declared external impl entry
 from `spec/2026-05-registry-discovery.md` §4.2 and end up with a live
 `RestorerImpl` instance in the same registry the in-repo factory
 feeds.
@@ -23,18 +46,18 @@ feeds.
 The audit (`jinn-mono-j75` §7.2.1 / §8 decision #1) framed this as a
 choice between four candidates: stay-in-repo, in-process dynamic
 import, fork template, and out-of-process executor (MCP / HTTP). The
-registry-discovery spec already chose **config-declared plug-ins** as
-the *source of candidates*; this spec picks the **loader** that
-turns a candidate into a callable impl.
+registry-discovery spec already chose **config-declared external
+impls** as the *source of candidates*; this spec picks the **loader**
+that turns a candidate into a callable impl.
 
 ### 1.1 In scope
 
-- Phase 1 loader mechanism: how `restorers.plugins[<i>].entry`
+- Phase 1 loader mechanism: how `restorers.externalImpls[<i>].entry`
   becomes a constructed `RestorerImpl`.
-- The plug-in package's module contract (default export shape, factory
-  signature, lifecycle).
-- The shape of `restorers.plugins[].entry` (filesystem path; no remote
-  URL in v1).
+- The external impl package's module contract (default export shape,
+  factory signature, lifecycle).
+- The shape of `restorers.externalImpls[].entry` (filesystem path; no
+  remote URL in v1).
 - Forward-compatibility with the trust-boundary spec's §6
   out-of-process seams — the upgrade path, and what we MUST NOT do
   now to keep it cheap.
@@ -51,12 +74,12 @@ turns a candidate into a callable impl.
 - The Phase 2 out-of-process execution model itself — only its
   Phase 1 seams. A later spec covers the wire protocol, lifecycle, and
   sandbox primitive.
-- Naming. The public-facing surface this spec defines (`restorers.plugins`,
-  `RestorerImpl`, `jinn impls *`, the package contract) MAY be renamed
-  before ship per `jinn-mono-juw` / GitHub issue #43 (Restorer → Solver,
-  outcome → solution). This spec uses the current vocabulary; a single
-  rename pass will retarget the surface before any external operator
-  publishes a plug-in. See §8.1.
+- Naming. The public-facing surface this spec defines
+  (`restorers.externalImpls`, `RestorerImpl`, `jinn impls *`, the
+  package contract) MAY be renamed before ship per `jinn-mono-juw` /
+  GitHub issue #43 (Restorer → Solver, outcome → solution). This spec
+  uses the current vocabulary; a single rename pass will retarget the
+  surface before any external operator publishes an impl. See §8.1.
 
 ### 1.3 Non-goals
 
@@ -66,18 +89,18 @@ turns a candidate into a callable impl.
   (trust-boundary §3 / §5) are the Phase 1 mitigation. This spec
   preserves the seams that let process isolation slot in later, and
   nothing more.
-- This spec is not a plug-in marketplace, runtime hot-reload, or
-  cross-fleet plug-in browser. Operators install with their existing
-  package manager; the daemon resolves at boot.
+- This spec is not a marketplace, runtime hot-reload, or cross-fleet
+  impl browser. Operators install with their existing package
+  manager; the daemon resolves at boot.
 
 ## 2. The decision
 
-For Phase 1 the daemon loads each config-declared plug-in by **dynamic
-ESM import of a local filesystem path** (audit option B / §7.2.1.B).
-The same `RestorationContext` and `RestorerImpl` shape used by in-repo
-impls applies. Out-of-process execution (audit option C) is the
-Phase 2 evolution; this spec enumerates the §6 seams we must hold to
-in Phase 1 to keep that upgrade trivial.
+For Phase 1 the daemon loads each config-declared external impl by
+**dynamic ESM import of a local filesystem path** (audit option B /
+§7.2.1.B). The same `RestorationContext` and `RestorerImpl` shape used
+by in-repo impls applies. Out-of-process execution (audit option C) is
+the Phase 2 evolution; this spec enumerates the §6 seams we must hold
+to in Phase 1 to keep that upgrade trivial.
 
 The other three candidates are rejected for Phase 1:
 
@@ -85,7 +108,7 @@ The other three candidates are rejected for Phase 1:
 |---|---|
 | **Stay in-repo** (audit option A) | Already the in-repo factory (Source A in `spec/2026-05-registry-discovery.md` §4.1). Doesn't satisfy this bead's premise — operators with their own restorer would still need to maintain a long-lived fork of the daemon. |
 | **Fork template** | Same long-lived-fork problem under a different name. Surfaced as a candidate in this bead's description; rejected on the explicit user requirement ("without maintaining a long-lived fork of the repo"). |
-| **MCP-only** | MCP is a tool-protocol, not a general impl-RPC channel. Its message shape (tools / resources / prompts) does not cleanly carry `RestorationContext` or `RestorationOutput`, and committing to it would foreclose non-MCP out-of-process variants the trust-boundary spec wants to keep open. MCP remains the right *internal* transport for in-repo impls that talk to Claude (the existing `claude-mcp-*` family); it is not the right surface for third-party plug-ins. |
+| **MCP-only** | MCP is a tool-protocol, not a general impl-RPC channel. Its message shape (tools / resources / prompts) does not cleanly carry `RestorationContext` or `RestorationOutput`, and committing to it would foreclose non-MCP out-of-process variants the trust-boundary spec wants to keep open. MCP remains the right *internal* transport for in-repo impls that talk to Claude (the existing `claude-mcp-*` family); it is not the right surface for external impls. |
 | **Out-of-process executor (audit option C)** | The right Phase 2 endpoint. Not the right Phase 1 *first* step: shipping it now also requires the wire protocol, child-process lifecycle, serialisation contracts, and a port of the existing in-repo impls' assumptions. Phase 1 dynamic-import lets the manifest, trust flow, and capability handles ship first, then Phase 2 swaps the loader without changing impl-author code if §6 holds. |
 
 The case **for** dynamic import in Phase 1, in plain terms:
@@ -97,7 +120,7 @@ The case **for** dynamic import in Phase 1, in plain terms:
   authors.
 - The trust contract (manifest signing, capability handles, install /
   runtime checks) is already cut by the sibling specs and applies
-  identically to dynamic-import plug-ins.
+  identically to dynamic-import external impls.
 - The §6 seams cost nothing extra to enforce now, and they make the
   Phase 2 lift "swap the loader" rather than "redesign the contract".
 
@@ -110,11 +133,11 @@ real isolation is a Phase 2 lift; this spec inherits that posture.
 
 ## 3. Loader contract
 
-### 3.1 Plug-in package layout
+### 3.1 External impl package layout
 
-A plug-in package is an npm-style package the operator installs into
-their `node_modules` (typically with `yarn add` or as a tarball pinned
-by `package.cid`). At its root:
+An external impl is shipped as an npm-style package the operator
+installs into their `node_modules` (typically with `yarn add` or as a
+tarball pinned by `package.cid`). At its root:
 
 ```
 my-restorer/
@@ -130,12 +153,12 @@ my-restorer/
   **relative to the package root**; absolute paths and `..` segments
   are install-time refusals.
 - `package.json`'s `main` / `exports` are not consulted by the loader.
-  The manifest `entry` is the single source of truth (so a plug-in
+  The manifest `entry` is the single source of truth (so an impl
   cannot present one entrypoint to Node and a different one to
   reviewers).
 - `package.cid` from the trust-boundary manifest pins the tarball; the
   loader operates on the *unpacked* tarball at the location named by
-  `restorers.plugins[<i>].entry` in operator config.
+  `restorers.externalImpls[<i>].entry` in operator config.
 
 ### 3.2 Module shape
 
@@ -145,10 +168,10 @@ The loaded module MUST default-export a factory function:
 // my-restorer/dist/index.ts
 import type {
   RestorerImpl,
-  RestorerPluginEnv,    // new — see §3.3
+  ExternalRestorerEnv,    // new — see §3.3
 } from '@jinn-network/restorer-sdk';   // typed re-exports of client/src/restorer/types
 
-export default function createRestorer(env: RestorerPluginEnv): RestorerImpl {
+export default function createRestorer(env: ExternalRestorerEnv): RestorerImpl {
   return new MyRestorer(env);
 }
 ```
@@ -173,19 +196,19 @@ Constraints on the factory:
 
 The default export is a function (not a class) to keep the contract
 JSON-describable in Phase 2 — a factory call serialises to "spawn
-process, send `init` with `env`" without any class-instance
-plumbing. A class export would force the loader to discriminate
+process, send `init` with `env`" without any class-instance plumbing.
+A class export would force the loader to discriminate
 "constructor-ness" across language runtimes.
 
-### 3.3 `RestorerPluginEnv`
+### 3.3 `ExternalRestorerEnv`
 
-The env object passed to the factory is the plug-in-side analog of
+The env object passed to the factory is the external-impl analog of
 `RestorerEnv` (`client/src/restorer/impls/index.ts`), narrowed to
-what an operator-supplied impl is allowed to receive at construction
-time. It is **not** `RestorationContext`; that is per-call.
+what an external impl is allowed to receive at construction time. It
+is **not** `RestorationContext`; that is per-call.
 
 ```ts
-export interface RestorerPluginEnv {
+export interface ExternalRestorerEnv {
   /** Manifest-declared name (matches RestorerImpl.name). */
   readonly implName: string;
   /** Manifest-declared semver. */
@@ -210,12 +233,12 @@ export interface RestorerPluginEnv {
 
 Two notes:
 
-- `RestorerPluginEnv` is **not** `RestorerEnv`. The in-repo factory
+- `ExternalRestorerEnv` is **not** `RestorerEnv`. The in-repo factory
   takes `RestorerEnv` (which contains `pk`, `safe`, `runner`, raw
-  RPC URLs); plug-ins do not get those. A plug-in that needs RPC
-  reads or signing receives them per-call via `ctx.rpc` and
-  `ctx.signer` (trust-boundary §3.2 / §3.3); a plug-in that needs an
-  external secret receives it via `ctx.secrets` after `onEnable`.
+  RPC URLs); external impls do not get those. An external impl that
+  needs RPC reads or signing receives them per-call via `ctx.rpc` and
+  `ctx.signer` (trust-boundary §3.2 / §3.3); an external impl that
+  needs a credential receives it via `ctx.secrets` after `onEnable`.
 - The shape is **JSON-serialisable**. No functions, no class
   instances, no Buffers, no Promises (constraint §6.2.2 of the
   trust-boundary spec). `log` is the one exception, and it is the
@@ -224,11 +247,11 @@ Two notes:
 
 ### 3.4 Lifecycle
 
-The daemon resolves and constructs each plug-in at boot, in the
-following order. Failure of any step excludes that plug-in only;
-other impls and the engine are unaffected (registry-discovery §4.3).
+The daemon resolves and constructs each external impl at boot, in the
+following order. Failure of any step excludes that impl only; other
+impls and the engine are unaffected (registry-discovery §4.3).
 
-1. **Read** the operator's `restorers.plugins[<i>]`.
+1. **Read** the operator's `restorers.externalImpls[<i>]`.
 2. **Resolve manifest.** Read the locally pinned `jinn.manifest.json`
    from the install directory (registry-discovery §4.3.2a).
 3. **Trust check.** Run trust-boundary §5.4 runtime checks: tarball
@@ -239,17 +262,17 @@ other impls and the engine are unaffected (registry-discovery §4.3).
    `status.fleet.needsAttention.reason in {"impl-trust", "impl-revoked",
    "impl-needs-revalidation"}`.
 4. **Dynamic import.** `await import(<absolute path to entry>)`. The
-   path is the join of `restorers.plugins[<i>].entry` and the
+   path is the join of `restorers.externalImpls[<i>].entry` and the
    manifest's `entry` field. Failure (module not found, syntax error,
    default export missing or non-function) → exclude with
    `reason: "impl-load-failed"`.
-5. **Construct.** Call the default export with `RestorerPluginEnv`.
+5. **Construct.** Call the default export with `ExternalRestorerEnv`.
    Construction throws → exclude with `reason: "impl-construction-failed"`.
 6. **Validate identity.** The returned `RestorerImpl.name` MUST equal
    `manifest.name`; `RestorerImpl.version` MUST equal `manifest.version`.
    Mismatch → exclude with `reason: "impl-identity-mismatch"` (this
-   defends against a plug-in that signed one manifest but ships code
-   claiming a different identity).
+   defends against an external impl that signed one manifest but ships
+   code claiming a different identity).
 7. **Validate `supportedKinds`.** Every kind the impl claims via
    `supports()` for the kinds in `manifest.supportedKinds` MUST match.
    We implement this as: for each entry `<kind>>=<semver>` in the
@@ -261,24 +284,24 @@ other impls and the engine are unaffected (registry-discovery §4.3).
 8. **Register.** Insert the impl into the same in-memory registry
    `buildRestorerImpls` populates. Duplicate `name` collisions across
    sources are an operator-fixable error (registry-discovery §4.3.3);
-   the in-repo impl wins by default and the plug-in is excluded with
-   `reason: "impl-name-collision"`. Operators resolve by editing
-   `restorers.disabled` or removing the plug-in.
+   the in-repo impl wins by default and the external impl is excluded
+   with `reason: "impl-name-collision"`. Operators resolve by editing
+   `restorers.disabled` or removing the external impl.
 
-The lifecycle is **once-per-process**. A plug-in does not hot-reload;
-to swap a plug-in version, the operator runs the install verb against
-a new manifest CID and restarts the daemon. Hot-reload is a Phase 2+
-concern explicitly because revocation (trust-boundary §5.6.2) MUST
-clear in-memory capability handles — which Phase 1 does by exiting
-the impl's slot in `buildRestorerImpls` and rebuilding the registry,
-which in turn requires an engine reload anyway. Reloading the whole
-daemon is the simpler invariant.
+The lifecycle is **once-per-process**. An external impl does not
+hot-reload; to swap an impl version, the operator runs the install
+verb against a new manifest CID and restarts the daemon. Hot-reload
+is a Phase 2+ concern explicitly because revocation (trust-boundary
+§5.6.2) MUST clear in-memory capability handles — which Phase 1 does
+by exiting the impl's slot in `buildRestorerImpls` and rebuilding the
+registry, which in turn requires an engine reload anyway. Reloading
+the whole daemon is the simpler invariant.
 
 ### 3.5 What `entry` is, and is not
 
-`restorers.plugins[<i>].entry` (registry-discovery §4.2) is a **local
-filesystem path** the daemon's loader resolves with dynamic `import()`
-joined to the manifest's `entry` field. It is typically a
+`restorers.externalImpls[<i>].entry` (registry-discovery §4.2) is a
+**local filesystem path** the daemon's loader resolves with dynamic
+`import()` joined to the manifest's `entry` field. It is typically a
 `node_modules` subdirectory the operator has populated with their
 package manager.
 
@@ -291,8 +314,8 @@ It is **not**:
   `package.cid` is the canonical remote pointer, resolved at install,
   not at boot.
 - An MCP server URL. See §2; MCP is the right transport for some
-  *internal* in-repo impls, not for the third-party plug-in surface
-  this spec defines.
+  *internal* in-repo impls, not for the external-impl surface this
+  spec defines.
 - A descriptor for an out-of-process child (e.g. `{ command: '...',
   args: [...] }`). Phase 2 may extend `entry` with a discriminated-union
   shape for that, but Phase 1 keeps it a string.
@@ -307,18 +330,18 @@ follow-up bead, §7) a small `@jinn-network/restorer-sdk` package that
 re-exports the public types: `RestorerImpl`, `RestorationContext`,
 `RestorationOutput`, `ReadyStatus`, `EnableResult`, `IntentEnableMetadata`,
 `SkippableError`, the `signer` / `rpc` / `secrets` / `fs` capability
-handle types from trust-boundary §3, and `RestorerPluginEnv` from §3.3
-above.
+handle types from trust-boundary §3, and `ExternalRestorerEnv` from
+§3.3 above.
 
-Plug-in authors depend on `@jinn-network/restorer-sdk`, not on
+External-impl authors depend on `@jinn-network/restorer-sdk`, not on
 `@jinn-network/client` directly. This separation is what lets the
 daemon implementation evolve (refactors, extra in-repo glue, internal
-deps) without breaking plug-in authors. The SDK package's semver
-becomes the contract surface plug-in authors track; today, the
+deps) without breaking external-impl authors. The SDK package's semver
+becomes the contract surface external-impl authors track; today, the
 boundary is implicit in `client/src/restorer/types.ts`.
 
-The SDK package is **not** required for Phase 1 to function — a
-plug-in author can copy the relevant types or import from the
+The SDK package is **not** required for Phase 1 to function — an
+external-impl author can copy the relevant types or import from the
 unstable internal path. But shipping the SDK is part of the "feels
 first-class" goal in this bead's description and belongs in the
 follow-up.
@@ -326,17 +349,17 @@ follow-up.
 ## 4. Conformance with the trust-boundary §6 seams
 
 Trust-boundary §6.2 lists six constraints the Phase 1 design must
-satisfy to keep the option-C upgrade trivial. The plug-in flow above
-satisfies them as follows.
+satisfy to keep the option-C upgrade trivial. The external-impl flow
+above satisfies them as follows.
 
 | §6.2 constraint | How this spec satisfies it |
 |---|---|
-| 1. Capabilities are functions, not config. | `RestorationContext.signer.signTypedData / sendAllowedCall`, `ctx.rpc` (a `viem` `PublicClient` interface), and `ctx.log` are async functions in Phase 1; they become RPCs in Phase 2 with the same signatures. The plug-in factory takes `RestorerPluginEnv` (config) and returns an impl that uses capability handles only at call time — never captures a raw signer. |
-| 2. Inputs and outputs are JSON-serialisable. | `RestorerPluginEnv` (§3.3) is JSON-serialisable. `RestorationContext` already is (per portfolio v0 design). `RestorationOutput` already is. The plug-in flow adds nothing JS-only. |
-| 3. Manifests describe capabilities declaratively. | The plug-in uses `jinn.manifest.json` `capabilities` (trust-boundary §5.2) verbatim. The loader does not synthesise capabilities at runtime; the manifest is the only source. |
+| 1. Capabilities are functions, not config. | `RestorationContext.signer.signTypedData / sendAllowedCall`, `ctx.rpc` (a `viem` `PublicClient` interface), and `ctx.log` are async functions in Phase 1; they become RPCs in Phase 2 with the same signatures. The external-impl factory takes `ExternalRestorerEnv` (config) and returns an impl that uses capability handles only at call time — never captures a raw signer. |
+| 2. Inputs and outputs are JSON-serialisable. | `ExternalRestorerEnv` (§3.3) is JSON-serialisable. `RestorationContext` already is (per portfolio v0 design). `RestorationOutput` already is. The external-impl flow adds nothing JS-only. |
+| 3. Manifests describe capabilities declaratively. | The external impl uses `jinn.manifest.json` `capabilities` (trust-boundary §5.2) verbatim. The loader does not synthesise capabilities at runtime; the manifest is the only source. |
 | 4. No global state. | Factory contract §3.2 forbids module-level state across `run` calls. Per-attempt state goes in `ctx.workingDir` (cleared between attempts); durable state goes in `ctx.implStateDir`. |
-| 5. Logging is structured. | `ctx.log({ level, msg, data })` is the only logging contract surfaced to plug-ins. The SDK package (§3.6) does NOT re-export `console`. Plug-in authors who reach for `console.log` are out of policy; their output is unobserved when out-of-process. |
-| 6. No environment-variable inheritance. | `RestorerPluginEnv` (§3.3) deliberately omits `process.env`. Plug-ins MUST NOT call `process.env` for credentials or config; secrets come via `ctx.secrets` after `onEnable`. The daemon does not propagate environment to in-process impls (other than what Node itself inherits, which is invisible to a well-behaved plug-in). Out-of-process Phase 2 will spawn children with `env: {}`. |
+| 5. Logging is structured. | `ctx.log({ level, msg, data })` is the only logging contract surfaced to external impls. The SDK package (§3.6) does NOT re-export `console`. External-impl authors who reach for `console.log` are out of policy; their output is unobserved when out-of-process. |
+| 6. No environment-variable inheritance. | `ExternalRestorerEnv` (§3.3) deliberately omits `process.env`. External impls MUST NOT call `process.env` for credentials or config; secrets come via `ctx.secrets` after `onEnable`. The daemon does not propagate environment to in-process impls (other than what Node itself inherits, which is invisible to a well-behaved impl). Out-of-process Phase 2 will spawn children with `env: {}`. |
 
 The Phase 2 swap, restated: replace step §3.4(4) (`await import(...)`)
 with `spawn(<entry>)` + a wire protocol; replace step §3.4(5)
@@ -349,8 +372,8 @@ registry insertion — is unchanged.
 An operator wants to run a third-party Aave-rebalance restorer
 (`@some-operator/aave-restorer`) for kind `lending-health.v0`.
 
-1. **Author publishes.** The author packages their plug-in, computes
-   the tarball CID, writes `jinn.manifest.json` with
+1. **Author publishes.** The author packages their external impl,
+   computes the tarball CID, writes `jinn.manifest.json` with
    `name: "@some-operator/aave-restorer"`, `version: "1.0.0"`,
    `supportedKinds: ["lending-health.v0>=1.0.0"]`,
    `entry: "./dist/index.js"`, the tarball pin, and the capability
@@ -372,7 +395,7 @@ An operator wants to run a third-party Aave-rebalance restorer
    `jinn impls add` (a follow-up bead, §7) runs the install-time checks
    (trust-boundary §5.4): resolves the CID, pins the tarball, verifies
    the signature, checks the capability allow-list against the daemon
-   ceiling. On success it appends to `restorers.plugins`:
+   ceiling. On success it appends to `restorers.externalImpls`:
    ```jsonc
    {
      "name": "@some-operator/aave-restorer",
@@ -383,7 +406,7 @@ An operator wants to run a third-party Aave-rebalance restorer
 
 4. **Daemon boot.** §3.4 runs: trust check passes, dynamic import
    resolves `./node_modules/@some-operator/aave-restorer/dist/index.js`,
-   the default export is called with `RestorerPluginEnv`, the returned
+   the default export is called with `ExternalRestorerEnv`, the returned
    impl identifies as `@some-operator/aave-restorer@1.0.0` matching
    the manifest, and the impl is registered alongside the in-repo
    impls.
@@ -392,7 +415,8 @@ An operator wants to run a third-party Aave-rebalance restorer
    the engine matches via `impl.supports({ kind: 'lending-health.v0',
    type: 'restoration' })`, constructs a `RestorationContext` with
    per-call `signer` / `rpc` / `secrets` / `fs` handles, and calls
-   `impl.run(ctx)`. The plug-in does its work using only those handles.
+   `impl.run(ctx)`. The external impl does its work using only those
+   handles.
 
 6. **Operator revokes (optional path).** Two months later the operator
    reads of a bug in `@some-operator/aave-restorer@1.0.0`:
@@ -411,13 +435,13 @@ An operator wants to run a third-party Aave-rebalance restorer
 
 - The Phase 2 out-of-process wire protocol. This spec promises the
   upgrade is cheap if §4 holds; it does not prescribe the protocol.
-- Hot-reload of plug-ins inside a running daemon. Out of scope; §3.4
-  commits to once-per-process construction.
+- Hot-reload of external impls inside a running daemon. Out of scope;
+  §3.4 commits to once-per-process construction.
 - Multi-version coexistence (e.g. running `@x/foo@1` and `@x/foo@2`
   side by side). The §3.4 duplicate-name rule rejects this. If a real
   use case appears, a follow-up spec can add a `--alias` flag to the
   install verb.
-- Plug-in inter-dependencies (impl A wanting to consume impl B's
+- External-impl inter-dependencies (impl A wanting to consume impl B's
   output beyond the existing engine artifact channel). Trust-boundary
   §7.3 already calls this out as a future bead; the loader does not
   introduce a dependency graph.
@@ -454,21 +478,21 @@ hand-off list.
    `ctx.signer`, `ctx.rpc`, `ctx.secrets`, optional `ctx.fs` per
    trust-boundary §3.1. Additive — existing in-repo impls keep
    working unchanged. This is a pre-req for the loader, because the
-   plug-in flow above assumes the new fields exist.
+   external-impl flow above assumes the new fields exist.
 2. **Manifest verifier.** Implement install-time and runtime checks
    per trust-boundary §5.4: tarball CID resolution, sha256 match,
    signature verification, allow-list ceiling, revocation.
-3. **Loader.** Implement §3.4 above: read `restorers.plugins`,
+3. **Loader.** Implement §3.4 above: read `restorers.externalImpls`,
    dynamic-import, validate identity, register. Includes the
    `status.fleet.needsAttention` reason codes named in §3.4.
 4. **CLI verbs.** `jinn impls trust|untrust|add|remove|list|show`
    for the install / introspection surface; `jinn impls
    revoke|revalidate|forget` for the revocation surface
    (trust-boundary §5.6); `jinn impls update <name>` per
-   registry-discovery §6.3 for plug-in updates.
+   registry-discovery §6.3 for external-impl updates.
 5. **In-repo disable list.** `restorers.disabled: [...]` per
    registry-discovery §4.1. Small and self-contained; can land
-   independently of the plug-in flow.
+   independently of the external-impl flow.
 6. **Maintainer revocation list wiring.** `config.implRevocationList`
    per trust-boundary §5.6.3, including IPNS / fixed-CID rotation
    policy.
@@ -477,15 +501,15 @@ hand-off list.
    `RestorerImpl` template / scaffold the way `client/src/restorer/impls/prediction-v0-baseline/`
    is the in-repo template.
 8. **Extension guide.** Promote audit §5.3 ("Add a third-party
-   impl") into `docs/runbooks/publish-a-restorer.md` once the loader
-   ships, with the worked example from §5 as the spine.
+   impl") into `docs/runbooks/publish-an-external-restorer.md` once
+   the loader ships, with the worked example from §5 as the spine.
 9. **Naming pass before public ship.** Per `jinn-mono-juw` /
    GitHub issue #43 — once the Restorer → Solver decision lands,
-   apply it across `RestorerImpl`, `restorers.plugins`,
-   `restorers.disabled`, `jinn impls *`, `RestorerPluginEnv`,
-   the SDK package name, and this spec's filename. The plug-in
+   apply it across `RestorerImpl`, `restorers.externalImpls`,
+   `restorers.disabled`, `jinn impls *`, `ExternalRestorerEnv`,
+   the SDK package name, and this spec's filename. The external-impl
    surface MUST land under final names; renaming after operators
-   publish plug-ins is a much larger churn event.
+   publish external impls is a much larger churn event.
 10. **Phase 2 out-of-process spec.** A follow-on spec when the
     operator demand or threat model warrants — wire protocol, child
     lifecycle, sandbox primitive (uid / sandbox-exec / namespaces).
@@ -494,24 +518,24 @@ hand-off list.
 
 ### 7.3 Open questions deferred
 
-- Whether `RestorerPluginEnv` should carry `network` as an enum
+- Whether `ExternalRestorerEnv` should carry `network` as an enum
   (`'base-mainnet' | 'base-sepolia' | ...`) or a structured
   `{ chainId, name }`. Today it's a string; a tightening pass
   follows the §7.2.1 work landing.
-- Whether to expose a `ctx.intentRegistry` read-only handle so a
-  plug-in can introspect sibling intents (e.g. an evaluator reading
-  a restorer's prior submission). Trust-boundary §7.3 already
-  flags this; the loader does not enable it today.
-- Plug-in `peerDependencies` policy: should the SDK enforce a
+- Whether to expose a `ctx.intentRegistry` read-only handle so an
+  external impl can introspect sibling intents (e.g. an evaluator
+  reading a restorer's prior submission). Trust-boundary §7.3
+  already flags this; the loader does not enable it today.
+- External-impl `peerDependencies` policy: should the SDK enforce a
   semver range against `@jinn-network/restorer-sdk` and refuse to
-  load plug-ins built against an incompatible SDK major? Today the
+  load impls built against an incompatible SDK major? Today the
   manifest has no SDK-version field; adding one is a §3 addendum
   when the SDK ships.
-- Whether to support a `restorers.plugins[].config` field for
-  per-plug-in operator config that is *not* a secret (e.g. an
-  exchange API base URL, a feature flag the plug-in author exposes).
+- Whether to support a `restorers.externalImpls[].config` field for
+  per-impl operator config that is *not* a secret (e.g. an exchange
+  API base URL, a feature flag the impl author exposes).
   Registry-discovery §6.3 already flags this; this spec leaves it
-  out of `RestorerPluginEnv` for v1.
+  out of `ExternalRestorerEnv` for v1.
 
 ## 8. Risks and reservations
 
@@ -519,45 +543,45 @@ hand-off list.
 
 `jinn-mono-juw` was closed pending GitHub issue #43; the Restorer →
 Solver and outcome → solution renames may land before this spec's
-implementation reaches operators. The risk is that we ship plug-in
-infrastructure under one vocabulary and then have to rename the
+implementation reaches operators. The risk is that we ship external-
+impl infrastructure under one vocabulary and then have to rename the
 public surface (config keys, CLI verbs, SDK package name) on top of
-operators who have already published plug-ins.
+operators who have already published external impls.
 
 Mitigation: §7.2 step 9 names a single rename pass before any
-operator publishes a plug-in. The implementation order ensures
-naming lands BEFORE the SDK package is published to npm and BEFORE
-the worked-example runbook ships. In-repo plug-in surface (this
-spec, `client/src/restorer/`) may rename internally without external
-churn.
+operator publishes an external impl. The implementation order
+ensures naming lands BEFORE the SDK package is published to npm and
+BEFORE the worked-example runbook ships. In-repo surface (this spec,
+`client/src/restorer/`) may rename internally without external churn.
 
 ### 8.2 The "in-process is not a security boundary" reservation
 
 Trust-boundary §2.4 and §6.1 are explicit: in-process Node has no
 real isolation. This spec inherits that posture and does not pretend
 otherwise. The mitigation is the §5.6 revocation flow: a malicious
-plug-in is removed by an operator-driven `jinn impls untrust` /
+external impl is removed by an operator-driven `jinn impls untrust` /
 `revoke`, plus the maintainer-published revocation list as a
 defense-in-depth layer.
 
 The fail-loud behaviour (§5.6.2 quarantine + state clearing,
 `status.fleet.needsAttention`) is the user-visible counterpart.
-Operators MUST be able to detect that a plug-in went bad and recover
-without rebuilding. The loader does not pretend to defend against a
-plug-in that runs *before* it is recognised as malicious — that is a
-Phase 2 process-isolation problem, and §4 keeps the upgrade open.
+Operators MUST be able to detect that an external impl went bad and
+recover without rebuilding. The loader does not pretend to defend
+against an external impl that runs *before* it is recognised as
+malicious — that is a Phase 2 process-isolation problem, and §4
+keeps the upgrade open.
 
 ### 8.3 Dependency-graph surface
 
-A plug-in's transitive npm dependencies are part of its trust surface
-(trust-boundary §2.3). The manifest pins the tarball, but the
-tarball typically excludes `node_modules` — the operator's package
-manager resolves dependencies at install. This means a poisoned
-transitive dep (the `event-stream` / `node-ipc` / `xz` pattern) is
-*not* caught by `package.hash`, because `package.hash` covers the
-plug-in's own source, not the resolved dep tree.
+An external impl's transitive npm dependencies are part of its trust
+surface (trust-boundary §2.3). The manifest pins the tarball, but
+the tarball typically excludes `node_modules` — the operator's
+package manager resolves dependencies at install. This means a
+poisoned transitive dep (the `event-stream` / `node-ipc` / `xz`
+pattern) is *not* caught by `package.hash`, because `package.hash`
+covers the impl's own source, not the resolved dep tree.
 
-Phase 1 mitigation: capability narrowing (the plug-in cannot reach
+Phase 1 mitigation: capability narrowing (the impl cannot reach
 `process.env`, the keystore, sibling impls' state, etc., even
 through a poisoned dep, *if* it goes through the boundary). Phase 2
 mitigation: process isolation, so a poisoned dep cannot escape the
@@ -573,19 +597,21 @@ or successor) rather than this spec.
 
 - `docs/reviews/2026-04-22-architecture-audit-j75.md` — audit; this
   spec records the loader half of §8 decision #1 (audit option B,
-  with §6 seams toward option C).
+  with §6 seams toward option C). The audit's "plug-in" vocabulary
+  is dropped here for the reasons in the vocabulary note above.
 - `spec/2026-05-schema-versioning.md` — kind grammar, manifest
-  semver, `supportedKinds` advertisement. The plug-in's manifest
-  `supportedKinds` array follows this grammar.
+  semver, `supportedKinds` advertisement. The external impl's
+  manifest `supportedKinds` array follows this grammar.
 - `spec/2026-05-registry-discovery.md` — the source-of-candidates
-  contract this spec consumes (§4.2's `restorers.plugins` shape).
+  contract this spec consumes (§4.2's `restorers.externalImpls`
+  shape).
 - `spec/2026-05-executor-trust-boundary.md` — the trust contract
-  the plug-in flow builds against. §5.4 install/runtime split,
+  the external-impl flow builds against. §5.4 install/runtime split,
   §5.6 revocation, §6 out-of-process seams.
 - `spec/2026-04-14-client-surface.md` — `status.fleet.needsAttention`
   shape that the loader reports into.
 - `client/src/restorer/types.ts` — current `RestorerImpl` shape; the
-  plug-in module contract (§3.2) is this interface.
+  external-impl module contract (§3.2) is this interface.
 - `client/src/restorer/impls/index.ts` — `buildRestorerImpls`; the
   in-repo Source A whose registry the loader inserts into.
 - `jinn-mono-juw` — naming alignment decision (now in GitHub issue

@@ -1,15 +1,24 @@
 # Executor Trust Boundary — Technical Spec
 
-> Version: 1.1
-> Date: 2026-04-27
-> Author: Ale
+> Version: 1.2
+> Date: 2026-04-27 (rev 2026-04-28: vocabulary — "plug-in" → "external impl")
+> Author: Ale (rev: opus on jinn-mono-7zz)
 > Status: Proposed (not yet adopted)
-> Supersedes: v1 (2026-05-04) — adds §5.6 revocation (signer untrust,
-> manifest revoke, maintainer revocation list, trust-pin expiry, and
-> quarantine semantics for revoked impl state)
-> Informs: `jinn-mono-7zz` (first-class operator-supplied restorers / plug-in flow)
+> Supersedes: v1.1 (vocabulary-only retarget); v1 (2026-05-04) added
+> §5.6 revocation (signer untrust, manifest revoke, maintainer
+> revocation list, trust-pin expiry, and quarantine semantics for
+> revoked impl state)
+> Informs: `jinn-mono-7zz` (first-class operator-supplied restorers / external-impl flow)
 > Audit: `jinn-mono-j75` §7.2.4, §8 decision #3
-> Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-registry-discovery.md`
+> Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-registry-discovery.md`, `spec/2026-05-external-restorer-impls.md`
+
+## Vocabulary note (2026-04-28)
+
+v1.2 retargets "plug-in" → "external impl" throughout, matching the
+codebase's `RestorerImpl` / `impl` vocabulary and avoiding collision
+with the unrelated existing `jinn plugin install` verb (which
+installs the Jinn MCP server / skill into AI hosts). The
+trust-boundary contract is unchanged.
 
 ## 1. Purpose and scope
 
@@ -26,7 +35,7 @@ read off of one document:
    place (provenance), and what is the install-time vs runtime split?
 
 The boundary established here is the contract `jinn-mono-7zz`
-(operator-supplied plug-ins) builds against. It is intentionally
+(operator-supplied external impls) builds against. It is intentionally
 conservative: a Phase 1 in-process impl is treated as **untrusted code
 running with the daemon's PID**. The seams below let us tighten that
 to out-of-process (option C in the registry-discovery spec) without
@@ -48,8 +57,9 @@ re-cutting the API.
 ### 1.2 Out of scope
 
 - Choice between dynamic-import / fork-template / out-of-process / MCP
-  for the Phase 1 plug-in mechanism — that is `jinn-mono-7zz`. This
-  spec gives that decision a constraint set, not a verdict.
+  for the Phase 1 external-impl mechanism — that is
+  `spec/2026-05-external-restorer-impls.md`. This spec gives that
+  decision a constraint set, not a verdict.
 - The schema-versioning policy for `kind` strings — that is
   `spec/2026-05-schema-versioning.md`.
 - Where impls live (in-repo vs config-declared vs on-chain registry)
@@ -64,8 +74,8 @@ re-cutting the API.
   isolation in Node is best-effort, not a security boundary. Phase 1
   treats provenance + capability narrowing as defense-in-depth, with
   process isolation deferred to Phase 2.
-- Defining a full plug-in marketplace. The provenance rules below
-  cover the **single operator install path**; a multi-operator
+- Defining a full external-impl marketplace. The provenance rules
+  below cover the **single operator install path**; a multi-operator
   registry is `spec/2026-05-registry-discovery.md` Phase 2.
 
 ## 2. Threat model
@@ -358,8 +368,8 @@ question is asked at install time (when the operator opts an impl
 into their fleet) and re-checked at runtime (when the daemon starts).
 
 This section assumes the **option (b)** registry-discovery model from
-§8 decision #1: in-repo directory + config-declared plug-ins, with no
-on-chain registry in Phase 1.
+§8 decision #1: in-repo directory + config-declared external impls,
+with no on-chain registry in Phase 1.
 
 ### 5.1 Sources of impls
 
@@ -368,15 +378,15 @@ Phase 1 has two impl sources, with different provenance requirements:
 | Source | Provenance | Verification |
 |---|---|---|
 | **In-repo** (`client/src/restorer/impls/<name>/`) | The repo's commit history; review by the Jinn maintainers. | Implicit — if the binary was built from this repo, the impl is trusted to the same level as the daemon. |
-| **Config-declared plug-in** (operator names a package + CID) | Manifest signed by a key the operator has chosen to trust. | Explicit — described in §5.2–§5.4. |
+| **Config-declared external impl** (operator names a package + CID) | Manifest signed by a key the operator has chosen to trust. | Explicit — described in §5.2–§5.4. |
 
 In-repo impls are out of scope for the rest of §5 — they ship and are
 verified with the daemon binary itself.
 
-### 5.2 Plug-in manifest
+### 5.2 External-impl manifest
 
-Every config-declared impl ships a `jinn.manifest.json` at the root
-of its package:
+Every config-declared external impl ships a `jinn.manifest.json` at
+the root of its package:
 
 ```jsonc
 {
@@ -646,7 +656,7 @@ their fleet — defense against silent decay.
 ## 6. Evolution to out-of-process (option C)
 
 The audit (`jinn-mono-j75` §8 decision #1) lists three options for
-plug-in delivery: dynamic import (in-process), fork template,
+external-impl delivery: dynamic import (in-process), fork template,
 out-of-process service (option C — MCP / HTTP). This spec does not
 pick one, but it requires that **the design we ship now does not
 foreclose option C**.
@@ -713,7 +723,8 @@ This spec is accepted when:
 2. `jinn-mono-7zz` description is updated to reference this spec as
    its trust-boundary input.
 3. The (closed) `jinn-mono-y6w` close-reason notes that the
-   trust-boundary contract for first-class plug-ins is defined here.
+   trust-boundary contract for first-class external impls is defined
+   here.
 
 ### 7.2 Downstream tasks (informational, not committed by this spec)
 

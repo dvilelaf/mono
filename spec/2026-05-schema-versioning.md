@@ -41,8 +41,8 @@ This spec closes that gap.
 - The contents of any specific manifest (defined per-kind in
   `client/src/types/<kind>.ts` and the kind's own spec doc).
 - Storage format on ERC-8004 / IPFS (envelope shape lives elsewhere).
-- The plugin distribution mechanism (`spec/2026-05-restorer-plugins.md`
-  or successor; audit §8 decision #1).
+- The external-impl distribution mechanism
+  (`spec/2026-05-external-restorer-impls.md`; audit §8 decision #1).
 - Trust boundary for third-party impls (audit §8 decision #3).
 
 ### 1.3 Non-goals

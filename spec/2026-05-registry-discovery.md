@@ -1,13 +1,26 @@
-# Plug-in Registry & Discovery — Technical Spec
+# External Impl Registry & Discovery — Technical Spec
 
-> Version: 1
-> Date: 2026-04-27
-> Author: Ale
+> Version: 1.1
+> Date: 2026-04-27 (rev 2026-04-28: vocabulary — "plug-in" → "external impl")
+> Author: Ale (rev: opus on jinn-mono-7zz)
 > Status: Proposed (not yet adopted)
 > Supersedes: none
-> Informs: `jinn-mono-7zz` (first-class operator-supplied restorers / plug-in flow)
+> Informs: `jinn-mono-7zz` (first-class operator-supplied restorers / external-impl flow)
 > Audit: `jinn-mono-j75` §7.2.3, §8 decision #1
-> Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-executor-trust-boundary.md`
+> Sibling specs: `spec/2026-05-schema-versioning.md`, `spec/2026-05-executor-trust-boundary.md`, `spec/2026-05-external-restorer-impls.md`
+
+## Vocabulary note (2026-04-28)
+
+The audit (`jinn-mono-j75`) and v1 of this spec used "plug-in" for the
+operator-supplied / config-declared variant of `RestorerImpl`. The
+codebase has been on `RestorerImpl` / `impl` throughout
+(`client/src/restorer/`, the `jinn impls *` CLI verbs); the term
+"plug-in" was the audit's gloss, not the codebase's, and it collides
+with the unrelated existing `jinn plugin install` verb (which
+installs the Jinn MCP server / skill into AI hosts). v1.1 retargets
+to **"external impl"** for prose and **`restorers.externalImpls`**
+for the config field. The decision and shape are unchanged from v1;
+only vocabulary moved.
 
 ## 1. Purpose and scope
 
@@ -16,8 +29,8 @@ which `RestorerImpl` / `EvaluatorImpl` instances exist** at boot time,
 and how an operator extends the set without forking the daemon.
 
 It is a short decision record. The mechanism it commits to (in-repo
-directory + config-declared plug-ins) is shaped jointly with the two
-sibling specs:
+directory + config-declared external impls) is shaped jointly with the
+two sibling specs:
 
 - `spec/2026-05-schema-versioning.md` — what kinds an impl claims via
   its manifest `supportedKinds`.
@@ -34,8 +47,9 @@ verification on the candidates this spec selects.
 
 - The Phase 1 mechanism for enumerating candidate impls at daemon
   startup.
-- The config field that declares operator-supplied plug-ins (sketch;
-  exact shape finalised by `jinn-mono-7zz`).
+- The config field that declares operator-supplied external impls
+  (sketch; field names finalised in
+  `spec/2026-05-external-restorer-impls.md`).
 - The interaction with the trust-boundary manifest from
   `spec/2026-05-executor-trust-boundary.md` §5.2.
 - What is **explicitly excluded** for Phase 1 and what would be
@@ -43,16 +57,17 @@ verification on the candidates this spec selects.
 
 ### 1.2 Out of scope
 
-- The plug-in loader's runtime mechanism (dynamic `import()` vs fork
-  vs out-of-process). That is `jinn-mono-7zz`; this spec gives it a
+- The external-impl loader's runtime mechanism (dynamic `import()`
+  vs fork vs out-of-process). That is
+  `spec/2026-05-external-restorer-impls.md`; this spec gives it a
   source-of-candidates contract, not an execution model.
 - Manifest signature verification, CID pinning, capability allow-lists,
   and revocation. Those live in
   `spec/2026-05-executor-trust-boundary.md` §5.
 - Schema versioning of intent kinds and manifests. That is
   `spec/2026-05-schema-versioning.md`.
-- Multi-operator plug-in marketplaces, payments, or reputation. Phase
-  2+ concerns; see §5.
+- Multi-operator external-impl marketplaces, payments, or reputation.
+  Phase 2+ concerns; see §5.
 
 ### 1.3 Non-goals
 
@@ -113,20 +128,20 @@ In-repo impls today *are* discovered by static import in
 but constrained at code-review time — that channel remains and is
 distinct from this option (see §4.1).
 
-### 3.2 (b) Manifest + config-declared plug-ins — **selected**
+### 3.2 (b) Manifest + config-declared external impls — **selected**
 
 **Mechanism:** two sources, unioned at boot:
 
 1. The in-repo factory `buildRestorerImpls` (existing behaviour).
-2. Config-declared plug-ins under a new `restorers.plugins` field;
-   each entry references a package + manifest the daemon loads via
-   the trust-boundary spec's install-time / runtime checks.
+2. Config-declared external impls under a new `restorers.externalImpls`
+   field; each entry references a package + manifest the daemon loads
+   via the trust-boundary spec's install-time / runtime checks.
 
 **Selected for Phase 1.** Rationale:
 
 - Reviewable per-fleet surface. The operator's `config.json` is the
   single source of truth for which third-party impls are active.
-- Provenance hook is direct. Each plug-in entry references a
+- Provenance hook is direct. Each external-impl entry references a
   `jinn.manifest.json` (`spec/2026-05-executor-trust-boundary.md`
   §5.2), signed by a key the operator has trusted. Discovery and
   trust use the same artifact.
@@ -192,19 +207,19 @@ as the daemon binary (audit §7.2.3,
 a normal code review on the daemon repo.
 
 Operators MAY disable individual in-repo impls via configuration
-(`restorers.disabled: ["legacy-claude", ...]`, exact field name
-finalised by `jinn-mono-7zz`). Disabling is purely subtractive — it
-cannot change behaviour, only suppress an impl entirely.
+(`restorers.disabled: ["legacy-claude", ...]`). Disabling is purely
+subtractive — it cannot change behaviour, only suppress an impl
+entirely.
 
-### 4.2 Source B: config-declared plug-ins
+### 4.2 Source B: config-declared external impls
 
 A new top-level field on the daemon config:
 
 ```jsonc
-// ~/.jinn-client/config.json (sketch — exact field names finalised by jinn-mono-7zz)
+// ~/.jinn-client/config.json
 {
   "restorers": {
-    "plugins": [
+    "externalImpls": [
       {
         "name": "@some-operator/restorer-foo",   // matches jinn.manifest.json `name`
         "package": "ipfs://bafy...manifest",      // points at the manifest, not the tarball
@@ -220,13 +235,13 @@ The fields, in plain terms:
 | Field | Purpose |
 |---|---|
 | `name` | The unique impl name. MUST equal the `name` in the resolved `jinn.manifest.json`. Mismatch is an install-time refusal. |
-| `package` | A pointer to the plug-in's `jinn.manifest.json` (typically `ipfs://<cid>` or a local path during development). The manifest carries the tarball CID, signature, and capability allow-list per `spec/2026-05-executor-trust-boundary.md` §5.2. |
-| `entry` | The local filesystem path the daemon's loader resolves at boot (typically a node_modules path the operator has populated with their package manager). The chosen loader (`jinn-mono-7zz`) decides whether this is a dynamic-import path, a fork-template root, or an MCP server descriptor. |
+| `package` | A pointer to the external impl's `jinn.manifest.json` (typically `ipfs://<cid>` or a local path during development). The manifest carries the tarball CID, signature, and capability allow-list per `spec/2026-05-executor-trust-boundary.md` §5.2. |
+| `entry` | The local filesystem path the daemon's loader resolves at boot (typically a node_modules path the operator has populated with their package manager). The Phase 1 loader (`spec/2026-05-external-restorer-impls.md` §3.4) resolves this with dynamic ESM `import()`; the field is locked to a local filesystem path for v1 (no remote URL, no MCP descriptor). |
 
-The exact key names (`plugins` vs `pluginEntries`, `package` vs
-`manifest`, etc.) are finalised by `jinn-mono-7zz` when it lands the
-implementation. This spec commits to the **shape** — name, manifest
-pointer, local entry — not the spelling.
+Field-name finalisation: `restorers.externalImpls`,
+`restorers.disabled`, and the per-entry `name` / `package` / `entry`
+shape land here. The loader spec
+(`spec/2026-05-external-restorer-impls.md`) consumes them as-is.
 
 ### 4.3 Discovery procedure at boot
 
@@ -234,7 +249,7 @@ The boot sequence:
 
 1. `buildRestorerImpls` constructs the in-repo impls (§4.1). Disabled
    names are filtered out.
-2. For each entry in `restorers.plugins`:
+2. For each entry in `restorers.externalImpls`:
    a. Resolve `package` to a local pinned `jinn.manifest.json`
       (install-time work; the daemon does not fetch from IPFS at
       boot — see `spec/2026-05-executor-trust-boundary.md` §5.4).
@@ -243,14 +258,16 @@ The boot sequence:
       capability allow-list is within daemon ceiling; impl is not
       revoked (`spec/2026-05-executor-trust-boundary.md` §5.6).
    c. Resolve `entry` to a module / process descriptor via the
-      Phase 1 loader (`jinn-mono-7zz`).
+      Phase 1 loader (`spec/2026-05-external-restorer-impls.md`
+      §3.4).
    d. Register the constructed impl into the same `RestorerImpl`
       registry the in-repo source feeds.
-3. Reject any duplicate `name` across both sources. Plug-in collision
-   with an in-repo name is an operator-fixable error: rename the
-   plug-in, disable the in-repo entry, or remove the plug-in.
+3. Reject any duplicate `name` across both sources. An external-impl
+   collision with an in-repo name is an operator-fixable error:
+   rename the external impl, disable the in-repo entry, or remove the
+   external impl.
 
-If step (2b) fails for any plug-in, that plug-in is excluded and
+If step (2b) fails for any external impl, that entry is excluded and
 `status.fleet.needsAttention` is flagged with reason `"impl-trust"`
 or `"impl-revoked"` (per the client-surface spec). The daemon does
 not abort boot — other impls remain available.
@@ -270,11 +287,12 @@ The decision in §4.1–§4.3 explicitly rules out, for Phase 1:
   subtractive.
 - **No directory scan of operator-writable paths.** A future
   `~/.jinn-client/impls/` autoload directory is **not** part of Phase
-  1. Operators add plug-ins by editing config; the daemon never picks
-  up a plug-in the operator has not explicitly listed.
-- **No bare-package plug-ins.** Every config-declared plug-in MUST
-  resolve to a `jinn.manifest.json` per the trust-boundary spec. An
-  npm package without a manifest is not a valid plug-in source.
+  1. Operators add external impls by editing config; the daemon never
+  picks up an external impl the operator has not explicitly listed.
+- **No bare-package external impls.** Every config-declared external
+  impl MUST resolve to a `jinn.manifest.json` per the trust-boundary
+  spec. An npm package without a manifest is not a valid external-impl
+  source.
 
 Reopening any of the above requires a new spec. The intent is that
 the next operator who proposes "let's just add a directory scan" has
@@ -300,10 +318,10 @@ A hosted additive index — symmetric to the revocation list — could
 publish "manifests the Jinn maintainers have reviewed" without
 removing the operator's `trustedImplSigners` veto. Whether this
 materialises depends on operator demand: if Phase 1 fleets routinely
-share the same five plug-ins, an index reduces config churn; if every
-fleet runs its own bespoke set, it does not.
+share the same five external impls, an index reduces config churn; if
+every fleet runs its own bespoke set, it does not.
 
-### 5.3 Cross-fleet plug-in discovery
+### 5.3 Cross-fleet external-impl discovery
 
 A multi-operator marketplace (browse, install, rate impls across
 fleets) is explicitly deferred. It composes on top of either §5.1 or
@@ -324,14 +342,14 @@ This spec is accepted when:
 
 ### 6.2 Downstream tasks (informational, not committed by this spec)
 
-- `jinn-mono-7zz` finalises the exact field names under `restorers`
-  (§4.2 sketch) and ships the loader implementation. It is the only
-  consumer of all three 9ry specs and is the integration point where
-  discovery, trust, and versioning meet runtime code.
+- `spec/2026-05-external-restorer-impls.md` ships the loader and
+  finalises the per-entry shape (§4.2). It is the only consumer of
+  all three 9ry specs and is the integration point where discovery,
+  trust, and versioning meet runtime code.
 - A follow-up bead implements the in-repo disable list (§4.1) — small
-  and self-contained, but distinct from the plug-in loader work.
+  and self-contained, but distinct from the external-impl loader work.
 - A follow-up bead defines the `jinn impls list` / `jinn impls show`
-  CLI verbs that surface the discovery state (which plug-ins
+  CLI verbs that surface the discovery state (which external impls
   resolved, which were excluded by trust failure or revocation, which
   in-repo impls are disabled). Companion to the install / trust verbs
   in `spec/2026-05-executor-trust-boundary.md` §7.2.
@@ -340,29 +358,33 @@ This spec is accepted when:
 
 - Whether the `entry` field allows a remote target (e.g. an MCP
   server URL) directly, or only a local filesystem path resolved by
-  the operator's package manager. `jinn-mono-7zz` decides as part of
-  the loader model; the trust-boundary spec's §6 seams already
-  anticipate both.
-- Per-plug-in environment / config injection (e.g. a plug-in needs
+  the operator's package manager. **Locked to local filesystem path
+  for v1** by `spec/2026-05-external-restorer-impls.md` §3.5; the
+  remote-target variant is deferred to Phase 2 alongside the
+  out-of-process loader (trust-boundary §6 seams keep it open).
+- Per-impl environment / config injection (e.g. an external impl needs
   an exchange API base URL). Deferred to the trust-boundary spec's
-  `ctx.secrets` flow plus a future plug-in-config field; out of scope
-  here.
-- Plug-in update semantics (how an operator moves to a newer
+  `ctx.secrets` flow plus a future external-impl-config field; out of
+  scope here.
+- External-impl update semantics (how an operator moves to a newer
   manifest CID). Conceptually a `jinn impls update <name>` verb that
   re-runs install-time checks against a new `package` pointer; field
-  shape lives with `jinn-mono-7zz`.
+  shape finalised in `spec/2026-05-external-restorer-impls.md` §7.2.
 
 ## 7. References
 
 - `docs/reviews/2026-04-22-architecture-audit-j75.md` — audit; this
   spec records the policy half of §8 decision #1 and closes §7.2.3.
-- `spec/2026-05-schema-versioning.md` — sibling spec. A plug-in's
-  `jinn.manifest.json` `supportedKinds` array follows that spec's
-  grammar; this spec assumes it as the kind-routing contract.
+- `spec/2026-05-schema-versioning.md` — sibling spec. An external
+  impl's `jinn.manifest.json` `supportedKinds` array follows that
+  spec's grammar; this spec assumes it as the kind-routing contract.
 - `spec/2026-05-executor-trust-boundary.md` — sibling spec. §5 of
   that spec owns manifest signing, capability allow-lists, install
   vs runtime checks, and revocation. This spec calls into those
-  rules for every config-declared plug-in.
+  rules for every config-declared external impl.
+- `spec/2026-05-external-restorer-impls.md` — sibling spec. Owns the
+  loader / execution model (Phase 1 dynamic ESM `import()` of a local
+  filesystem path) and the per-entry shape this spec sketches in §4.2.
 - `spec/2026-04-14-client-surface.md` — `status.fleet.needsAttention`
   and `jinn version --json` shape that the discovery surface (§4.3)
   reports into.
