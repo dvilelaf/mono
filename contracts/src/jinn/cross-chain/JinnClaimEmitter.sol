@@ -42,36 +42,47 @@ interface IServiceRegistry {
 }
 
 /// @title JinnClaimEmitter
-/// @notice Stateless event emitter on Base / Base Sepolia. Reads three
+/// @notice Snapshot emitter on Base / Base Sepolia. Reads three
 ///         monotonic counters across two source contracts (V2 checker
 ///         and V2 router) plus the service multisig from the OLAS
 ///         ServiceRegistry, and emits a `ClaimTicket` carrying the
 ///         snapshot. The companion `IClaimMessenger` on the JINN
-///         chain (Ethereum / Sepolia) validates the resulting log via
-///         a canonical OP-Stack proof and feeds the recovered values
-///         to the JinnDistributor.
+///         chain (Ethereum / Sepolia) validates the stored snapshot
+///         hash via a canonical OP-Stack storage proof and feeds the
+///         recovered values to the JinnDistributor.
 ///
-/// @dev    No storage, no admin, no upgrade path. Permissionless:
-///         anyone can call `emitClaim` for any serviceId. Spamming
-///         the event costs the caller gas; doesn't affect the
-///         on-chain values being read. Replay protection lives in
-///         JinnDistributor accumulators on the JINN chain.
+/// @dev    No admin, no upgrade path. Permissionless: anyone can call
+///         `emitClaim` for any serviceId. Spamming the event costs the
+///         caller gas; each call writes a new immutable snapshot hash.
+///         Replay protection lives in JinnDistributor accumulators on
+///         the JINN chain.
 contract JinnClaimEmitter {
     IRestorationActivityCheckerV2 public immutable checker;
     IJinnRouterV2 public immutable router;
     IServiceRegistry public immutable serviceRegistry;
+
+    /// @notice Last assigned claim id. Starts at 0; the first emitted
+    ///         claim uses id 1.
+    uint256 public nextClaimId;
+
+    /// @notice Stored snapshot commitment proven by the canonical L1
+    ///         messenger. The mapping slot is intentionally stable for
+    ///         storage-proof construction:
+    ///         `keccak256(abi.encode(claimId, uint256(1)))`.
+    mapping(uint256 => bytes32) public claimSnapshotHashes;
 
     /// @notice Snapshot of the three counter values for `serviceId`
     ///         at emit time. Carries `multisig` so the JINN-chain
     ///         distributor can route the operator-share mint, and
     ///         `claimer` for analytics (does not gate anything).
     event ClaimTicket(
+        uint256 indexed claimId,
         uint256 indexed serviceId,
         uint256 verifiedCreations,
         uint256 noveltyWeightedRestorationDeliveries,
         uint256 evaluationDeliveryCount,
         address indexed multisig,
-        address indexed claimer
+        address claimer
     );
 
     constructor(address _checker, address _router, address _registry) {
@@ -81,6 +92,16 @@ contract JinnClaimEmitter {
         checker = IRestorationActivityCheckerV2(_checker);
         router = IJinnRouterV2(_router);
         serviceRegistry = IServiceRegistry(_registry);
+
+        // Storage-layout invariant: CanonicalOpStackMessenger derives the
+        // mapping slot as keccak256(abi.encode(claimId, 1)). If a future
+        // edit reorders state and shifts claimSnapshotHashes off slot 1,
+        // every canonical proof would silently fail. Pin it at deploy.
+        uint256 actualSlot;
+        assembly {
+            actualSlot := claimSnapshotHashes.slot
+        }
+        require(actualSlot == 1, "JinnClaimEmitter: snapshot slot drift");
     }
 
     /// @notice Emit a snapshot ClaimTicket for the given service. All
@@ -88,14 +109,34 @@ contract JinnClaimEmitter {
     ///         event captures their values at one block.
     /// @param serviceId OLAS service id whose multisig owns the
     ///                  counters being snapshotted.
-    function emitClaim(uint256 serviceId) external {
+    function emitClaim(uint256 serviceId) external returns (uint256 claimId) {
         (, address multisig, , , , , ) = serviceRegistry.mapServices(serviceId);
         require(multisig != address(0), "JinnClaimEmitter: unknown service");
+
+        claimId = nextClaimId + 1;
+        nextClaimId = claimId;
+
+        uint256 verifiedCreations = checker.verifiedCreations(multisig);
+        uint256 noveltyWeightedRestorationDeliveries = checker.noveltyWeightedCounts(multisig);
+        uint256 evaluationDeliveryCount = router.evaluationDeliveryCount(multisig);
+
+        claimSnapshotHashes[claimId] = keccak256(
+            abi.encode(
+                claimId,
+                serviceId,
+                verifiedCreations,
+                noveltyWeightedRestorationDeliveries,
+                evaluationDeliveryCount,
+                multisig
+            )
+        );
+
         emit ClaimTicket(
+            claimId,
             serviceId,
-            checker.verifiedCreations(multisig),
-            checker.noveltyWeightedCounts(multisig),
-            router.evaluationDeliveryCount(multisig),
+            verifiedCreations,
+            noveltyWeightedRestorationDeliveries,
+            evaluationDeliveryCount,
             multisig,
             msg.sender
         );

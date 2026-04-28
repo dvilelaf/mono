@@ -8,8 +8,8 @@ import {IClaimMessenger} from "../interfaces/IClaimMessenger.sol";
 ///         tests, local dev, and Phase D testnet burn-in fallback when
 ///         canonical OP-Stack finality is not yet practical on Base
 ///         Sepolia. Implements `IClaimMessenger` by decoding `proof`
-///         as `abi.encode(uint256 serviceId)` and returning the
-///         pre-set fixture for that service.
+///         as `abi.encode(uint256 claimId)` and returning the pre-set
+///         fixture for that exact snapshot.
 ///
 /// @dev    Insecure by design — the owner can mint arbitrary JINN
 ///         through the JinnDistributor by writing fixtures. NEVER
@@ -21,15 +21,17 @@ contract MockMessenger is IClaimMessenger {
     ///         is sentinel for "not set"; `verifyClaim` reverts on
     ///         that.
     struct Fixture {
+        uint256 serviceId;
         uint256 verifiedCreations;
         uint256 noveltyWeightedRestorationDeliveries;
         uint256 evaluationDeliveryCount;
         address multisig;
     }
 
+    /// @notice Fixtures keyed by `JinnClaimEmitter.ClaimTicket.claimId`.
     mapping(uint256 => Fixture) public fixtures;
 
-    event FixtureSet(uint256 indexed serviceId, address indexed multisig);
+    event FixtureSet(uint256 indexed claimId, uint256 indexed serviceId, address indexed multisig);
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
 
     constructor(address _owner) {
@@ -40,11 +42,11 @@ contract MockMessenger is IClaimMessenger {
 
     /// @notice Owner-only fixture write. `verifyClaim` is read-only
     ///         for anyone.
-    function setFixture(uint256 serviceId, Fixture calldata f) external {
+    function setFixture(uint256 claimId, Fixture calldata f) external {
         require(msg.sender == owner, "MockMessenger: not owner");
         require(f.multisig != address(0), "MockMessenger: multisig=0");
-        fixtures[serviceId] = f;
-        emit FixtureSet(serviceId, f.multisig);
+        fixtures[claimId] = f;
+        emit FixtureSet(claimId, f.serviceId, f.multisig);
     }
 
     /// @notice Owner-only ownership transfer. Useful for handing the
@@ -58,8 +60,8 @@ contract MockMessenger is IClaimMessenger {
     }
 
     /// @inheritdoc IClaimMessenger
-    /// @dev `proof` is `abi.encode(uint256 serviceId)`. Reverts if no
-    ///      fixture has been set for that service.
+    /// @dev `proof` is `abi.encode(uint256 claimId)`. Reverts if no
+    ///      fixture has been set for that snapshot.
     function verifyClaim(bytes calldata proof)
         external
         view
@@ -72,11 +74,11 @@ contract MockMessenger is IClaimMessenger {
             address multisig
         )
     {
-        serviceId = abi.decode(proof, (uint256));
-        Fixture memory f = fixtures[serviceId];
+        uint256 claimId = abi.decode(proof, (uint256));
+        Fixture memory f = fixtures[claimId];
         require(f.multisig != address(0), "MockMessenger: no fixture");
         return (
-            serviceId,
+            f.serviceId,
             f.verifiedCreations,
             f.noveltyWeightedRestorationDeliveries,
             f.evaluationDeliveryCount,

@@ -22,6 +22,29 @@ describe('JinnClaimEmitter', function () {
 
   const SERVICE_ID = 42n;
 
+  function expectedSnapshotHash(args: {
+    claimId: bigint;
+    serviceId: bigint;
+    verifiedCreations: bigint;
+    novelty: bigint;
+    evalDelivery: bigint;
+    multisig: string;
+  }): string {
+    return ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'address'],
+        [
+          args.claimId,
+          args.serviceId,
+          args.verifiedCreations,
+          args.novelty,
+          args.evalDelivery,
+          args.multisig,
+        ],
+      ),
+    );
+  }
+
   beforeEach(async function () {
     [owner, claimer, multisig] = await ethers.getSigners();
 
@@ -85,7 +108,19 @@ describe('JinnClaimEmitter', function () {
 
     await expect(emitter.connect(claimer).emitClaim(SERVICE_ID))
       .to.emit(emitter, 'ClaimTicket')
-      .withArgs(SERVICE_ID, 7n, 11n, 3n, multisig.address, claimer.address);
+      .withArgs(1n, SERVICE_ID, 7n, 11n, 3n, multisig.address, claimer.address);
+
+    expect(await emitter.nextClaimId()).to.equal(1n);
+    expect(await emitter.claimSnapshotHashes(1n)).to.equal(
+      expectedSnapshotHash({
+        claimId: 1n,
+        serviceId: SERVICE_ID,
+        verifiedCreations: 7n,
+        novelty: 11n,
+        evalDelivery: 3n,
+        multisig: multisig.address,
+      }),
+    );
   });
 
   it('reads zero counters when nothing has been set', async function () {
@@ -93,7 +128,7 @@ describe('JinnClaimEmitter', function () {
 
     await expect(emitter.connect(claimer).emitClaim(SERVICE_ID))
       .to.emit(emitter, 'ClaimTicket')
-      .withArgs(SERVICE_ID, 0n, 0n, 0n, multisig.address, claimer.address);
+      .withArgs(1n, SERVICE_ID, 0n, 0n, 0n, multisig.address, claimer.address);
   });
 
   it('reflects subsequent counter updates on re-emit', async function () {
@@ -107,7 +142,8 @@ describe('JinnClaimEmitter', function () {
 
     await expect(emitter.connect(claimer).emitClaim(SERVICE_ID))
       .to.emit(emitter, 'ClaimTicket')
-      .withArgs(SERVICE_ID, 5n, 9n, 4n, multisig.address, claimer.address);
+      .withArgs(2n, SERVICE_ID, 5n, 9n, 4n, multisig.address, claimer.address);
+    expect(await emitter.nextClaimId()).to.equal(2n);
   });
 
   it('reverts on unknown serviceId (multisig=0)', async function () {
@@ -122,9 +158,9 @@ describe('JinnClaimEmitter', function () {
 
     await expect(emitter.connect(owner).emitClaim(SERVICE_ID))
       .to.emit(emitter, 'ClaimTicket')
-      .withArgs(SERVICE_ID, 2n, 0n, 0n, multisig.address, owner.address);
+      .withArgs(1n, SERVICE_ID, 2n, 0n, 0n, multisig.address, owner.address);
     await expect(emitter.connect(claimer).emitClaim(SERVICE_ID))
       .to.emit(emitter, 'ClaimTicket')
-      .withArgs(SERVICE_ID, 2n, 0n, 0n, multisig.address, claimer.address);
+      .withArgs(2n, SERVICE_ID, 2n, 0n, 0n, multisig.address, claimer.address);
   });
 });

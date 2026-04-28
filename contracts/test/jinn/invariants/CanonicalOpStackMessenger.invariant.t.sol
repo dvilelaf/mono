@@ -5,8 +5,9 @@ import {Test} from "forge-std/Test.sol";
 
 /// @title CanonicalOpStackMessengerInvariantTest — placeholder stub
 /// @notice Foundry invariant harness for the canonical OP-Stack
-///         messenger. Real invariants once the 8 `TODO(7x5)` markers in
-///         CanonicalOpStackMessenger.sol have closed:
+///         messenger. The canonical path now verifies L2 account/storage
+///         proofs for claimSnapshotHashes[claimId]; the remaining follow-up
+///         is invariant authoring:
 ///
 ///           1. statelessness:
 ///                `verifyClaim` writes no storage. Property: between
@@ -17,28 +18,26 @@ import {Test} from "forge-std/Test.sol";
 ///
 ///           2. proof envelope binding:
 ///                Proofs that decode but mismatch the expected emitter
-///                address or claimTicketTopic always revert. Fuzz with
-///                random emitters / topics.
+///                account proof, storage slot, or stored snapshot hash
+///                always revert.
 ///
 ///           3. tuple recovery surjective:
-///                Given a well-formed log, the returned tuple equals
-///                the values that the test harness encoded into
-///                `topics` + `data`.
+///                Given a well-formed storage proof, the returned tuple
+///                equals the values committed by the proven snapshot hash.
 ///
-///           4. dispute-game finality (post-7x5):
+///           4. dispute-game finality:
 ///                `verifyClaim` reverts whenever
 ///                game.status() != DEFENDER_WINS or the airgap timer
 ///                has not elapsed. Tests must stub
-///                IDisputeGameFactory + IFaultDisputeGame to drive
+///                IDisputeGameFactory + generic IDisputeGame to drive
 ///                these states.
 ///
-///           5. receipt MPT inclusion (post-7x5):
-///                Mutating any byte of `receiptRLP` or the proof
+///           5. storage MPT inclusion:
+///                Mutating any byte of the account/storage proof
 ///                without rebuilding the root produces a revert.
 ///
 ///         These will be authored under a follow-up to bd
-///         `jinn-mono-sz0` once the deeper Fault Proof verification
-///         logic ships.
+///         `jinn-mono-sz0`.
 ///
 /// @dev    Stub harness; verifies forge-std wiring only.
 contract CanonicalOpStackMessengerInvariantTest is Test {

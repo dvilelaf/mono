@@ -343,5 +343,6 @@ export const FAST_TEST_DEPLOY_CONFIG: DeployConfig = {
   epochLen: 900,
   votePeriodSeconds: 900,
   weightVoteDelaySeconds: 900,
-  voteCheckpointHorizon: 1000,
+  /** Matches `VoteWeightingFast._maxNumPeriods()` (widened from 1_000 → 10_000 for Sepolia heartbeat stalls). */
+  voteCheckpointHorizon: 10_000,
 };

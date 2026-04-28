@@ -169,6 +169,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const SERVICE_ID = 42n;
 
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -213,6 +214,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const SERVICE_ID = 1n;
 
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -244,6 +246,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // Snapshot A: weighted=35.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -255,6 +258,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // Snapshot B: weighted=100.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 30n,
         noveltyWeightedRestorationDeliveries: 50n,
         evaluationDeliveryCount: 20n,
@@ -289,6 +293,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // High snapshot first.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 30n,
         noveltyWeightedRestorationDeliveries: 50n,
         evaluationDeliveryCount: 20n,
@@ -301,6 +306,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // Now a lower snapshot for the same service.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -325,6 +331,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // First claim at default weights (1,1,1).
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -352,6 +359,7 @@ describe("JinnDistributor (Phase A3)", function () {
       // With wCreation=0, weighted = 1*restoration + 1*evalDelivery.
       // Set restoration=100, evalDelivery=5 → weighted=105.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n, // ignored, wCreation=0
         noveltyWeightedRestorationDeliveries: 100n,
         evaluationDeliveryCount: 5n,
@@ -378,6 +386,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const SERVICE_ID = 31n;
 
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -428,6 +437,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // Original messenger: snapshot A (weighted=35).
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -441,6 +451,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const messenger2 = await MockMessenger.deploy(deployer.address);
       await messenger2.waitForDeployment();
       await messenger2.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 30n,
         noveltyWeightedRestorationDeliveries: 50n,
         evaluationDeliveryCount: 20n,
@@ -474,6 +485,7 @@ describe("JinnDistributor (Phase A3)", function () {
 
       // Start on a high snapshot via the original messenger.
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 30n,
         noveltyWeightedRestorationDeliveries: 50n,
         evaluationDeliveryCount: 20n,
@@ -488,6 +500,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const MockMessenger = await ethers.getContractFactory(MOCK_MESSENGER_FQN);
       const messenger2 = await MockMessenger.deploy(deployer.address);
       await messenger2.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -592,6 +605,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const messenger = await MockMessenger.deploy(deployer.address);
       await messenger.waitForDeployment();
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -686,6 +700,7 @@ describe("JinnDistributor (Phase A3)", function () {
       expect(await jinn.minter()).to.equal(await distributor.getAddress());
 
       await messenger.setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 100n,
         noveltyWeightedRestorationDeliveries: 200n,
         evaluationDeliveryCount: 50n,

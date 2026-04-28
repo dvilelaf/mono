@@ -2,21 +2,24 @@
 pragma solidity ^0.8.30;
 
 /// @title MockFaultDisputeGame
-/// @notice Configurable stand-in for OP-Stack `FaultDisputeGame`. Tests
+/// @notice Configurable stand-in for OP-Stack dispute games. Tests
 ///         set the four immutable getters used by
 ///         `CanonicalOpStackMessenger`. All other Bedrock surface is
-///         out-of-scope; the messenger only reads `status()`,
-///         `gameType()`, `resolvedAt()`, and `rootClaim()`.
+///         out-of-scope.
 contract MockFaultDisputeGame {
     uint8 public statusValue;
     uint32 public gameTypeValue;
     uint64 public resolvedAtValue;
     bytes32 public rootClaimValue;
+    bool public wasRespectedGameTypeWhenCreatedValue = true;
 
     function status() external view returns (uint8) { return statusValue; }
     function gameType() external view returns (uint32) { return gameTypeValue; }
     function resolvedAt() external view returns (uint64) { return resolvedAtValue; }
     function rootClaim() external view returns (bytes32) { return rootClaimValue; }
+    function wasRespectedGameTypeWhenCreated() external view returns (bool) {
+        return wasRespectedGameTypeWhenCreatedValue;
+    }
 
     function configure(
         uint8 _status,
@@ -28,6 +31,10 @@ contract MockFaultDisputeGame {
         gameTypeValue = _gameType;
         resolvedAtValue = _resolvedAt;
         rootClaimValue = _rootClaim;
+    }
+
+    function setWasRespectedGameTypeWhenCreated(bool value) external {
+        wasRespectedGameTypeWhenCreatedValue = value;
     }
 }
 
@@ -68,7 +75,15 @@ contract MockDisputeGameFactory {
 ///         is consulted by the messenger.
 contract MockOptimismPortal2 {
     uint256 public delay;
+    uint256 public gameFinalityDelay;
+    uint32 public respectedGameTypeValue;
 
     function setDelay(uint256 _delay) external { delay = _delay; }
+    function setGameFinalityDelay(uint256 _delay) external { gameFinalityDelay = _delay; }
+    function setRespectedGameType(uint32 _gameType) external { respectedGameTypeValue = _gameType; }
     function proofMaturityDelaySeconds() external view returns (uint256) { return delay; }
+    function disputeGameFinalityDelaySeconds() external view returns (uint256) {
+        return gameFinalityDelay;
+    }
+    function respectedGameType() external view returns (uint32) { return respectedGameTypeValue; }
 }

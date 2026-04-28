@@ -21,7 +21,7 @@
  *   - `canonical`  Deploys {CanonicalOpStackMessenger} bound to L1 OptimismPortal2,
  *                  DisputeGameFactory, the L2 emitter, and the locked event topic.
  *                  Default for `canonical` timing profile. Live deploys must set
- *                  the four address/topic env vars below.
+ *                  the address/topic env vars below.
  *
  * Messenger mode is selected via the `JINN_MVI_MESSENGER_MODE` env var; if
  * unset, it follows the timing profile.
@@ -177,16 +177,11 @@ export interface CanonicalMessengerWiring {
   expectedEmitter: string;
   /** topic0 of the `ClaimTicket` event. */
   claimTicketTopic: string;
-  /** Authorised FaultDisputeGame type (e.g., 0 = permissioned, 1 = permissionless Cannon). */
-  authorisedGameType: number;
 }
-
-/** Default authorised FaultDisputeGame type — permissioned Cannon (0) on Sepolia. */
-export const DEFAULT_AUTHORISED_GAME_TYPE = 0;
 
 /** Canonical `JinnClaimEmitter.ClaimTicket` event topic — locked at deploy. */
 export const CLAIM_TICKET_TOPIC: string = ethers.id(
-  "ClaimTicket(uint256,uint256,uint256,uint256,address,address)",
+  "ClaimTicket(uint256,uint256,uint256,uint256,uint256,address,address)",
 );
 
 /**
@@ -203,16 +198,10 @@ export function resolveCanonicalMessengerWiring(
   if (!optimismPortal || !disputeGameFactory || !expectedEmitter) {
     return null;
   }
-  const rawGameType = env.JINN_MVI_AUTHORISED_GAME_TYPE;
-  const authorisedGameType =
-    rawGameType !== undefined && rawGameType !== ""
-      ? Number(rawGameType)
-      : DEFAULT_AUTHORISED_GAME_TYPE;
   return {
     optimismPortal,
     disputeGameFactory,
     expectedEmitter,
     claimTicketTopic: env.JINN_MVI_CLAIM_TICKET_TOPIC ?? CLAIM_TICKET_TOPIC,
-    authorisedGameType,
   };
 }

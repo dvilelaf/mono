@@ -17,6 +17,8 @@ describe('MockMessenger', function () {
   let other: any;
   let multisig: any;
 
+  const CLAIM_ID = 101n;
+  const CLAIM_ID_2 = 102n;
   const SERVICE_ID = 7n;
 
   beforeEach(async function () {
@@ -33,15 +35,16 @@ describe('MockMessenger', function () {
     );
   });
 
-  it('verifyClaim returns the fixture for a known serviceId', async function () {
-    await messenger.setFixture(SERVICE_ID, {
+  it('verifyClaim returns the fixture for a known claimId', async function () {
+    await messenger.setFixture(CLAIM_ID, {
+      serviceId: SERVICE_ID,
       verifiedCreations: 10n,
       noveltyWeightedRestorationDeliveries: 20n,
       evaluationDeliveryCount: 5n,
       multisig: multisig.address,
     });
 
-    const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [SERVICE_ID]);
+    const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [CLAIM_ID]);
     const result = await messenger.verifyClaim(proof);
 
     expect(result.serviceId).to.equal(SERVICE_ID);
@@ -51,7 +54,29 @@ describe('MockMessenger', function () {
     expect(result.multisig).to.equal(multisig.address);
   });
 
-  it('reverts when no fixture has been set for the serviceId', async function () {
+  it('supports multiple claims for one serviceId', async function () {
+    await messenger.setFixture(CLAIM_ID, {
+      serviceId: SERVICE_ID,
+      verifiedCreations: 10n,
+      noveltyWeightedRestorationDeliveries: 20n,
+      evaluationDeliveryCount: 5n,
+      multisig: multisig.address,
+    });
+    await messenger.setFixture(CLAIM_ID_2, {
+      serviceId: SERVICE_ID,
+      verifiedCreations: 11n,
+      noveltyWeightedRestorationDeliveries: 21n,
+      evaluationDeliveryCount: 6n,
+      multisig: multisig.address,
+    });
+
+    const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [CLAIM_ID_2]);
+    const result = await messenger.verifyClaim(proof);
+    expect(result.serviceId).to.equal(SERVICE_ID);
+    expect(result.verifiedCreations).to.equal(11n);
+  });
+
+  it('reverts when no fixture has been set for the claimId', async function () {
     const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [123n]);
     await expect(messenger.verifyClaim(proof)).to.be.revertedWith(
       'MockMessenger: no fixture',
@@ -60,7 +85,8 @@ describe('MockMessenger', function () {
 
   it('rejects setFixture from a non-owner', async function () {
     await expect(
-      messenger.connect(other).setFixture(SERVICE_ID, {
+      messenger.connect(other).setFixture(CLAIM_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 1n,
         noveltyWeightedRestorationDeliveries: 1n,
         evaluationDeliveryCount: 1n,
@@ -71,7 +97,8 @@ describe('MockMessenger', function () {
 
   it('rejects setFixture with multisig=0 (sentinel for unset)', async function () {
     await expect(
-      messenger.setFixture(SERVICE_ID, {
+      messenger.setFixture(CLAIM_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 1n,
         noveltyWeightedRestorationDeliveries: 1n,
         evaluationDeliveryCount: 1n,
@@ -82,7 +109,8 @@ describe('MockMessenger', function () {
 
   it('emits FixtureSet on setFixture', async function () {
     await expect(
-      messenger.setFixture(SERVICE_ID, {
+      messenger.setFixture(CLAIM_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 1n,
         noveltyWeightedRestorationDeliveries: 1n,
         evaluationDeliveryCount: 1n,
@@ -90,7 +118,7 @@ describe('MockMessenger', function () {
       }),
     )
       .to.emit(messenger, 'FixtureSet')
-      .withArgs(SERVICE_ID, multisig.address);
+      .withArgs(CLAIM_ID, SERVICE_ID, multisig.address);
   });
 
   it('owner can transfer ownership; new owner can set fixtures', async function () {
@@ -101,7 +129,8 @@ describe('MockMessenger', function () {
 
     // Old owner can no longer write.
     await expect(
-      messenger.setFixture(SERVICE_ID, {
+      messenger.setFixture(CLAIM_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 1n,
         noveltyWeightedRestorationDeliveries: 1n,
         evaluationDeliveryCount: 1n,
@@ -110,13 +139,14 @@ describe('MockMessenger', function () {
     ).to.be.revertedWith('MockMessenger: not owner');
 
     // New owner can.
-    await messenger.connect(other).setFixture(SERVICE_ID, {
+    await messenger.connect(other).setFixture(CLAIM_ID, {
+      serviceId: SERVICE_ID,
       verifiedCreations: 99n,
       noveltyWeightedRestorationDeliveries: 88n,
       evaluationDeliveryCount: 77n,
       multisig: multisig.address,
     });
-    const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [SERVICE_ID]);
+    const proof = ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [CLAIM_ID]);
     const result = await messenger.verifyClaim(proof);
     expect(result.verifiedCreations).to.equal(99n);
   });

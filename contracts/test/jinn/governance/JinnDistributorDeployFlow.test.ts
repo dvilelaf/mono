@@ -180,6 +180,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
       //   entitledDao      = 35 * 0.25e18 / 1e18 =  8
       const SERVICE_ID = 7n;
       await messenger.connect(deployer).setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -239,6 +240,7 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
 
       const SERVICE_ID = 99n;
       await messenger.connect(deployer).setFixture(SERVICE_ID, {
+        serviceId: SERVICE_ID,
         verifiedCreations: 10n,
         noveltyWeightedRestorationDeliveries: 20n,
         evaluationDeliveryCount: 5n,
@@ -274,7 +276,6 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
           disputeGameFactory: fakeFactory.address,
           expectedEmitter: fakeEmitter.address,
           claimTicketTopic: CLAIM_TICKET_TOPIC,
-          authorisedGameType: 0,
         },
       };
 
