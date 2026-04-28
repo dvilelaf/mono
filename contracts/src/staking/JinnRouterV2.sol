@@ -92,23 +92,23 @@ contract JinnRouterV2 {
     address public mechMarketplace;
     // Slot 3 — kept for proxy storage layout compatibility
     uint256 public livenessRatio;
-    // Slot 4
+    // Slot 4 — `initialized` (byte 0) and `activityChecker` (bytes 1..20) pack
+    //          into the same slot; do not split.
     bool public initialized;
-    // Slot 5
     address public activityChecker;
 
-    // Activity counters (slots 6-9)
+    // Activity counters (slots 5-8)
     mapping(address => uint256) public creationCount;
     mapping(address => uint256) public restorationDeliveryCount;
     mapping(address => uint256) public evaluationCreationCount;
     mapping(address => uint256) public evaluationDeliveryCount;
 
-    // Request tracking (slots 10-12)
+    // Request tracking (slots 9-11)
     mapping(bytes32 => JobType) public requestTypes;
     mapping(bytes32 => bool) public claimed;
     mapping(bytes32 => bool) public restorationDeliveryClaimed;
 
-    // ε creation gating (slot 13)
+    // ε creation gating (slot 12)
     /// @dev Maps requestId → original creator (caller of `createRestorationJob`).
     ///      Used by `claimDelivery` to forward the creator into the V2 checker so
     ///      creator credit is gated by the same Hamming/SimHash novelty test as
