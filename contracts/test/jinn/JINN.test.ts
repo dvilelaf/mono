@@ -126,17 +126,19 @@ describe("JINN (v0 ERC20Votes governance token)", function () {
       expect(await jinn.getVotes(alice.address)).to.equal(1_000n);
       expect(await jinn.getVotes(bob.address)).to.equal(200n);
 
-      // Snapshot the block before the transfer so we can probe past votes.
-      const beforeTransferBlock = await ethers.provider.getBlockNumber();
+      // Snapshot the timestamp before the transfer so we can probe past votes.
+      // (JINN uses ERC-6372 timestamp mode — getPastVotes takes a timestamp,
+      // not a block number.)
+      const beforeTransferTime = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
 
-      // Mine one block so that beforeTransferBlock is queryable as a "past" block.
+      // Advance time so beforeTransferTime is queryable as a strictly-past timepoint.
       await ethers.provider.send("evm_mine", []);
 
       // Transfer from alice -> bob.
       await jinn.connect(alice).transfer(bob.address, 300n);
-      const afterTransferBlock = await ethers.provider.getBlockNumber();
+      const afterTransferTime = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
 
-      // Mine again to make afterTransferBlock queryable as past.
+      // Advance again to make afterTransferTime queryable as past.
       await ethers.provider.send("evm_mine", []);
 
       // Live voting power tracks balances.
@@ -144,10 +146,10 @@ describe("JINN (v0 ERC20Votes governance token)", function () {
       expect(await jinn.getVotes(bob.address)).to.equal(500n);
 
       // Past voting power preserves history.
-      expect(await jinn.getPastVotes(alice.address, beforeTransferBlock)).to.equal(1_000n);
-      expect(await jinn.getPastVotes(bob.address, beforeTransferBlock)).to.equal(200n);
-      expect(await jinn.getPastVotes(alice.address, afterTransferBlock)).to.equal(700n);
-      expect(await jinn.getPastVotes(bob.address, afterTransferBlock)).to.equal(500n);
+      expect(await jinn.getPastVotes(alice.address, beforeTransferTime)).to.equal(1_000n);
+      expect(await jinn.getPastVotes(bob.address, beforeTransferTime)).to.equal(200n);
+      expect(await jinn.getPastVotes(alice.address, afterTransferTime)).to.equal(700n);
+      expect(await jinn.getPastVotes(bob.address, afterTransferTime)).to.equal(500n);
     });
   });
 
