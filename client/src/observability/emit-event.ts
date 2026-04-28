@@ -9,6 +9,8 @@ export type LifecycleKind =
   | 'evaluation_submitted'
   | 'reward_claimed'
   | 'balance_topup'
+  | 'jinn_claim_emitted'
+  | 'jinn_claim_submitted'
   | 'engine_transition'
   | 'tick_error'
   | 'startup'

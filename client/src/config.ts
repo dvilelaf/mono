@@ -120,6 +120,91 @@ export const JinnConfigSchema = z.object({
   /** Optional Base Sepolia ClaimRegistry deployment artifact path */
   testnetClaimRegistryDeploymentPath: z.string().optional(),
 
+  /**
+   * Optional deployment artifact for the v0 MVI L1 stack
+   * (deployment-jinn-mvi-l1-{network}{,-fast}.json). Provides addresses for
+   * JINN, Timelock, JinnGovernor, JinnDistributor, and Messenger.
+   * When set the daemon enables the cross-chain JINN claim loop.
+   */
+  jinnMviL1DeploymentPath: z.string().optional(),
+
+  /**
+   * Optional deployment artifact for the v0 MVI L2 emitter
+   * (deployment-jinn-mvi-l2-{network}.json). Provides the
+   * JinnClaimEmitter address on the measurement chain (Base / Base Sepolia).
+   */
+  jinnMviL2DeploymentPath: z.string().optional(),
+
+  // ── Cross-chain claim loop (Phase B / jinn-mono-7x5) ─────────────────────
+
+  /**
+   * RPC endpoint for the L1 governance chain (Ethereum / Sepolia) where the
+   * JinnDistributor lives. Required when jinnDistributorAddress is set.
+   * Env: JINN_ETHEREUM_RPC_URL.
+   */
+  ethereumRpcUrl: z.string().url().optional(),
+
+  /**
+   * Optional archive RPC endpoint for the L1 governance chain. Used for
+   * historical block lookups when constructing canonical-mode proofs.
+   * Env: JINN_ETHEREUM_ARCHIVE_RPC_URL.
+   */
+  ethereumArchiveRpcUrl: z.string().url().optional(),
+
+  /**
+   * L1 network used by the cross-chain claim loop. 'sepolia' tracks Base
+   * Sepolia testnet; 'ethereum' tracks Base mainnet. Defaults to 'sepolia'
+   * during Phase 1b. Env: JINN_L1_NETWORK.
+   */
+  jinnL1Network: z.enum(['sepolia', 'ethereum']).default('sepolia'),
+
+  /**
+   * JinnDistributor address on the L1 governance chain. Setting this enables
+   * the cross-chain claim loop. When set, ethereumRpcUrl MUST also be set.
+   * Resolved from jinnMviL1DeploymentPath when omitted; otherwise a manual
+   * override. Env: JINN_DISTRIBUTOR_ADDRESS.
+   */
+  jinnDistributorAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * JinnClaimEmitter address on the L2 measurement chain (Base / Base
+   * Sepolia). Resolved from jinnMviL2DeploymentPath when omitted.
+   * Env: JINN_CLAIM_EMITTER_ADDRESS.
+   */
+  jinnClaimEmitterAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * Messenger address on the L1 governance chain. Resolved from
+   * jinnMviL1DeploymentPath when omitted.
+   * Env: JINN_MESSENGER_ADDRESS.
+   */
+  jinnMessengerAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
+    .optional(),
+
+  /**
+   * Messenger mode driving proof construction. 'canonical' constructs
+   * OP-Stack Fault Proof proofs; 'mock' submits MockMessenger fixtures and is
+   * intended for testnet burn-in convenience or CI. Defaults to 'canonical'.
+   * Env: JINN_MESSENGER_MODE.
+   */
+  jinnMessengerMode: z.enum(['canonical', 'mock']).default('canonical'),
+
+  /**
+   * How often the daemon ticks the cross-chain JINN claim loop (ms). Default
+   * 3 600 000 (1 hour) — well below mainnet challenge windows while
+   * minimising RPC/gas churn. Set to 0 to disable when the address is set.
+   * Env: JINN_CLAIM_LOOP_INTERVAL_MS.
+   */
+  jinnClaimLoopIntervalMs: z.number().int().min(0).default(60 * 60 * 1000),
+
   /** Staking mode: 'standard' uses stOLAS (no OLAS needed), 'self-bond' uses operator-provided OLAS. */
   stakingMode: z.enum(['standard', 'self-bond']).default('standard'),
 
@@ -169,7 +254,16 @@ export const JinnConfigSchema = z.object({
       implStateDirRoot: z.string().optional(),
     })
     .optional(),
-});
+}).refine(
+  (cfg) => !cfg.jinnDistributorAddress || !!cfg.ethereumRpcUrl,
+  {
+    message:
+      'ethereumRpcUrl must be set when jinnDistributorAddress is configured ' +
+      '(env JINN_ETHEREUM_RPC_URL or config field). The cross-chain claim loop ' +
+      'cannot reach the L1 governance chain without it.',
+    path: ['ethereumRpcUrl'],
+  },
+);
 
 const DEFAULT_ENGINE = {
   workingDirRoot: join(homedir(), '.jinn-client', 'engine', 'work'),
@@ -267,6 +361,18 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
   if (env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT']) {
     merged.testnetClaimRegistryDeploymentPath = env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
+  }
+  if (env['JINN_MVI_L1_DEPLOYMENT']) merged.jinnMviL1DeploymentPath = env['JINN_MVI_L1_DEPLOYMENT'];
+  if (env['JINN_MVI_L2_DEPLOYMENT']) merged.jinnMviL2DeploymentPath = env['JINN_MVI_L2_DEPLOYMENT'];
+  if (env['JINN_ETHEREUM_RPC_URL']) merged.ethereumRpcUrl = env['JINN_ETHEREUM_RPC_URL'];
+  if (env['JINN_ETHEREUM_ARCHIVE_RPC_URL']) merged.ethereumArchiveRpcUrl = env['JINN_ETHEREUM_ARCHIVE_RPC_URL'];
+  if (env['JINN_L1_NETWORK']) merged.jinnL1Network = env['JINN_L1_NETWORK'];
+  if (env['JINN_DISTRIBUTOR_ADDRESS']) merged.jinnDistributorAddress = env['JINN_DISTRIBUTOR_ADDRESS'];
+  if (env['JINN_CLAIM_EMITTER_ADDRESS']) merged.jinnClaimEmitterAddress = env['JINN_CLAIM_EMITTER_ADDRESS'];
+  if (env['JINN_MESSENGER_ADDRESS']) merged.jinnMessengerAddress = env['JINN_MESSENGER_ADDRESS'];
+  if (env['JINN_MESSENGER_MODE']) merged.jinnMessengerMode = env['JINN_MESSENGER_MODE'];
+  if (env['JINN_CLAIM_LOOP_INTERVAL_MS'] !== undefined) {
+    merged.jinnClaimLoopIntervalMs = parseInt(env['JINN_CLAIM_LOOP_INTERVAL_MS'], 10);
   }
   if (env['JINN_STAKING_MODE'])           merged.stakingMode = env['JINN_STAKING_MODE'];
   if (env['JINN_TARGET_SERVICES'])    merged.targetServices = parseInt(env['JINN_TARGET_SERVICES'], 10);
