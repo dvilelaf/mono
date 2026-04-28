@@ -33,9 +33,17 @@ import {
   FAST_TEST_GOVERNANCE_CONFIG,
   LOCKED_DISTRIBUTOR_INITIAL_CONFIG,
   CLAIM_TICKET_TOPIC,
+  CHAIN_ID_HARDHAT,
+  CHAIN_ID_SEPOLIA,
+  CHAIN_ID_BASE_MAINNET,
+  JINN_MVI_L1_ALLOWED_CHAINS,
+  assertChainIdAllowed,
+  resolveJinnMviTimingProfileForChain,
 } from "../../../scripts/lib/jinn-mvi-helpers";
 import {
   deployJinnMviL1,
+  resolveRenounceAdmin,
+  verifyDeploy,
   type MessengerDeployParams,
 } from "../../../scripts/deploy-jinn-mvi-l1";
 
@@ -259,6 +267,212 @@ describe("JinnDistributor deploy + handover flow (Phase A5)", function () {
         (l: any) => l.topics[0] === claimedTopic,
       );
       expect(hasClaimedLog).to.equal(false);
+    });
+  });
+
+  describe("chainId guard (Fix 8)", function () {
+    it("allows hardhat (31337) and sepolia (11155111) by default", function () {
+      assertChainIdAllowed({
+        chainId: CHAIN_ID_HARDHAT,
+        allowed: JINN_MVI_L1_ALLOWED_CHAINS,
+        scriptName: "test",
+      });
+      assertChainIdAllowed({
+        chainId: CHAIN_ID_SEPOLIA,
+        allowed: JINN_MVI_L1_ALLOWED_CHAINS,
+        scriptName: "test",
+      });
+    });
+
+    it("rejects unknown chains (e.g. Base mainnet) with an actionable message", function () {
+      expect(() =>
+        assertChainIdAllowed({
+          chainId: CHAIN_ID_BASE_MAINNET,
+          allowed: JINN_MVI_L1_ALLOWED_CHAINS,
+          scriptName: "Jinn MVI L1 stack",
+        }),
+      ).to.throw(`Refusing to deploy Jinn MVI L1 stack on chainId ${CHAIN_ID_BASE_MAINNET}`);
+    });
+
+    it("opts in via JINN_MVI_ALLOW_CHAIN matching the connected chain", function () {
+      // Override grants an explicit pass for a single chain id.
+      assertChainIdAllowed({
+        chainId: CHAIN_ID_BASE_MAINNET,
+        allowed: JINN_MVI_L1_ALLOWED_CHAINS,
+        scriptName: "test",
+        env: { JINN_MVI_ALLOW_CHAIN: String(CHAIN_ID_BASE_MAINNET) },
+      });
+    });
+
+    it("override does not bypass other chains", function () {
+      expect(() =>
+        assertChainIdAllowed({
+          chainId: CHAIN_ID_BASE_MAINNET,
+          allowed: JINN_MVI_L1_ALLOWED_CHAINS,
+          scriptName: "test",
+          env: { JINN_MVI_ALLOW_CHAIN: "999" },
+        }),
+      ).to.throw();
+    });
+  });
+
+  describe("chainId-aware default timing profile (Fix 9)", function () {
+    it("returns fast-test on Sepolia + Hardhat by default", function () {
+      expect(resolveJinnMviTimingProfileForChain(CHAIN_ID_HARDHAT, {})).to.equal(
+        "fast-test",
+      );
+      expect(resolveJinnMviTimingProfileForChain(CHAIN_ID_SEPOLIA, {})).to.equal(
+        "fast-test",
+      );
+    });
+
+    it("returns canonical on mainnet by default", function () {
+      expect(resolveJinnMviTimingProfileForChain(1, {})).to.equal("canonical");
+    });
+
+    it("explicit JINN_MVI_TIMING_PROFILE wins on every chain", function () {
+      expect(
+        resolveJinnMviTimingProfileForChain(CHAIN_ID_HARDHAT, {
+          JINN_MVI_TIMING_PROFILE: "canonical",
+        }),
+      ).to.equal("canonical");
+      expect(
+        resolveJinnMviTimingProfileForChain(1, {
+          JINN_MVI_TIMING_PROFILE: "fast-test",
+        }),
+      ).to.equal("fast-test");
+    });
+  });
+
+  describe("MockMessenger ownership transfer (Fix 10)", function () {
+    it("transfers ownership when JINN_MVI_MOCK_MESSENGER_OWNER differs from deployer", async function () {
+      const [deployer, daemonKey] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        mockMessengerOwner: daemonKey.address,
+      });
+      expect(result.messengerOwner).to.equal(daemonKey.address);
+
+      const messenger = await ethers.getContractAt(
+        MOCK_MESSENGER_FQN,
+        result.messenger,
+      );
+      expect(await messenger.owner()).to.equal(daemonKey.address);
+
+      // Daemon key can plant fixtures. The deployer no longer can.
+      await messenger.connect(daemonKey).setFixture(99n, {
+        serviceId: 99n,
+        verifiedCreations: 1n,
+        noveltyWeightedRestorationDeliveries: 1n,
+        evaluationDeliveryCount: 1n,
+        multisig: deployer.address,
+      });
+      await expect(
+        messenger.connect(deployer).setFixture(99n, {
+          serviceId: 99n,
+          verifiedCreations: 1n,
+          noveltyWeightedRestorationDeliveries: 1n,
+          evaluationDeliveryCount: 1n,
+          multisig: deployer.address,
+        }),
+      ).to.be.revertedWith("MockMessenger: not owner");
+    });
+
+    it("keeps the deployer as owner when no override is supplied", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+      });
+      expect(result.messengerOwner).to.equal(deployer.address);
+    });
+  });
+
+  describe("Opt-in admin renunciation (Fix 11)", function () {
+    it("default is false on Sepolia, true on mainnet, false on Hardhat", function () {
+      expect(resolveRenounceAdmin(CHAIN_ID_HARDHAT, {})).to.equal(false);
+      expect(resolveRenounceAdmin(CHAIN_ID_SEPOLIA, {})).to.equal(false);
+      expect(resolveRenounceAdmin(1, {})).to.equal(true);
+    });
+
+    it("env var overrides chain default in either direction", function () {
+      expect(
+        resolveRenounceAdmin(1, { JINN_MVI_RENOUNCE_ADMIN: "false" }),
+      ).to.equal(false);
+      expect(
+        resolveRenounceAdmin(CHAIN_ID_SEPOLIA, {
+          JINN_MVI_RENOUNCE_ADMIN: "true",
+        }),
+      ).to.equal(true);
+    });
+
+    it("renounceAdmin=false leaves the deployer as Timelock admin", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        renounceAdmin: false,
+      });
+      expect(result.adminRenounced).to.equal(false);
+
+      const timelock = await ethers.getContractAt(
+        "@openzeppelin/contracts/governance/TimelockController.sol:TimelockController",
+        result.timelock,
+      );
+      const adminRole = await timelock.DEFAULT_ADMIN_ROLE();
+      expect(await timelock.hasRole(adminRole, deployer.address)).to.equal(true);
+    });
+
+    it("renounceAdmin=true clears the admin role from the deployer", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        renounceAdmin: true,
+      });
+      expect(result.adminRenounced).to.equal(true);
+
+      const timelock = await ethers.getContractAt(
+        "@openzeppelin/contracts/governance/TimelockController.sol:TimelockController",
+        result.timelock,
+      );
+      const adminRole = await timelock.DEFAULT_ADMIN_ROLE();
+      expect(await timelock.hasRole(adminRole, deployer.address)).to.equal(false);
+    });
+  });
+
+  describe("Post-deploy sanity assertions (Fix 12)", function () {
+    it("verifyDeploy passes on a clean deploy with renounceAdmin=true", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        renounceAdmin: true,
+      });
+      // Should not throw.
+      await verifyDeploy(result, deployer.address, true);
+    });
+
+    it("verifyDeploy passes on a clean deploy with renounceAdmin=false", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        renounceAdmin: false,
+      });
+      await verifyDeploy(result, deployer.address, false);
+    });
+
+    it("verifyDeploy throws when renounceAdmin asserts but the role is still held", async function () {
+      const [deployer] = await ethers.getSigners();
+      const result = await deployJinnMviL1(deployer, FAST_TEST_GOVERNANCE_CONFIG, {
+        messenger: { mode: "mock" },
+        renounceAdmin: false, // role retained
+      });
+      // Lie to verifyDeploy: claim we renounced when we didn't.
+      let threw = false;
+      try {
+        await verifyDeploy(result, deployer.address, true);
+      } catch (e: any) {
+        threw = true;
+        expect(String(e.message)).to.match(/DEFAULT_ADMIN_ROLE/);
+      }
+      expect(threw).to.equal(true);
     });
   });
 

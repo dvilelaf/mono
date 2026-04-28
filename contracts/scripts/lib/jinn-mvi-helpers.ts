@@ -82,11 +82,86 @@ export function getJinnMviGovernanceConfig(
     : { ...CANONICAL_GOVERNANCE_CONFIG };
 }
 
+// ---------------------------------------------------------------------------
+// Chain whitelist + chain-aware defaults
+// ---------------------------------------------------------------------------
+
+/** Hardhat / Anvil dev chain id. */
+export const CHAIN_ID_HARDHAT = 31337;
+/** Sepolia testnet (the v0 MVI L1 surface). */
+export const CHAIN_ID_SEPOLIA = 11155111;
+/** Ethereum mainnet — guarded; not whitelisted by default for v0. */
+export const CHAIN_ID_MAINNET = 1;
+
+/** Chain ids the L1 deploy script will run on without an explicit override. */
+export const JINN_MVI_L1_ALLOWED_CHAINS: readonly number[] = [
+  CHAIN_ID_HARDHAT,
+  CHAIN_ID_SEPOLIA,
+];
+
+/** Base Sepolia (the v0 MVI L2 measurement chain). */
+export const CHAIN_ID_BASE_SEPOLIA = 84532;
+/** Base mainnet — guarded behind explicit allow-list opt-in. */
+export const CHAIN_ID_BASE_MAINNET = 8453;
+
+/** Chain ids the L2 emitter deploy script will run on without an explicit override. */
+export const JINN_MVI_L2_ALLOWED_CHAINS: readonly number[] = [
+  CHAIN_ID_HARDHAT,
+  CHAIN_ID_BASE_SEPOLIA,
+];
+
+/**
+ * Throw if the connected chainId is not in `allowed`, unless the
+ * `JINN_MVI_ALLOW_CHAIN` env var matches the connected chainId. Lets a
+ * captain override the guard for explicit deploys (e.g. to mainnet)
+ * without weakening the default for everyone else.
+ */
+export function assertChainIdAllowed(args: {
+  chainId: number;
+  allowed: readonly number[];
+  scriptName: string;
+  env?: EnvMap;
+}): void {
+  const env = args.env ?? process.env;
+  if (args.allowed.includes(args.chainId)) return;
+  const override = env.JINN_MVI_ALLOW_CHAIN;
+  if (override !== undefined && Number(override) === args.chainId) return;
+  const allowedList = args.allowed.join(", ");
+  throw new Error(
+    `Refusing to deploy ${args.scriptName} on chainId ${args.chainId}. ` +
+      `Allowed: [${allowedList}]. To override, set ` +
+      `JINN_MVI_ALLOW_CHAIN=${args.chainId}.`,
+  );
+}
+
 /** Resolve the timing profile from env (`JINN_MVI_TIMING_PROFILE`). */
 export function resolveJinnMviTimingProfile(
   env: EnvMap = process.env,
 ): JinnMviTimingProfile {
   return env.JINN_MVI_TIMING_PROFILE === "fast-test" ? "fast-test" : "canonical";
+}
+
+/**
+ * Resolve the timing profile, accounting for chainId. On Sepolia and
+ * Hardhat the canonical 7-day OP-Stack finality is impractical (per
+ * the R-1 finality measurement plan); without an explicit override we
+ * fall back to `fast-test` for those chains. Mainnet still defaults
+ * to the canonical profile when whitelisted.
+ *
+ * Honors `JINN_MVI_TIMING_PROFILE` if set explicitly.
+ */
+export function resolveJinnMviTimingProfileForChain(
+  chainId: number,
+  env: EnvMap = process.env,
+): JinnMviTimingProfile {
+  const explicit = env.JINN_MVI_TIMING_PROFILE;
+  if (explicit === "fast-test" || explicit === "canonical") {
+    return explicit;
+  }
+  if (chainId === CHAIN_ID_SEPOLIA || chainId === CHAIN_ID_HARDHAT) {
+    return "fast-test";
+  }
+  return "canonical";
 }
 
 /** Standard artifact name for the v0 L1 deploy, parameterised by network. */
