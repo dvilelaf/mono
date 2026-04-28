@@ -1,6 +1,6 @@
 # OLAS Staking Reward Semantics — Investigation Note
 
-> Status: **Superseded — see Recommendation v2 below**
+> Status: **Superseded — see Recommendation v3 (Architecture B) at the bottom**
 > Date: 2026-04-27 (updated 2026-04-28)
 > Branch: `jinn-mono/jinn-mono-1bo`
 > Phase A0 of the Jinn v0 MVI implementation plan
@@ -8,14 +8,20 @@
 > Reference: `docs/planning/2026-04-jinn-mvi-on-olas.md` (proposal) +
 > `log/decisions/2026-04-27-jinn-mvi-on-olas-decisions.md` §10 (DR)
 
-> **2026-04-28 update.** The original recommendation (read OLAS reward
-> field with operational invariants) is documented below for the
-> record. After working through the implications for standard mode +
-> self-bond mode, **a cleaner alternative emerged: read JinnRouter
-> activity counters directly instead of OLAS reward.** Counters are
-> monotonic by construction; the entire claim-zeroing problem
-> disappears. See "Recommendation v2 — JinnRouter counters" near the
-> bottom.
+> **2026-04-28 evolution.** Three iterations on the design:
+> 1. **v1** (deprecated) — read OLAS staking reward field directly,
+>    with operational invariants. Killed the moment we surfaced
+>    self-bond and standard mode racing.
+> 2. **v2** (deprecated) — read JinnRouter counters directly, gate
+>    minting on staking eligibility at the JinnDistributor. Cleaner,
+>    but creates an overlap with the V2 activity checker (two gates
+>    for "is this real work").
+> 3. **v3 (locked)** — checker becomes the single gate. The V2
+>    activity checker tracks per-channel cumulative verified-work
+>    counters; emitter reads from checker; distributor mints
+>    unconditionally against checker output. One gate for both OLAS
+>    rewards and JINN. See "Recommendation v3 — Architecture B" near
+>    the bottom.
 
 ## The question
 
@@ -432,7 +438,7 @@ anti-farming). OLAS reward accounting is irrelevant to JINN.
 | 5 | §10 OLAS disposition is now an OLAS-substrate-level concern (not a Jinn protocol concern); bd `1bo` scope shrinks accordingly | Recommended |
 | 6 | V2 anti-farming (`pwg`) stays in critical path — guards counter signal | Unchanged |
 
-## Effect on the implementation plan
+## Effect on the implementation plan (v2 — superseded by v3)
 
 - **A0 (this doc):** done. v2 recommendation locked, v1 archived.
 - **`l6b` cross-chain spec:** scope unchanged shape; emitter reads
@@ -453,3 +459,192 @@ anti-farming). OLAS reward accounting is irrelevant to JINN.
 - **Proposal doc §1 ratio:** not "1 JINN per 1 OLAS earned"
   anymore. Likely "1 JINN per 1 weighted activity unit" with the
   weighting per channel explicit.
+
+---
+
+# Recommendation v3 — Architecture B (locked 2026-04-28)
+
+## What changed in framing
+
+v2 (read JinnRouter counters; gate minting on staking eligibility
+at the distributor) creates an overlap between the V2 activity
+checker (which gates OLAS rewards via anti-farming analysis) and
+the JinnDistributor (which gates JINN rewards via a separate
+eligibility check). Two gates doing similar work for different
+reward streams.
+
+v3 collapses the overlap: **the activity checker is the single
+gate, used by both OLAS rewards and JINN minting.** The checker's
+job — verify real work, reject farmed work — is exactly what the
+JINN flow needs as its source of truth. By extending the checker
+to track per-service cumulative verified-work counters, JINN
+mints directly against the checker's output, with no parallel
+eligibility logic in the distributor.
+
+## Architecture
+
+**V2 activity checker (extended):**
+
+```solidity
+contract RestorationActivityCheckerV2 {
+    // Existing V2 anti-farming logic (Hamming distance, evidence
+    // analysis, eviction signaling via isRatioPass) unchanged.
+
+    // New: per-multisig per-channel cumulative verified-work
+    // counters. Increments when the checker's analysis confirms
+    // a delivery (or directly on creation, depending on channel).
+    mapping(address => uint256) public verifiedCreations;
+    mapping(address => uint256) public verifiedRestorationDeliveries;
+    mapping(address => uint256) public verifiedEvaluationCreations;
+    mapping(address => uint256) public verifiedEvaluationDeliveries;
+
+    function recordRestorationEvidence(address multisig, bytes32 evidenceHash) external {
+        // ... existing V2 anti-farming evaluation ...
+        if (passesAntiFarming(...)) {
+            verifiedRestorationDeliveries[multisig]++;
+        }
+    }
+
+    // Similar entry points for the other channels, called by JinnRouter.
+
+    // Public getters auto-generated for the four counters.
+}
+```
+
+**JinnRouter (existing):** unchanged. Continues to count raw
+events; forwards evidence to checker. Its raw counters become
+analytics/observability signals, no longer the JINN signal.
+
+**JinnClaimEmitter (Base, ~30 lines stateless):**
+
+```solidity
+contract JinnClaimEmitter {
+    IActivityCheckerV2 public immutable checker;
+    IServiceRegistry public immutable serviceRegistry;
+
+    event ClaimTicket(
+        uint256 indexed serviceId,
+        uint256 verifiedCreations,
+        uint256 verifiedRestorationDeliveries,
+        uint256 verifiedEvaluationCreations,
+        uint256 verifiedEvaluationDeliveries,
+        address indexed multisig,
+        address indexed claimer
+    );
+
+    function emitClaim(uint256 serviceId) external {
+        address multisig = serviceRegistry.mapServices(serviceId).multisig;
+        emit ClaimTicket(
+            serviceId,
+            checker.verifiedCreations(multisig),
+            checker.verifiedRestorationDeliveries(multisig),
+            checker.verifiedEvaluationCreations(multisig),
+            checker.verifiedEvaluationDeliveries(multisig),
+            multisig,
+            msg.sender
+        );
+    }
+}
+```
+
+**JinnDistributor (Ethereum):** mints unconditionally against the
+weighted snapshot. **No eligibility check.** The fact that the
+counters only increment when the checker says so IS the gate.
+
+```solidity
+function claim(bytes calldata proof) external {
+    (uint256 serviceId,
+     uint256 vCreations,
+     uint256 vRestorationDeliveries,
+     uint256 vEvaluationCreations,
+     uint256 vEvaluationDeliveries,
+     address multisig) = messenger.verifyClaim(proof);
+
+    uint256 weighted =
+          wCreation             * vCreations
+        + wRestorationDelivery  * vRestorationDeliveries
+        + wEvaluationCreation   * vEvaluationCreations
+        + wEvaluationDelivery   * vEvaluationDeliveries;
+    // ... rest unchanged: ratios + accumulators + clamp + mint.
+}
+```
+
+## Why v3 is better than v2
+
+| Concern | v2 (counters + eligibility gate) | v3 (checker-as-oracle) |
+|---|---|---|
+| "Is this real work?" decision | Two places: checker + distributor | One place: checker |
+| Anti-farming for JINN | Indirect (checker → eviction → eligibility) | Direct (checker increments only on verified work) |
+| Distributor scope | Math + eligibility logic | Math only |
+| Single source of truth | No | Yes |
+| OLAS / Jinn coordination | Two parallel mechanisms | One mechanism, two consumers |
+| Future reusability | Eligibility logic is Jinn-specific | Verified-work counters reusable for other systems |
+| 7-day window security role | Critical (gives anti-farming time before mint) | Helpful but not load-bearing — counter only ticks for verified work |
+| Risk surface | Distributor + checker both need to be correct | Checker is the single critical path |
+
+## Per-channel weights (locked 2026-04-28)
+
+Same as v2: weights = 1 each across the four protocol-work
+channels, Governor-mutable on the JinnDistributor side. Counter
+[0] (Safe nonce) excluded — admin operations only, not protocol
+work.
+
+`snapshot = verifiedCreations + verifiedRestorationDeliveries + verifiedEvaluationCreations + verifiedEvaluationDeliveries`
+
+## What the checker actually verifies, per channel
+
+Open question for `l6b` to resolve, but the natural shape:
+
+- **Creations** (restoration + evaluation creation): incremented
+  on the checker when the router calls into it from
+  `createRestorationJob` / `createEvaluationJob`. No anti-farming
+  gate on creations — they're just "I posted an intent" and don't
+  have evidence to compare. Caveat: spam creations could be a
+  vector; we may want a rate-limit on the checker side.
+- **Deliveries** (restoration + evaluation): incremented only if
+  the V2 anti-farming analysis (Hamming distance, similarity
+  threshold) passes. This is the existing V2 logic with a new
+  side effect (counter increment) on pass.
+
+Sub-decisions for `l6b`:
+- Are creations also gated (rate-limited)?
+- Does the checker's evaluation happen synchronously on the call
+  from the router, or deferred to a separate analysis pass?
+- What's the interface between router and checker for the
+  creation / evaluation-creation channels (today only delivery
+  evidence is forwarded)?
+
+## Effects on the implementation plan (v3)
+
+- **A0 (this doc):** done. v3 locked, v2 archived.
+- **`pwg` V2 activity checker upgrade:** **scope expands.** Adds
+  per-channel cumulative verified-work counters + getters to V2,
+  plus router→checker entry points for creation channels (today
+  only delivery evidence is forwarded). Estimate +2–3 days on top
+  of existing V2 audit + deploy.
+- **`l6b` cross-chain spec:** spec the checker getter shape,
+  ClaimTicket event, proof format, plus the open sub-decisions
+  above (creation gating, sync vs deferred verification, router-
+  checker entry points for creation channels).
+- **`6lq` cross-chain impls:** emitter reads from V2 checker
+  (extended) instead of from JinnRouter. ~30 lines stateless.
+  CanonicalOpStackMessenger + MockMessenger unchanged in shape.
+- **`olx` JinnDistributor:** simpler than v2 — no eligibility
+  check needed. Pure math: weighted sum, ratios, accumulators,
+  clamp, mint. Per-channel weights as Governor-mutable storage.
+- **`1bo` OLAS reward tracking + disposition:** scope unchanged
+  from v2 (still shrunk; OLAS rewards still decoupled from JINN).
+- **Proposal doc §1 ratio:** "1 JINN per 1 verified-work unit"
+  with weights = 1 each across the four channels.
+
+## v3 decisions table
+
+| # | Decision | Status |
+|---|---|---|
+| 1 | V2 activity checker is the single gate for "is this real work" — used by both OLAS and JINN | Locked |
+| 2 | V2 extended with per-channel cumulative verified-work counters + getters | Locked; expands `pwg` scope |
+| 3 | Emitter reads from checker, not from JinnRouter | Locked |
+| 4 | Distributor has no eligibility check; trusts checker output | Locked |
+| 5 | Weights = 1 each across four channels, Governor-mutable on distributor | Locked from v2 |
+| 6 | Creation-channel gating (rate-limit?) and verification timing (sync vs deferred) | Open — `l6b` resolves |
+| 7 | Router→checker integration for creation channels | Open — `l6b` resolves |
