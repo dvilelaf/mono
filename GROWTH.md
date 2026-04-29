@@ -71,6 +71,12 @@ Bootstrap reference points inside `growth/`:
 - [`growth/docs/2026-04-10-bullseye-framework.md`](growth/docs/2026-04-10-bullseye-framework.md) — channel brainstorm by audience
 - [`growth/docs/thesis-mechanistic (1).md`](growth/docs/thesis-mechanistic%20(1).md) and [`growth/docs/thesis-narrative.md`](growth/docs/thesis-narrative.md) — long-form thesis pieces sourcing teach-content
 - [`growth/docs/2026-04-24-intro-to-jinn.md`](growth/docs/2026-04-24-intro-to-jinn.md) — canonical intro doc; lead reference for outreach
-- [`growth/skills/x-algorithm-grader/`](growth/skills/x-algorithm-grader/) — tooling for grading X drafts before posting
+
+Two skills under [`growth/skills/`](growth/skills/) implement the techniques behind the daily loop. They are the operational form of the disciplines in §4 — invoked in-session, not just documented.
+
+- **Discovery — [`discover-twitter-recruits/`](growth/skills/discover-twitter-recruits/).** Surfaces candidate accounts for the **Understand** step. Audience filter, not language filter; outputs a triaged list with conversion rationale, an honest reply-rate ranking, and an audit trail of skipped candidates. Calibrated against past discoveries (`@yieldfreaks`, `@ta_eis_eauton`) and corrections (`@gingersamurai`).
+- **Broadcast — [`x-algorithm-grader/`](growth/skills/x-algorithm-grader/).** Grades draft posts before publishing for the **Teach** step. Returns a relative reach score, the binding constraint, and the single highest-leverage edit. Calibrated for `@oaksprout`'s crypto+AI-infrastructure cluster.
+
+Both skills are deliberately scoped to one job each. Discovery does not draft replies; broadcast does not generate content. Composing them — discovery surfaces a candidate, the user drafts a reply, the grader scores it — is left to the operator, not folded into a single workflow.
 
 Changes to this document require a linked spec proposal under `spec/YYYY-MM-DD-<topic>.md` and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
