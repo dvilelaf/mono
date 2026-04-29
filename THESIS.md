@@ -24,6 +24,8 @@ The most general form is a system where you describe an outcome — for yourself
 
 Two preconditions have converged. Crypto provides the economic substrate: native value transfer, programmable agreements, permissionless participation — money, contracts, and property rights for the internet. AI provides cognition: systems that can do work autonomously.
 
+AI here means cognition, not coordination. Frontier models are commoditising — multiple providers, open-weight equivalents catching up, capability per dollar falling fast. Cognition is plural and becoming more so. What cannot be commoditised by any one provider is the network around the cognition: ownership, incentives, routing, reputation, payments, the loop that decides which agent gets which job and who captures the value when it is done. The model is the substrate the agent thinks in. The network is the substrate the economy runs on. This thesis is about the second. A native internet economy is model-agnostic by design; cognition is something the network buys, not something it is.
+
 Neither alone is sufficient. Crypto without AI is financial plumbing with nothing flowing through it. AI without crypto is productive capacity trapped inside platforms, with no native economic coordination layer.
 
 Together, they enable end-to-end autonomous action without falling back into the physical world for every step. For the first time, the internet can have its own economy — not a digitisation of the existing one, but a native one.
@@ -60,7 +62,7 @@ Building agentic AI on decentralised technology delivers four structural propert
 
 **More composable.** A closed platform can optimise within its own boundary but cannot compose across boundaries it does not control. The combinatorial frontier of an open protocol is structurally larger than the linear frontier of a platform. Composability is also a prerequisite of the scale ladder above — each rung depends on capabilities from the rungs below. You do not get the full expansion of viable activity without composability, and you do not get composability without openness.
 
-**More efficient.** A decentralised system governed as a DAO — where governance can only update parameters, pure config as code — has virtually zero organisational state. Compare to a company: funded, maintained, staffed, governed, with legal obligations, office infrastructure, management hierarchies. The engine that improves the AI is orders of magnitude simpler in the decentralised case. More of every input converts to useful output.
+**More efficient.** The DAO carries governance state and complexity in decision-making; that is fine, and in a decentralised agentic world it is where human effort should sit. What matters is what happens downstream of governance. Once a priority is set on chain, the entire means of producing value kicks into gear without departments, managers, legal teams, or the legal system mediating each step. Compare an OpenAI-scale company: every unit of output passes through hiring, management, compliance, and corporate overhead before it reaches the user. The decentralised stack converts a higher fraction of every input into useful output because the production machinery itself is leaner — not because governance is.
 
 These properties compound. More of every unit of capital reaches compute. More participation flows in. The search space is larger. Less is wasted in overhead. The system that compounds fastest wins.
 
@@ -73,6 +75,8 @@ Openness is not a moral preference layered on top of the economic argument. It i
 Most teams building agentic AI on crypto rails treat decentralisation as a cost — a tax they pay to access the crypto-native audience, to be minimised wherever possible, with progressive-decentralisation handwaving as the escape valve. We invert this. The decentralisation is the product. Treating it as the edge changes every downstream design decision.
 
 If we are going to do decentralised agentic AI, we max out the decentralisation. That is our edge.
+
+The choices below are the four properties from section 5 made concrete. **Less extractive** needs the DAO holding the treasury, with no founder rents in the path. **More neutral** needs no admin keys and no privileged operator class. **More composable** needs permissionless participation. **More efficient** is what these constraints enable: once governance is on chain and unmediated, the production stack acts on priorities directly, without departments, managers, or legal teams interpreting each step.
 
 The corollary is a stress-test, not an intention: the network *should* be able to run without us. Whether we choose to step away is a separate question from whether we *can*. The test of having built decentralised infrastructure is whether the founders can step out of the middle without the system degrading. Most crypto founders fail this test by design — they bake themselves into governance, brand, treasury. Our launch criterion is the inverse: we are nearing launch *because* we believe the protocol is approaching the point where it can run without us.
 
