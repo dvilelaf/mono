@@ -144,14 +144,15 @@ describe("JinnRouterV2 + RestorationActivityCheckerV2 Integration", function () 
 
     // ── 8. RestorationActivityCheckerV2 ──────────────────────────────────────
     const CheckerFactory = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
-    checker = await CheckerFactory.deploy(
+    checker = await CheckerFactory.deploy();
+    await checker.waitForDeployment();
+    await (await checker.initialize(
       LIVENESS_RATIO,           // livenessRatio = 1e15
       deployerAddress,          // owner
       64n,                      // similarityThreshold
       0n,                       // similarDecayMultiplier (binary: similar = zero weight)
       20n                       // comparisonWindow
-    );
-    await checker.waitForDeployment();
+    )).wait();
     const checkerAddress = await checker.getAddress();
 
     // ── 9. JinnRouterV2 impl + proxy ──────────────────────────────────────────

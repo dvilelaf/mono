@@ -13,7 +13,7 @@ async function deployJinnFixture() {
     await ethers.getSigners();
 
   const Factory = await ethers.getContractFactory(JINN_FQN);
-  const jinn = await Factory.deploy(deployer.address);
+  const jinn = await Factory.deploy("Jinn", "JINN", deployer.address);
   await jinn.waitForDeployment();
 
   return { jinn, deployer, alice, bob, carol, distributor, newDistributor, newOwner };

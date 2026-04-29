@@ -35,14 +35,15 @@ async function deployChecker(
   overrides?: { comparisonWindow?: bigint; similarityThreshold?: bigint; similarDecayMultiplier?: bigint },
 ) {
   const Checker = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
-  const checker = await Checker.deploy(
+  const checker = await Checker.deploy();
+  await checker.waitForDeployment();
+  await (await checker.initialize(
     DEFAULT_LIVENESS_RATIO,
     await deployer.getAddress(),
     overrides?.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD,
     overrides?.similarDecayMultiplier ?? DEFAULT_DECAY_MULTIPLIER,
     overrides?.comparisonWindow ?? DEFAULT_COMPARISON_WINDOW,
-  );
-  await checker.waitForDeployment();
+  )).wait();
   // Wire the test signer that will impersonate the router.
   await (await checker.setRouterAddresses(authorizedRouter, authorizedRouter)).wait();
   return checker;
@@ -430,14 +431,15 @@ describe("Phase B' — RestorationActivityCheckerV2 audit fixes & ε gating", fu
 
       // ── V2 checker
       const CheckerFactory = await ethers.getContractFactory("RestorationActivityCheckerV2", deployer);
-      checker = await CheckerFactory.deploy(
+      checker = await CheckerFactory.deploy();
+      await checker.waitForDeployment();
+      await (await checker.initialize(
         DEFAULT_LIVENESS_RATIO,
         deployerAddress,
         DEFAULT_SIMILARITY_THRESHOLD,
         DEFAULT_DECAY_MULTIPLIER,
         DEFAULT_COMPARISON_WINDOW,
-      );
-      await checker.waitForDeployment();
+      )).wait();
 
       // ── V2 router proxy
       const JinnRouterV2Factory = await ethers.getContractFactory("JinnRouterV2", deployer);

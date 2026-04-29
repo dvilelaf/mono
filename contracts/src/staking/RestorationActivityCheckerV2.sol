@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.30;
+
+import {Implementation, OwnerOnly, ZeroAddress} from "../vendor/stolas/Implementation.sol";
 
 /// @dev Multisig interface for getting nonce
 interface IMultisig {
@@ -16,16 +18,8 @@ interface IJinnRouter {
     function evaluationDeliveryCount(address multisig) external view returns (uint256);
 }
 
-/// @dev Provided zero address.
-error ZeroAddress();
-
 /// @dev Zero value when it has to be different from zero.
 error ZeroValue();
-
-/// @dev Only owner can call this function.
-/// @param sender Sender address.
-/// @param owner Required owner address.
-error OwnerOnly(address sender, address owner);
 
 /// @dev Value exceeds maximum.
 /// @param value Provided value.
@@ -37,28 +31,41 @@ error Overflow(uint256 value, uint256 max);
 /// @param authorizedRouter Required authorized router address.
 error UnauthorizedRouter(address sender, address authorizedRouter);
 
+/// @dev Already initialized.
+error AlreadyInitialized();
+
 /// @title RestorationActivityCheckerV2 - Activity checker with SimHash-based anti-farming decay
 /// @author JIN Network
 /// @notice Extends V1 with evidence novelty checking. Activities submitted with evidence hashes
 ///         are weighted by novelty — novel evidence earns full weight, similar evidence earns
 ///         reduced (or zero) weight. The OLAS staking contract reads novelty-weighted counts
 ///         via getMultisigNonces() and isRatioPass(), so farming operators fail liveness checks.
+///
+///         **Proxy-deployed.** This contract is deployed as a logic implementation behind
+///         `vendor/stolas/Proxy.sol` (mainnet checker pattern at `0x477C41...`). Future
+///         hardening lands as a new implementation; the proxy's `changeImplementation(newImpl)`
+///         swaps logic in place, preserving stakers + activity state. Direct deploy + call
+///         is supported for unit tests (each test deploys a fresh impl and calls `initialize`).
 /// @dev Evidence SimHashes are computed off-chain by the client and submitted as bytes32.
 ///      Similarity is measured by Hamming distance between 256-bit SimHash values.
 ///      The contract stores a sliding window of recent hashes per multisig for comparison.
-contract RestorationActivityCheckerV2 {
+///
+///      Storage layout (declared first to last; matters for proxy upgrades):
+///        slot 0: `owner` (inherited from Implementation)
+///        slot 1: `livenessRatio` (storage; was immutable before proxy refactor)
+///        slot 2..N: counters, mappings, anti-farming params, router addresses
+///      All future implementations must preserve this layout. Add new state at the END.
+contract RestorationActivityCheckerV2 is Implementation {
     /// @dev Activity types that workers can record
     enum ActivityType { CREATE, DELIVER, EVALUATE }
 
-    // ============ Immutables ============
-
-    /// @dev Liveness ratio in the format of 1e18
-    uint256 public immutable livenessRatio;
-
     // ============ State ============
+    // Inherited from Implementation: address public owner (slot 0)
 
-    /// @dev Contract owner (can update anti-farming parameters)
-    address public owner;
+    /// @dev Liveness ratio in the format of 1e18.
+    ///      Storage (was `immutable` before the proxy refactor) so a future
+    ///      governance proposal can adjust without redeploying both impl+proxy.
+    uint256 public livenessRatio;
 
     /// @dev Raw activity count per multisig (monotonically increasing, for off-chain inspection)
     mapping(address => uint256) public activityCounts;
@@ -140,22 +147,27 @@ contract RestorationActivityCheckerV2 {
         uint256 comparisonWindow
     );
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    // OwnerUpdated comes from Implementation. No local OwnershipTransferred.
 
-    // ============ Constructor ============
+    // ============ Initialization ============
 
+    /// @notice Initialize the proxy storage. Called once via the Proxy's deploy-time
+    ///         delegatecall (see `vendor/stolas/Proxy.sol`). Subsequent calls revert.
+    ///         For unit tests that deploy the implementation directly, call `initialize`
+    ///         once to set up state.
     /// @param _livenessRatio Liveness ratio threshold (1e18 format)
-    /// @param _owner Contract owner
+    /// @param _owner Contract owner (gets `changeOwner` + `changeImplementation` rights)
     /// @param _similarityThreshold Hamming distance threshold (0-256)
     /// @param _similarDecayMultiplier Weight for similar evidence (1e18 scale)
     /// @param _comparisonWindow Number of recent hashes to compare against
-    constructor(
+    function initialize(
         uint256 _livenessRatio,
         address _owner,
         uint256 _similarityThreshold,
         uint256 _similarDecayMultiplier,
         uint256 _comparisonWindow
-    ) {
+    ) external {
+        if (owner != address(0)) revert AlreadyInitialized();
         if (_livenessRatio == 0) revert ZeroValue();
         if (_owner == address(0)) revert ZeroAddress();
         if (_similarityThreshold > 256) revert Overflow(_similarityThreshold, 256);
@@ -168,7 +180,7 @@ contract RestorationActivityCheckerV2 {
         similarDecayMultiplier = _similarDecayMultiplier;
         comparisonWindow = _comparisonWindow;
 
-        emit OwnershipTransferred(address(0), _owner);
+        emit OwnerUpdated(_owner);
     }
 
     // ============ Activity Recording ============
@@ -451,12 +463,6 @@ contract RestorationActivityCheckerV2 {
         authorizedRouter = _authorizedRouter;
     }
 
-    /// @notice Transfer ownership.
-    function transferOwnership(address newOwner) external {
-        if (msg.sender != owner) revert OwnerOnly(msg.sender, owner);
-        if (newOwner == address(0)) revert ZeroAddress();
-        address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
+    // Ownership transfer + implementation upgrade (`changeOwner`, `changeImplementation`)
+    // are inherited from Implementation. They emit OwnerUpdated / ImplementationUpdated.
 }

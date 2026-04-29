@@ -26,9 +26,12 @@ contract JINN is ERC20, ERC20Permit, ERC20Votes, Ownable2Step {
     /// @notice Thrown when a non-minter attempts to call {mint}.
     error NotMinter(address sender);
 
-    constructor(address initialOwner)
-        ERC20("Jinn", "JINN")
-        ERC20Permit("Jinn")
+    /// @param name_  Token name (e.g. `"JINN"` on mainnet, `"JINN (testnet)"` on Sepolia).
+    /// @param symbol_ Token symbol (e.g. `"JINN"` on mainnet, `"tJINN"` on testnet).
+    /// @param initialOwner Initial owner; expected to transfer to the Timelock post-deploy.
+    constructor(string memory name_, string memory symbol_, address initialOwner)
+        ERC20(name_, symbol_)
+        ERC20Permit(name_)
         Ownable(initialOwner)
     {}
 

@@ -167,6 +167,11 @@ export async function deployJinnMviL1(
   options: {
     messenger?: MessengerDeployParams;
     distributorConfig?: JinnDistributorInitialConfig;
+    /** Token name to pass to the JINN constructor (e.g. "JINN" mainnet,
+     *  "JINN (testnet)" Sepolia). Defaults to "JINN". */
+    tokenName?: string;
+    /** Token symbol (e.g. "JINN" mainnet, "tJINN" testnet). Defaults to "JINN". */
+    tokenSymbol?: string;
     /** If set and != deployer, transfer MockMessenger ownership to this
      *  address after deploy. Ignored in canonical mode. */
     mockMessengerOwner?: string;
@@ -181,6 +186,8 @@ export async function deployJinnMviL1(
   const distributorConfig: JinnDistributorInitialConfig =
     options.distributorConfig ?? { ...LOCKED_DISTRIBUTOR_INITIAL_CONFIG };
   const renounceAdmin = options.renounceAdmin ?? true;
+  const tokenName = options.tokenName ?? "JINN";
+  const tokenSymbol = options.tokenSymbol ?? "JINN";
 
   // -----------------------------------------------------------------------
   // Step 1: JINN token — initialOwner = deployer (transferred to Timelock
@@ -190,7 +197,7 @@ export async function deployJinnMviL1(
     "src/jinn/token/JINN.sol:JINN",
     signer,
   );
-  const jinn = await JINN.deploy(deployerAddress);
+  const jinn = await JINN.deploy(tokenName, tokenSymbol, deployerAddress);
   await jinn.waitForDeployment();
 
   // -----------------------------------------------------------------------
@@ -360,6 +367,7 @@ export async function verifyDeploy(
   deployment: JinnMviL1Deployment,
   deployerAddress: string,
   renounceAdmin: boolean,
+  expected: { tokenName?: string; tokenSymbol?: string } = {},
 ): Promise<void> {
   const checks: Array<[string, string, string]> = [];
 
@@ -367,6 +375,17 @@ export async function verifyDeploy(
     "src/jinn/token/JINN.sol:JINN",
     deployment.jinn,
   );
+
+  // Token name / symbol — assert the on-chain values match what the deploy
+  // intended (e.g. "JINN (testnet)" / "tJINN" on Sepolia).
+  if (expected.tokenName !== undefined) {
+    const onChainName: string = await jinn.name();
+    checks.push(["JINN.name", onChainName, expected.tokenName]);
+  }
+  if (expected.tokenSymbol !== undefined) {
+    const onChainSymbol: string = await jinn.symbol();
+    checks.push(["JINN.symbol", onChainSymbol, expected.tokenSymbol]);
+  }
   const distributor = await ethers.getContractAt(
     "src/jinn/distribution/JinnDistributor.sol:JinnDistributor",
     deployment.distributor,
@@ -493,6 +512,15 @@ async function main() {
   // write fixtures. Canonical mode ignores this.
   const mockMessengerOwner = process.env.JINN_MVI_MOCK_MESSENGER_OWNER;
 
+  // Token name + symbol — env-driven for testnet/mainnet disambiguation.
+  // Mainnet default: "JINN" / "JINN". Sepolia/Hardhat default: "JINN (testnet)" / "tJINN".
+  // The on-chain ERC20 reports these — explorers and wallets show the testnet
+  // variant clearly distinct from the Phase 1a "Jinn" tokens (which play the
+  // OLAS-equivalent role; see CLAUDE.md / runbooks).
+  const isTestnet = chainId === 11155111 || chainId === 31337;
+  const tokenName = process.env.JINN_TOKEN_NAME ?? (isTestnet ? "JINN (testnet)" : "JINN");
+  const tokenSymbol = process.env.JINN_TOKEN_SYMBOL ?? (isTestnet ? "tJINN" : "JINN");
+
   console.log("=== Jinn v0 MVI L1 Deployment ===");
   console.log(`Network:        ${networkName} (chainId: ${network.chainId})`);
   console.log(`Deployer:       ${deployer.address}`);
@@ -524,6 +552,8 @@ async function main() {
   if (mockMessengerOwner) {
     console.log(`Mock messenger owner override: ${mockMessengerOwner}`);
   }
+  console.log(`Token name:     ${tokenName}`);
+  console.log(`Token symbol:   ${tokenSymbol}`);
   console.log(
     "Deploying JINN, TimelockController, JinnGovernor, Messenger, JinnDistributor…\n",
   );
@@ -532,11 +562,16 @@ async function main() {
     distributorConfig,
     mockMessengerOwner,
     renounceAdmin,
+    tokenName,
+    tokenSymbol,
   });
 
   // Fix 12: post-deploy sanity assertions, before writing the artifact.
   // Throws on the first mismatch. Required by threat model §3.2.
-  await verifyDeploy(deployment, deployer.address, renounceAdmin);
+  await verifyDeploy(deployment, deployer.address, renounceAdmin, {
+    tokenName,
+    tokenSymbol,
+  });
   console.log("[verifyDeploy] All post-deploy invariants verified.");
 
   if (deployment.messengerMode === "mock") {

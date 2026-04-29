@@ -40,7 +40,7 @@ async function deployFixture() {
 
   // Real JINN token, deployer as owner.
   const Jinn = await ethers.getContractFactory(JINN_FQN);
-  const jinn = await Jinn.deploy(deployer.address);
+  const jinn = await Jinn.deploy("Jinn", "JINN", deployer.address);
   await jinn.waitForDeployment();
 
   // Mock messenger.
@@ -105,7 +105,7 @@ describe("JinnDistributor (Phase A3)", function () {
       const [deployer, dao] = await ethers.getSigners();
       const Distributor = await ethers.getContractFactory(DISTRIBUTOR_FQN);
       const Jinn = await ethers.getContractFactory(JINN_FQN);
-      const jinn = await Jinn.deploy(deployer.address);
+      const jinn = await Jinn.deploy("Jinn", "JINN", deployer.address);
       const MockMessenger = await ethers.getContractFactory(MOCK_MESSENGER_FQN);
       const messenger = await MockMessenger.deploy(deployer.address);
 
@@ -668,7 +668,7 @@ describe("JinnDistributor (Phase A3)", function () {
       await zeroMsg.waitForDeployment();
 
       const Jinn = await ethers.getContractFactory(JINN_FQN);
-      const jinn = await Jinn.deploy(deployer.address);
+      const jinn = await Jinn.deploy("Jinn", "JINN", deployer.address);
 
       const Distributor = await ethers.getContractFactory(DISTRIBUTOR_FQN);
       const distributor = await Distributor.deploy(
@@ -782,7 +782,7 @@ describe("JinnDistributor (Phase A3)", function () {
       await zeroMsg.waitForDeployment();
 
       const Jinn = await ethers.getContractFactory(JINN_FQN);
-      const jinn = await Jinn.deploy(deployer.address);
+      const jinn = await Jinn.deploy("Jinn", "JINN", deployer.address);
       const Distributor = await ethers.getContractFactory(DISTRIBUTOR_FQN);
       const distributor = await Distributor.deploy(
         deployer.address,
