@@ -190,6 +190,7 @@ This is how the skill stays accurate. The model is a starting point; the calibra
 
 ## Composing with other skills
 
+- `x-post-builder` orchestrates ideation → drafting → grading → scheduling → post-mortem end-to-end. This skill is invoked at the rewrite stage by default, and can be called between any two stages on demand. Use `x-post-builder` for end-to-end post construction; use this skill for grading existing drafts.
 - `oak-content-strategy` generates drafts; this skill grades them. Compose: generate → grade → edit → grade → ship.
 - `brand-review` (marketing plugin) checks brand voice and unsubstantiated claims. Compose: brand-review → grade for algorithm fit.
 - A future `x-reply-finder` skill (productionising `growth/prompts/find-open-twitter-convos-agentic-ai-gap.md`) will surface candidate replies; this skill grades them.
