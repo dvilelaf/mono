@@ -162,7 +162,9 @@ export async function tickStolasDistributorClaims(
         amountWei: pending.toString(),
       });
       console.log(
-        `[reward-claim] Submitted distributor.claim for service ${serviceId} (~${pending.toString()} wei pending before tx)`,
+        `[reward-claim] Submitted distributor.claim for service ${serviceId} ` +
+        `(~${pending.toString()} wei pre-split — actual operator share is the ` +
+        `collector slot only; protocol/curating shares route per stOLAS proxy config)`,
       );
     } catch (err) {
       if (isRecoverableTransactionError(err)) {

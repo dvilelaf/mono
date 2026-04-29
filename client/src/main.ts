@@ -33,7 +33,8 @@ import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import { Daemon } from './daemon/daemon.js';
-import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
+import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
+import { privateKeyToAccount } from 'viem/accounts';
 import { RestorerImplRegistry } from './restorer/engine/registry.js';
 import { buildRestorerImpls } from './restorer/impls/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
@@ -341,6 +342,32 @@ export async function main(): Promise<DaemonStartupInfo> {
     : (await import('viem/chains')).base;
   const agentClients = createClients(config.rpcUrl, agentPrivateKey, agentChain);
 
+  // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
+  // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
+  // Same key as L2; only the chain differs.
+  const l1ClientsForJinnClaim =
+    config.jinnDistributorAddress && config.ethereumRpcUrl
+      ? {
+          public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
+          wallet: createJinnL1WalletClient(
+            config.ethereumRpcUrl,
+            config.jinnL1Network,
+            privateKeyToAccount(agentPrivateKey),
+          ),
+        }
+      : undefined;
+  if (l1ClientsForJinnClaim) {
+    console.log(
+      `[main] JinnClaimLoop: enabled (mode=${config.jinnMessengerMode}, ` +
+      `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${config.jinnDistributorAddress}, ` +
+      `emitter=${config.jinnClaimEmitterAddress})`,
+    );
+  } else {
+    console.log(
+      `[main] JinnClaimLoop: disabled (JINN_DISTRIBUTOR_ADDRESS or JINN_ETHEREUM_RPC_URL not set)`,
+    );
+  }
+
   // ── Impl registry ────────────────────────────────────────────────────────────
 
   // Default-disable impls with external dependencies the operator must opt
@@ -477,6 +504,26 @@ export async function main(): Promise<DaemonStartupInfo> {
             store: earningStore,
             chain: NETWORK_CHAIN,
             distributorAddress: CHAIN_CONFIG.distributorAddress,
+          }
+        : undefined,
+    jinnClaim:
+      l1ClientsForJinnClaim &&
+      config.jinnClaimEmitterAddress &&
+      config.jinnMessengerAddress &&
+      config.jinnDistributorAddress &&
+      config.jinnClaimLoopIntervalMs > 0
+        ? {
+            intervalMs: config.jinnClaimLoopIntervalMs,
+            l2Client: agentClients.publicClient,
+            l2Wallet: agentClients.walletClient,
+            l1Client: l1ClientsForJinnClaim.public,
+            l1Wallet: l1ClientsForJinnClaim.wallet,
+            store: earningStore,
+            chain: NETWORK_CHAIN,
+            claimEmitterAddress: config.jinnClaimEmitterAddress as `0x${string}`,
+            distributorAddress: config.jinnDistributorAddress as `0x${string}`,
+            messengerAddress: config.jinnMessengerAddress as `0x${string}`,
+            messengerMode: config.jinnMessengerMode,
           }
         : undefined,
     restorationEngine: {

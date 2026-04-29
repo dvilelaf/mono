@@ -281,7 +281,8 @@ export class JinnClaimLoop {
       );
     }
 
-    const receipt = await this.config.l2Client.getTransactionReceipt({ hash: args.emitTxHash });
+    // Use retrying helper for same reason as readSnapshot — RPC eventual consistency.
+    const receipt = await waitForTransactionReceiptWithRetry(this.config.l2Client, args.emitTxHash);
     const claimLog = receipt.logs.find((log) =>
       log.address.toLowerCase() === this.config.claimEmitterAddress.toLowerCase()
       && log.topics[0]?.toLowerCase() === CLAIM_TICKET_TOPIC0.toLowerCase(),
@@ -321,7 +322,10 @@ export class JinnClaimLoop {
    * to the emit block to avoid scanning the full chain on every tick.
    */
   private async readSnapshot(serviceId: bigint, emitTxHash: Hex): Promise<MockClaimSnapshot> {
-    const receipt = await this.config.l2Client.getTransactionReceipt({ hash: emitTxHash });
+    // Use the retrying helper because Tenderly's L2 RPC is load-balanced and
+    // can return "receipt not found" briefly after the tx lands when the
+    // request hits a backend that hasn't propagated the receipt yet.
+    const receipt = await waitForTransactionReceiptWithRetry(this.config.l2Client, emitTxHash);
     // Search a small window around the emit block.
     const fromBlock = receipt.blockNumber > 5n ? receipt.blockNumber - 5n : 0n;
     const toBlock = receipt.blockNumber + 5n;
