@@ -293,11 +293,10 @@ Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a v
 > Migrating to `BRAND.md` (canonical) per `spec/2026-04-28-canonical-docs.md` — current contents remain authoritative until that follow-up lands.
 
 **Root-level quick reference** (for `impeccable` and other skill consumers):
-- [`PRODUCT.md`](PRODUCT.md) — register (default `brand`; override to `product` inside `client/`, `ui_kits/explorer/`, or any dashboard surface), users, brand personality, anti-references, and five strategic principles.
 - [`DESIGN.md`](DESIGN.md) — visual spec in [Google Stitch format](https://stitch.withgoogle.com/docs/design-md/format/): YAML frontmatter with colours, typography, radii, spacing, and component tokens; six-section prose body (Overview, Colors, Typography, Elevation, Components, Do's and Don'ts).
 - [`DESIGN.json`](DESIGN.json) — sidecar extending the frontmatter with tonal ramps, canonical OKLCH, shadow/motion/breakpoint tokens, and drop-in component HTML/CSS.
 
-These three files are the root-level precipitate of `docs/design/jinn-design-system/`. If you're writing marketing copy, docs, slides, or product UI, start with PRODUCT.md + DESIGN.md. If you're extending the brand itself (new sigil, new palette variant, new surface treatment), continue to the long-form source below.
+These two files are the root-level precipitate of `docs/design/jinn-design-system/`. If you're writing marketing copy, docs, slides, or product UI, start with `THESIS.md` (positioning) and `DESIGN.md` (visual). If you're extending the brand itself (new sigil, new palette variant, new surface treatment), continue to the long-form source below.
 
 ---
 
