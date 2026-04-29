@@ -60,17 +60,17 @@ Two requirements, both enforced.
 
 ### 1. CODEOWNERS
 
-`.github/CODEOWNERS` requires review from a designated owner team for any PR that modifies canonical files:
+`.github/CODEOWNERS` requires review from designated owners for any PR that modifies canonical files. Bootstrap owners are `@oaksprout` and `@ritsukai` directly — a `@Jinn-Network/canon` team can be introduced later if/when the canon group grows beyond two people.
 
 ```
-# Canonical docs — require canon-team review
-/SPEC.md       @Jinn-Network/canon
-/THESIS.md     @Jinn-Network/canon
-/BRAND.md      @Jinn-Network/canon
-/GROWTH.md     @Jinn-Network/canon
-/GLOSSARY.md   @Jinn-Network/canon
-/CLAUDE.md     @Jinn-Network/canon
-/README.md     @Jinn-Network/canon
+# Canonical docs — require canon-owner review
+/SPEC.md       @oaksprout @ritsukai
+/THESIS.md     @oaksprout @ritsukai
+/BRAND.md      @oaksprout @ritsukai
+/GROWTH.md     @oaksprout @ritsukai
+/GLOSSARY.md   @oaksprout @ritsukai
+/CLAUDE.md     @oaksprout @ritsukai
+/README.md     @oaksprout @ritsukai
 ```
 
 GitHub branch protection on `main` enforces that CODEOWNERS approval is required before merge.
@@ -201,7 +201,7 @@ Order is suggested, not strict. Each follow-up is independent.
 
 ## Open questions
 
-- **Exact CODEOWNERS handle.** Placeholder: `@Jinn-Network/canon`. Real handle TBD.
+- **CODEOWNERS handle.** Resolved: individual handles (`@oaksprout`, `@ritsukai`) for now. A `@Jinn-Network/canon` team is deferred until the canon group has reason to grow.
 - **Are `README.md` and `CLAUDE.md` formally canonical?** Proposed: yes — CODEOWNERS-protected, but exempt from the spec-proposal requirement since they're meta. Open to argument that `CLAUDE.md` *should* require a spec given how load-bearing it is for agent behaviour.
 - **CI check strictness.** Strict (blocks merge) or advisory (label-only) at first? Proposed: strict, with override via a `canonical-bypass` label that itself requires CODEOWNERS approval to apply.
 - **Versioning.** Should canonical docs carry a version + last-changed date in their preamble? Proposed: yes for `SPEC.md` (because phase boundaries matter), optional for the rest.
