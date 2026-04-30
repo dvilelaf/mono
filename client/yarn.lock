@@ -450,6 +450,7 @@ __metadata:
     "@slicekit/erc8128": "npm:^0.3.3"
     "@types/better-sqlite3": "npm:^7.6.0"
     "@types/node": "npm:^20.0.0"
+    "@types/semver": "npm:^7.7.1"
     "@x402/core": "npm:^2.9.0"
     "@x402/evm": "npm:^2.9.0"
     "@x402/fetch": "npm:^2.9.0"
@@ -461,6 +462,7 @@ __metadata:
     canonicalize: "npm:^2.0.0"
     dotenv: "npm:^17.4.1"
     hono: "npm:^4.12.10"
+    semver: "npm:^7.7.4"
     tsx: "npm:^4.0.0"
     typescript: "npm:^5.5.0"
     viem: "npm:^2.0.0"
@@ -1652,6 +1654,13 @@ __metadata:
   dependencies:
     undici-types: "npm:~6.21.0"
   checksum: 10c0/1d16da7b5f47a7415b827fcf3b94d279febf4c14671afec74a03e47856b5270023d9beb1b9aeab4d3b622fd97d61a60206cfc2cca588663181331bc592468289
+  languageName: node
+  linkType: hard
+
+"@types/semver@npm:^7.7.1":
+  version: 7.7.1
+  resolution: "@types/semver@npm:7.7.1"
+  checksum: 10c0/c938aef3bf79a73f0f3f6037c16e2e759ff40c54122ddf0b2583703393d8d3127130823facb880e694caa324eb6845628186aac1997ee8b31dc2d18fafe26268
   languageName: node
   linkType: hard
 
@@ -3778,7 +3787,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"semver@npm:^7.3.5, semver@npm:^7.6.2, semver@npm:^7.7.2":
+"semver@npm:^7.3.5, semver@npm:^7.6.2, semver@npm:^7.7.2, semver@npm:^7.7.4":
   version: 7.7.4
   resolution: "semver@npm:7.7.4"
   bin:

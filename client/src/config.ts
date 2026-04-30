@@ -334,6 +334,27 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * Path 1 plug-ins for the bundled `claude-code-learner` impl — npm
+   * packages on disk that contribute phase-agent overrides, topic
+   * explorers, MCP tools, skill bundles, memory backends, or hooks via
+   * `jinn-plugin.json`.
+   *
+   * Each entry's `entry` is the absolute (or cwd-relative) path to the
+   * plug-in package root containing `package.json` + `jinn-plugin.json`.
+   * The CLI command `jinn plug-ins {list|add|remove|show}` edits this
+   * field. See spec/2026-04-30-plug-in-surface.md §4 and
+   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md.
+   */
+  learnerPlugIns: z
+    .array(
+      z.object({
+        name: z.string(),
+        entry: z.string(),
+      }),
+    )
+    .optional(),
+
+  /**
    * Restoration engine durable directories (per-intent work + impl state).
    * Defaults under ~/.jinn-client/engine/. Env: JINN_ENGINE_WORKING_DIR_ROOT,
    * JINN_ENGINE_IMPL_STATE_DIR_ROOT.
