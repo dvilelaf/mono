@@ -80,6 +80,8 @@ export interface NetworkArtifactInput {
   sourceEndpoint?: string | null;
   paidAmountUsdc: string;
   fetchedAt: string;
+  /** When set, links this blob to a row from the HTTP catalog / peer sync `artifacts.id`. */
+  peerCatalogId?: string | null;
 }
 
 export interface NetworkArtifactRow {
@@ -94,6 +96,7 @@ export interface NetworkArtifactRow {
   paidAmountUsdc: string;
   fetchedAt: string;
   lastUsedAt: string;
+  peerCatalogId: string | null;
 }
 
 export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
@@ -218,7 +221,8 @@ CREATE TABLE IF NOT EXISTS network_artifacts (
   source_endpoint TEXT,
   paid_amount_usdc TEXT NOT NULL,
   fetched_at TEXT NOT NULL,
-  last_used_at TEXT NOT NULL
+  last_used_at TEXT NOT NULL,
+  peer_catalog_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
@@ -251,7 +255,19 @@ export class Store {
     this.db.exec(SCHEMA);
     this.db.exec(RESTORATION_INTENTS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
+    this.ensureNetworkArtifactsPeerCatalogId();
     this.backfillActivityEvents();
+  }
+
+  /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
+  private ensureNetworkArtifactsPeerCatalogId(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(network_artifacts)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'peer_catalog_id')) {
+      this.db.exec(`ALTER TABLE network_artifacts ADD COLUMN peer_catalog_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
+    );
   }
 
   /** Idempotent: older DBs before idx_reward_claims_tx may lack the unique index. */
@@ -795,14 +811,27 @@ export class Store {
     });
   }
 
-  getArtifactContent(id: string): string | null {
-    const row = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as { content: string | null } | undefined;
-    return row?.content ?? null;
+  /**
+   * Text body for a catalog artifact id: local `artifacts.content`, else a peer-cached
+   * blob in `network_artifacts` (via `peer_catalog_id`).
+   */
+  resolveCatalogArtifactContent(id: string): string | null {
+    const local = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as
+      | { content: string | null }
+      | undefined;
+    if (local?.content != null) return local.content;
+
+    const net = this.db.prepare(
+      `SELECT content FROM network_artifacts WHERE peer_catalog_id = ? ORDER BY fetched_at DESC LIMIT 1`,
+    ).get(id) as { content: Buffer } | undefined;
+    if (!net) return null;
+    return net.content.toString('utf-8');
   }
 
-  getRemoteArtifactInfo(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
+  /** Endpoint / owner for a remote (peer-synced) catalog row in `artifacts`. */
+  getRemoteDiscoveryMetadata(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
     const row = this.db.prepare(
-      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1'
+      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1',
     ).get(id) as { endpoint: string; owner_address: string; price: string | null } | undefined;
     if (!row) return null;
     return {
@@ -898,13 +927,16 @@ export class Store {
   }
 
   saveNetworkArtifact(input: NetworkArtifactInput): void {
+    if (input.peerCatalogId) {
+      this.db.prepare(`DELETE FROM network_artifacts WHERE peer_catalog_id = ?`).run(input.peerCatalogId);
+    }
     this.db.prepare(
       `INSERT OR REPLACE INTO network_artifacts
          (sha256, artifact_type, envelope_cid, content, content_size, source,
-          source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at)
+          source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at, peer_catalog_id)
        VALUES
          (@sha256, @artifactType, @envelopeCid, @content, @contentSize, @source,
-          @sourceOperator, @sourceEndpoint, @paidAmountUsdc, @fetchedAt, @fetchedAt)`,
+          @sourceOperator, @sourceEndpoint, @paidAmountUsdc, @fetchedAt, @fetchedAt, @peerCatalogId)`,
     ).run({
       sha256: input.sha256,
       artifactType: input.artifactType,
@@ -916,13 +948,15 @@ export class Store {
       sourceEndpoint: input.sourceEndpoint ?? null,
       paidAmountUsdc: input.paidAmountUsdc,
       fetchedAt: input.fetchedAt,
+      peerCatalogId: input.peerCatalogId ?? null,
     });
   }
 
   getNetworkArtifact(sha256: string): NetworkArtifactRow | null {
     const row = this.db.prepare(
       `SELECT sha256, artifact_type, envelope_cid, content, content_size, source,
-              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at
+              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at,
+              peer_catalog_id
        FROM network_artifacts WHERE sha256 = ?`,
     ).get(sha256) as {
       sha256: string;
@@ -936,6 +970,7 @@ export class Store {
       paid_amount_usdc: string;
       fetched_at: string;
       last_used_at: string;
+      peer_catalog_id: string | null;
     } | undefined;
     if (!row) return null;
     return {
@@ -950,6 +985,7 @@ export class Store {
       paidAmountUsdc: row.paid_amount_usdc,
       fetchedAt: row.fetched_at,
       lastUsedAt: row.last_used_at,
+      peerCatalogId: row.peer_catalog_id,
     };
   }
 
@@ -1010,10 +1046,6 @@ export class Store {
         createdAt: r.fetched_at,
       })),
     ];
-  }
-
-  cacheRemoteContent(id: string, content: string): void {
-    this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
   }
 
   close(): void {

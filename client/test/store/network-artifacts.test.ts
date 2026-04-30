@@ -29,6 +29,22 @@ describe('Store.network_artifacts', () => {
     expect(row!.sourceOperator).toBe('0x' + '1'.repeat(40));
     expect(row!.paidAmountUsdc).toBe('0.001');
     expect(row!.lastUsedAt).toBe('2026-04-30T00:00:00.000Z');
+    expect(row!.peerCatalogId).toBeNull();
+  });
+
+  it('resolves catalog text via peer_catalog_id after save', () => {
+    const sha256 = 'a'.repeat(64);
+    store.saveNetworkArtifact({
+      sha256,
+      artifactType: 'api-catalog',
+      content: Buffer.from('peer body', 'utf-8'),
+      source: 'origin',
+      sourceEndpoint: 'http://peer.example',
+      paidAmountUsdc: '0',
+      fetchedAt: '2026-04-30T12:00:00.000Z',
+      peerCatalogId: 'artifact-xyz',
+    });
+    expect(store.resolveCatalogArtifactContent('artifact-xyz')).toBe('peer body');
   });
 
   it('updates last_used_at on touchNetworkArtifactUsage', () => {
