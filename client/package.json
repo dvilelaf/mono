@@ -62,7 +62,8 @@
     "e2e:prediction": "cd ../contracts && yarn compile && cd ../client && tsx test/e2e/prediction-v0.ts",
     "staking": "tsx test/e2e/staking.ts",
     "stolas": "tsx test/e2e/stolas.ts",
-    "withdraw": "tsx scripts/withdraw.ts"
+    "withdraw": "tsx scripts/withdraw.ts",
+    "corpus:e2e": "tsx scripts/corpus-e2e-validate.ts"
   },
   "dependencies": {
     "@ethereumjs/wallet": "^10.0.0",
