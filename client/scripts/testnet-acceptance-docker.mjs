@@ -500,7 +500,7 @@ async function main() {
       historyCounts: countHistoryKinds(baselineHistory),
       runStartAt,
       cycleSubstrate: 'prediction.v0',
-      artifactProgress: baselineArtifacts.byRequestId,
+      artifactProgress: baselineArtifacts.byDesiredStateId,
       pendingRewardsWei: sumPendingRewards(baselineRewards).toString(),
       status: baselineStatus,
     });
@@ -549,7 +549,7 @@ async function main() {
         at: new Date().toISOString(),
         runStartAt,
         completedCycles: artifactProgress.completedCycles,
-        artifactProgress: artifactProgress.byRequestId,
+        artifactProgress: artifactProgress.byDesiredStateId,
         blocking: status.exit?.blocking ?? false,
         daemonShutdownState: status.daemon?.shutdownState ?? null,
       };
@@ -617,7 +617,7 @@ async function main() {
       runStartAt,
       cycleSubstrate: 'prediction.v0',
       observedCompletedCycles: observed.artifactProgress.completedCycles,
-      observedArtifactProgress: observed.artifactProgress.byRequestId,
+      observedArtifactProgress: observed.artifactProgress.byDesiredStateId,
       pendingRewardsBeforeClaimWei: pendingBeforeClaim.toString(),
       rewardClaimMode,
       claim,

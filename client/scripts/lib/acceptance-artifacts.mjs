@@ -89,42 +89,52 @@ export function readArtifactProgress(dbPath, desiredStateIds) {
 
 /**
  * Aggregate artifacts produced after `runStartAt` (ISO 8601), grouped by
- * `request_id`. A cycle is complete when both a `restoration-result` SUCCESS
- * and an `evaluation-verdict` SUCCESS row exist for the same request_id.
+ * `desired_state_id`. A cycle is complete when both a `restoration-result`
+ * SUCCESS and an `evaluation-verdict` SUCCESS row exist for the same
+ * `desired_state_id`.
  *
- * Used by the docker acceptance gate to track auto-generated `prediction.v0`
- * cycles whose desired_state_ids (`pred-v0-auto-<bucket>`) are not known
- * up-front.
+ * The on-chain restoration and evaluation phases each get their own
+ * `request_id` (separate mech submissions), but they share the
+ * `pred-v0-auto-<bucket>` `desired_state_id` from the auto-generator
+ * template. Grouping by `desired_state_id` therefore matches the cycle, not
+ * the phase.
  */
 export function summarizeRunWindowArtifacts(rows, runStartAt) {
-  const byRequestId = new Map();
+  const byDesiredStateId = new Map();
   const startMs = Date.parse(runStartAt);
   for (const row of rows) {
-    if (!row.request_id) continue;
+    if (!row.desired_state_id) continue;
     if (Number.isFinite(startMs) && row.created_at) {
       const created = Date.parse(row.created_at);
       if (Number.isFinite(created) && created < startMs) continue;
     }
-    let entry = byRequestId.get(row.request_id);
+    let entry = byDesiredStateId.get(row.desired_state_id);
     if (!entry) {
       entry = {
-        requestId: row.request_id,
         desiredStateId: row.desired_state_id,
+        restorationRequestId: null,
+        evaluationRequestId: null,
         restorationOk: false,
         evaluationOk: false,
         latestArtifactAt: null,
       };
-      byRequestId.set(row.request_id, entry);
+      byDesiredStateId.set(row.desired_state_id, entry);
     }
     const tags = new Set(normalizeTags(row.tags));
-    if (tags.has('restoration-result') && row.outcome === 'SUCCESS') entry.restorationOk = true;
-    if (tags.has('evaluation-verdict') && row.outcome === 'SUCCESS') entry.evaluationOk = true;
+    if (tags.has('restoration-result')) {
+      if (row.outcome === 'SUCCESS') entry.restorationOk = true;
+      if (row.request_id) entry.restorationRequestId = row.request_id;
+    }
+    if (tags.has('evaluation-verdict')) {
+      if (row.outcome === 'SUCCESS') entry.evaluationOk = true;
+      if (row.request_id) entry.evaluationRequestId = row.request_id;
+    }
     entry.latestArtifactAt = row.created_at ?? entry.latestArtifactAt;
   }
-  const entries = Array.from(byRequestId.values());
+  const entries = Array.from(byDesiredStateId.values());
   return {
     rows,
-    byRequestId: entries,
+    byDesiredStateId: entries,
     completedCycles: entries.filter((e) => e.restorationOk && e.evaluationOk).length,
   };
 }

@@ -147,26 +147,29 @@ describe('artifact cycle summaries', () => {
 describe('summarizeRunWindowArtifacts', () => {
   const runStartAt = '2026-04-30T10:00:00.000Z';
 
-  it('counts a cycle complete only when both restoration and evaluation succeed for the same request_id', () => {
+  it('counts a cycle complete only when both restoration and evaluation succeed for the same desired_state_id', () => {
+    // Real shape: restoration and evaluation phases each get their own
+    // on-chain request_id; they share the prediction.v0 auto-gen bucket id
+    // (`pred-v0-auto-<bucket>`) as desired_state_id.
     const summary = summarizeRunWindowArtifacts(
       [
         {
           desired_state_id: 'pred-v0-auto-1714464000000',
-          request_id: '0xreq1',
+          request_id: '0xrestreq1',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30T10:03:00.000Z',
         },
         {
           desired_state_id: 'pred-v0-auto-1714464000000',
-          request_id: '0xreq1',
+          request_id: '0xevalreq1',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30T10:06:00.000Z',
         },
         {
           desired_state_id: 'pred-v0-auto-1714464120000',
-          request_id: '0xreq2',
+          request_id: '0xrestreq2',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30T10:09:00.000Z',
@@ -176,13 +179,15 @@ describe('summarizeRunWindowArtifacts', () => {
     );
 
     expect(summary.completedCycles).toBe(1);
-    expect(summary.byRequestId).toHaveLength(2);
-    const req1 = summary.byRequestId.find((e) => e.requestId === '0xreq1');
-    expect(req1?.restorationOk).toBe(true);
-    expect(req1?.evaluationOk).toBe(true);
-    const req2 = summary.byRequestId.find((e) => e.requestId === '0xreq2');
-    expect(req2?.restorationOk).toBe(true);
-    expect(req2?.evaluationOk).toBe(false);
+    expect(summary.byDesiredStateId).toHaveLength(2);
+    const cycle1 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464000000');
+    expect(cycle1?.restorationOk).toBe(true);
+    expect(cycle1?.evaluationOk).toBe(true);
+    expect(cycle1?.restorationRequestId).toBe('0xrestreq1');
+    expect(cycle1?.evaluationRequestId).toBe('0xevalreq1');
+    const cycle2 = summary.byDesiredStateId.find((e) => e.desiredStateId === 'pred-v0-auto-1714464120000');
+    expect(cycle2?.restorationOk).toBe(true);
+    expect(cycle2?.evaluationOk).toBe(false);
   });
 
   it('excludes rows created before runStartAt', () => {
@@ -190,14 +195,14 @@ describe('summarizeRunWindowArtifacts', () => {
       [
         {
           desired_state_id: 'pred-v0-auto-old',
-          request_id: '0xstale',
+          request_id: '0xstaleR',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30T09:30:00.000Z',
         },
         {
           desired_state_id: 'pred-v0-auto-old',
-          request_id: '0xstale',
+          request_id: '0xstaleE',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
           created_at: '2026-04-30T09:45:00.000Z',
@@ -207,12 +212,12 @@ describe('summarizeRunWindowArtifacts', () => {
     );
 
     expect(summary.completedCycles).toBe(0);
-    expect(summary.byRequestId).toHaveLength(0);
+    expect(summary.byDesiredStateId).toHaveLength(0);
   });
 
   it('returns zero cycles for an empty row set', () => {
     const summary = summarizeRunWindowArtifacts([], runStartAt);
     expect(summary.completedCycles).toBe(0);
-    expect(summary.byRequestId).toEqual([]);
+    expect(summary.byDesiredStateId).toEqual([]);
   });
 });
