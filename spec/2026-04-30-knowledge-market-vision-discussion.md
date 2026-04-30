@@ -1,4 +1,4 @@
-# Jinn as the knowledge market — substrate vision, gates, and the work to get there
+# Jinn as the knowledge market — implementation roadmap proposal
 
 **Status:** Discussion draft
 **Date:** 2026-04-30
