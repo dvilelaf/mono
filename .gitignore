@@ -11,3 +11,7 @@ node_modules/
 
 # Per-operator dev helpers (not collaborative)
 client/start-daemon.sh
+packages/*/node_modules/
+packages/*/dist/
+packages/*/.yarn/cache/
+packages/*/.yarn/install-state.gz
