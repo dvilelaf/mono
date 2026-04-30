@@ -120,12 +120,17 @@ export function readArtifactProgress(dbPath, desiredStateIds) {
  */
 export function summarizeRunWindowArtifacts(rows, runStartAt) {
   const byDesiredStateId = new Map();
-  const startMs = Date.parse(runStartAt);
+  // Compare as strings in SQLite TEXT format. Using Date.parse() on SQLite's
+  // `YYYY-MM-DD HH:MM:SS` format treats it as LOCAL time, while ISO inputs
+  // with `Z` are UTC — a TZ-offset's worth of rows would silently drop. Both
+  // SQL and JS sides now agree on lexicographic SQLite-format comparison.
+  const sinceSqlite = typeof runStartAt === 'string'
+    ? isoToSqliteTimestamp(runStartAt)
+    : runStartAt;
   for (const row of rows) {
     if (!row.desired_state_id) continue;
-    if (Number.isFinite(startMs) && row.created_at) {
-      const created = Date.parse(row.created_at);
-      if (Number.isFinite(created) && created < startMs) continue;
+    if (typeof sinceSqlite === 'string' && row.created_at) {
+      if (row.created_at < sinceSqlite) continue;
     }
     let entry = byDesiredStateId.get(row.desired_state_id);
     if (!entry) {

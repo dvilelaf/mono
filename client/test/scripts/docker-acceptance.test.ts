@@ -148,9 +148,11 @@ describe('summarizeRunWindowArtifacts', () => {
   const runStartAt = '2026-04-30T10:00:00.000Z';
 
   it('counts a cycle complete only when both restoration and evaluation succeed for the same desired_state_id', () => {
-    // Real shape: restoration and evaluation phases each get their own
-    // on-chain request_id; they share the prediction.v0 auto-gen bucket id
-    // (`pred-v0-auto-<bucket>`) as desired_state_id.
+    // Real shape: SQLite stores `created_at` as `YYYY-MM-DD HH:MM:SS`
+    // (CURRENT_TIMESTAMP default), not ISO 8601. Restoration and evaluation
+    // phases each get their own on-chain request_id; they share the
+    // prediction.v0 auto-gen bucket id (`pred-v0-auto-<bucket>`) as
+    // desired_state_id.
     const summary = summarizeRunWindowArtifacts(
       [
         {
@@ -158,21 +160,21 @@ describe('summarizeRunWindowArtifacts', () => {
           request_id: '0xrestreq1',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
-          created_at: '2026-04-30T10:03:00.000Z',
+          created_at: '2026-04-30 10:03:00',
         },
         {
           desired_state_id: 'pred-v0-auto-1714464000000',
           request_id: '0xevalreq1',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
-          created_at: '2026-04-30T10:06:00.000Z',
+          created_at: '2026-04-30 10:06:00',
         },
         {
           desired_state_id: 'pred-v0-auto-1714464120000',
           request_id: '0xrestreq2',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
-          created_at: '2026-04-30T10:09:00.000Z',
+          created_at: '2026-04-30 10:09:00',
         },
       ],
       runStartAt,
@@ -190,7 +192,7 @@ describe('summarizeRunWindowArtifacts', () => {
     expect(cycle2?.evaluationOk).toBe(false);
   });
 
-  it('excludes rows created before runStartAt', () => {
+  it('excludes rows created before runStartAt (SQLite TEXT format comparison)', () => {
     const summary = summarizeRunWindowArtifacts(
       [
         {
@@ -198,14 +200,14 @@ describe('summarizeRunWindowArtifacts', () => {
           request_id: '0xstaleR',
           tags: '["restoration-result"]',
           outcome: 'SUCCESS',
-          created_at: '2026-04-30T09:30:00.000Z',
+          created_at: '2026-04-30 09:30:00',
         },
         {
           desired_state_id: 'pred-v0-auto-old',
           request_id: '0xstaleE',
           tags: '["evaluation-verdict"]',
           outcome: 'SUCCESS',
-          created_at: '2026-04-30T09:45:00.000Z',
+          created_at: '2026-04-30 09:45:00',
         },
       ],
       runStartAt,
@@ -219,6 +221,36 @@ describe('summarizeRunWindowArtifacts', () => {
     const summary = summarizeRunWindowArtifacts([], runStartAt);
     expect(summary.completedCycles).toBe(0);
     expect(summary.byDesiredStateId).toEqual([]);
+  });
+
+  it('does not silently exclude rows due to timezone interpretation mismatch', () => {
+    // Regression: SQLite `created_at` parsed via Date.parse() was treated as
+    // local time while ISO `runStartAt` (with Z) is UTC. With the local zone
+    // ahead of UTC, every SQLite row appeared "earlier" than runStartAt by a
+    // full TZ offset and was silently dropped — the live gate saw 0 cycles
+    // even when complete pairs existed.
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-1777545600000',
+          request_id: '0xrestreq',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          // SQLite-format, only seconds after the ISO runStartAt below.
+          created_at: '2026-04-30 10:00:30',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1777545600000',
+          request_id: '0xevalreq',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30 10:01:00',
+        },
+      ],
+      // runStartAt is the ISO format new Date().toISOString() produces.
+      '2026-04-30T10:00:00.000Z',
+    );
+    expect(summary.completedCycles).toBe(1);
   });
 });
 
