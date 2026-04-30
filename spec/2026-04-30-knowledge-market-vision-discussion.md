@@ -11,13 +11,13 @@ This is a discussion draft, not a commitment. It exists to give the team a singl
 
 ## TL;DR
 
-**Jinn is the knowledge market for verified agentic execution knowledge.** Operators run intents and produce trajectories. Trajectories are priced, verified, and accessible to anyone who pays — humans, labs, vertical AI companies, end users, agents fulfilling other agents' work. There is one buy primitive and anyone can use it.
+**Jinn is the knowledge market for verified agentic execution knowledge.** Operators run intents and produce trajectories. Trajectories are priced, verified, and accessible to anyone who pays — humans, labs, vertical AI companies, end users, and agents pulling past knowledge to inform their own work. There is one buy primitive and anyone can use it.
 
-The compounding mechanism falls out automatically: because agents are buyers like everyone else, fulfilling a complex intent naturally pulls past trajectories from the corpus, paying their original creators. A's failure becomes B's lesson, B's success becomes C's input, the corpus compounds — *because the agents in it are also consumers of it*. Closed labs cannot replicate this because they cannot open the loop to operators they don't employ, against a corpus their competitors also contributed to.
+The compounding mechanism falls out automatically: because agents in the network are buyers like everyone else, the same population that *produces* trajectories also *consumes* them. An operator running today reads relevant past trajectories from the corpus to do its own work better, paying the original creators. The next operator does the same against a corpus that now includes today's run. The corpus compounds — *not because agents serve each other, but because the same population that produces is also consuming.* Closed labs cannot replicate this because they cannot open the loop to operators they don't employ, against a corpus their competitors also contributed to.
 
-The system splits into three layers. **The protocol** — on-chain contracts, envelope schemas, signing rules, tokenomics. The neutral substrate that makes execution knowledge tradeable. **Infrastructure** — subgraph indexers, storage backends, x402 facilitators, retrieval APIs. The operational stack that makes the protocol usable. **Apps** — user-facing surfaces. The first product on top of Jinn.
+The system splits into three layers. **The protocol** — on-chain contracts, envelope schemas, signing rules, tokenomics. The neutral substrate that makes execution knowledge tradeable. **Infrastructure** — subgraph indexers, storage backends, x402 facilitators, retrieval APIs. The operational stack that makes the protocol usable. **Apps** — user-facing surfaces. The first app on top of Jinn is **the agent-discovery surface that makes the learning loop possible at all** — without it, there is no path for an agent to find and consume past trajectories.
 
-The protocol is mostly built. Infrastructure is partial — there's a gating leak that defeats pricing today. Apps are mostly missing. The phases below close those gaps in dependency order.
+The protocol is mostly built. Infrastructure is partial — there's a gating leak that defeats pricing today. Apps are missing entirely, and the learning loop *cannot exist* until the first app does. The phases below close those gaps in dependency order.
 
 ---
 
@@ -27,11 +27,13 @@ Closed labs compound knowledge by default. Every run feeds back into the next: t
 
 Discussion #41 named this tension and proposed: turn execution knowledge itself into a priced asset. This document accepts that frame and tightens it.
 
-**One market, one buy primitive, anyone can use it.** A trader, a developer, a fund, an open-weights lab, a regulated enterprise, a researcher, an end user, an agent fulfilling somebody else's intent — they all use the same primitive. Pay, get knowledge. Same envelopes, same gating, same x402 rails, same evaluator scores, same reputation. The protocol makes no distinction between buyer types. *Anyone who wants knowledge from the network is a buyer.*
+**One market, one buy primitive, anyone can use it.** A trader, a developer, a fund, an open-weights lab, a regulated enterprise, a researcher, an end user, an agent doing its own work — they all use the same primitive. Pay, get knowledge. Same envelopes, same gating, same x402 rails, same evaluator scores, same reputation. The protocol makes no distinction between buyer types. *Anyone who wants knowledge from the network is a buyer.*
 
-The compounding loop is not a separate mechanism. It is what happens automatically when agents — which are buyers like anyone else — read past trajectories during their own work. An agent producing a portfolio strategy queries past portfolio trajectories. An agent producing a prediction queries past evaluator notes. An agent debugging a contract queries past debugging trajectories. The corpus compounds because its participants consume it.
+The compounding loop is not a separate mechanism — it is what happens automatically when **the same population that produces trajectories is also consuming them.** An operator producing a portfolio strategy pulls past portfolio trajectories to inform its own approach. An operator producing a prediction pulls past evaluator notes about similar markets. An operator debugging a contract pulls past debugging trajectories. The agent isn't *serving* another agent — it's *learning from past work* (its own and others') so its own current work is better. The corpus compounds because its participants both feed it and read from it.
 
-Labs that buy from Jinn are doing the same thing at a different cadence: they pull bulk corpus, train on it, deploy improved models, re-enter the network as solvers running those improved models. They metabolise Jinn rather than extracting from it (Oak's framing in #41). The lab does not become an exclusive consumer of any particular operator's edge — they buy knowledge that operators chose to disclose at a price, and contribute new knowledge back when they re-enter.
+But this loop only exists if there is a path from agent → corpus → relevant past trajectories. Without that path, the corpus is inert no matter how rich. **The first app on top of Jinn — primarily targeted at agents in the network — is what creates that path.** It's not a UI for humans first; it's a discovery and retrieval surface for operators-as-buyers, programmatic, latency-aware, and integrated with the restorer phases that need it.
+
+Labs that buy from Jinn do the same thing at a different cadence: they pull bulk corpus, train on it, deploy improved models, re-enter the network as solvers running those improved models. They metabolise Jinn rather than extracting from it (Oak's framing in #41). The lab does not become an exclusive consumer of any particular operator's edge — they buy knowledge that operators chose to disclose at a price, and contribute new knowledge back when they re-enter.
 
 The structural advantage compounds two ways. **Volume** — more buyers buying means more operators producing means more knowledge accumulating. **Provenance** — every envelope carries cryptographic lineage, evaluator scores, operator reputation; this metadata layer is the moat, and it is built by the protocol's own activity.
 
@@ -45,9 +47,9 @@ Three things to notice about that framing.
 
 **"Knowledge," not "outputs."** A prediction, a swap, a scored answer is an output. The trajectory that produced it — context, plan, prompts, tool calls, sources, intermediate observations, failed branches, evaluator notes, outcome proof — is the knowledge. Pricing knowledge dominates pricing outputs because the output is consumed once and the knowledge is reusable forever.
 
-**"Anyone."** No buyer classes. No "labs vs end users vs agents." Anyone with a wallet who wants knowledge issues a request and pays. The market does not care who they are or why. This is the property that makes the agent-to-agent compounding loop fall out for free.
+**"Anyone."** No buyer classes. No "labs vs end users vs agents." Anyone with a wallet who wants knowledge issues a request and pays. The market does not care who they are or why. This is the property that makes the compounding loop fall out for free — agents-as-buyers don't need a separate mechanism, they just use the same primitive everyone else uses.
 
-**"Compounds intelligence."** Most data marketplaces clear transactions. Jinn's distinctive property is that the act of selling knowledge *makes the next round of knowledge production better*, because the next operator runs against a richer corpus. Volume × provenance × open-loop = compounding curve.
+**"Compounds intelligence."** Most data marketplaces clear transactions. Jinn's distinctive property is that the act of selling knowledge *makes the next round of knowledge production better*, because the next operator runs against a richer corpus they can read from. The same population that produces the corpus is consuming it. Volume × provenance × open-loop = compounding curve.
 
 ---
 
@@ -87,17 +89,23 @@ Infrastructure is the layer where the **gating leak** lives. The leak is operati
 
 ### 3.3 Apps — the products on top
 
-Apps are user-facing surfaces. They translate human (or agent) intent into protocol-level operations. The first app on top of Jinn is the **knowledge marketplace** — the user-facing product where buyers come to acquire execution knowledge. There can be many apps on the same protocol; the first ones are how Jinn becomes legible to people who don't read the schema.
+Apps are user-facing surfaces. They translate human (or agent) intent into protocol-level operations. There can be many apps on the same protocol over time; their order of arrival matters because the compounding loop depends on the *first* one existing.
 
-What apps do, that the protocol and infrastructure do not:
+**The first app: the agent-discovery surface.** The first app on top of Jinn is primarily targeted at agents in the network — operators who need to discover and consume past trajectories to inform their own work. It is what unblocks the learning loop.
 
-- **Translate user requests into protocol intents** (the production path: post a request, escrow funds, wait for an operator to claim and produce).
-- **Translate user queries into corpus retrieval** (the retrieval path: search the indexer, return matching trajectories, x402 acquire the content).
-- **Apply selection rules** at query time (rank by reputation? evaluator consensus? user-defined predicate?).
-- **Bundle royalties** (a knowledge-query that returns a 5-trajectory bundle splits payment across the original creators).
-- **Own UX** — request creation form, search UI, agent SDK, lab-tier API, ve-JINN governance UI.
+Why agents first, not humans. The compounding loop the whole vision rests on is "the same population that produces the corpus is also reading from it." Without an app that lets agents actually *read* the corpus, the loop is a thought experiment. Operators are also the most demanding early consumers — they need programmatic access, low latency, integration into restorer phases, and they have a clear native economic incentive (better trajectories earn more, including via downstream royalties). Building for them first is a forcing function for getting the path right.
 
-**Apps may unify request and query into one surface, or split them into two — this is a product choice, not a protocol decision.** The protocol underneath has two distinct mechanisms: posting an intent (which commissions new work and produces a fresh trajectory) and reading the corpus (which retrieves existing trajectories). They have different freshness, different latency, different price profiles:
+Concretely, the first app provides:
+
+- **Discovery** — agents (or humans) issue queries against the corpus by predicate (kind, time window, evaluator score, operator reputation, etc.); the app talks to one or more indexers.
+- **Retrieval** — once a result set is returned, the app handles the x402 payment + acquire dance against the producing operator's node.
+- **Selection rules** — rank-by-reputation, rank-by-evaluator-consensus, user-defined predicate. Applied at query time.
+- **Royalty bundling** — payment splits across original creators when a multi-component bundle is acquired.
+- **Programmatic surface** — SDK + API designed for agents-in-restorer-phases, not a UI primarily.
+
+**Later apps:** human-facing knowledge marketplace UIs, lab-tier bulk-access APIs, vertical bundlers, search engines, ve-JINN governance UIs, alternative indexers. These come *after* the agent-discovery surface because they don't directly enable the loop, only consume from a corpus the loop is already feeding.
+
+**On the request/query split.** The protocol has two distinct mechanisms underneath: posting an intent (which commissions new work and produces a fresh trajectory) and reading the corpus (which retrieves existing trajectories). They have different freshness, different latency, different price profiles:
 
 | | Request (production path) | Query (retrieval path) |
 |---|---|---|
@@ -107,7 +115,7 @@ What apps do, that the protocol and infrastructure do not:
 | **Specificity** | Targeted to the buyer's exact predicate | Best-effort over what exists |
 | **Risk** | Operator may not claim or may produce poor work | Trajectory exists but may not match perfectly |
 
-Apps decide whether to expose them as one ("ask Jinn for knowledge — we'll route") or two ("commission new" and "search corpus" as separate products). Both are valid. Different apps may make different choices. The market sorts.
+**Apps may unify them into one surface ("ask Jinn for knowledge — we'll route") or split them into two ("commission new" + "search corpus") — this is a product choice, not a protocol decision.** The first agent-discovery app likely starts with retrieval-only (the loop only needs reading from corpus to begin compounding); request-posting can be added once retrieval is working. Other apps will make different choices.
 
 ---
 
@@ -135,70 +143,71 @@ This is the surgical fix that unlocks the whole pricing story. It is a few-day i
 
 **Retrieval API:** Does not exist yet as a network-wide service. The skeleton lives in MCP tools (`client/src/mcp/server.ts:160-230`) — `publish_artifact`, `search_artifacts`, `acquire_artifact` — but they query a *local* store. Promoting them to query the subgraph + acquire from peer operators' x402 endpoints is the second piece of Phase A.
 
-### 4.3 Apps — mostly missing
+### 4.3 Apps — missing entirely; the loop blocks on the first one
 
-There is no canonical knowledge-marketplace app today. There is no UI surface where a buyer comes, queries the corpus, gets a quote, and pays. There is no agent-SDK exposing the same flow programmatically. Phase A and Phase B build these.
+There is no agent-discovery surface today. There is no SDK or API where an agent in a restorer phase can query the network corpus and acquire matching trajectories. There is no UI where a human can search, get a quote, and pay. **The compounding loop the whole vision rests on does not exist in operational form because the path does not exist.**
 
 What does exist that gets folded in:
 
-- The default learning restorer spec (`docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) is, in effect, the **canonical agent-as-buyer**. Its Orient and Debrief phases are explicitly the consumption points where an agent reads past trajectories. It's the first concrete demonstration that the agent-as-buyer pattern works — and Phase C is its wiring.
-- The MCP tool skeleton sketches the agent-side shape; Phase A promotes them from local-store to network-wide.
+- The default learning restorer spec (`docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) is the **canonical agent-as-buyer**. Its Orient and Debrief phases are the natural consumption points — the spec already calls for "others' run history when accessible." Phase B + C is what makes "accessible" real.
+- The MCP tool skeleton (`publish_artifact` / `search_artifacts` / `acquire_artifact`) sketches the agent-side shape; Phase A promotes them from local-store-only to network-aware; Phase B builds them out into the first agent-discovery app.
 
 ### 4.4 Net
 
-Protocol: ~80% built; royalty-split primitives are the main near-term addition. Infrastructure: ~60% built; gating leak is the load-bearing fix; retrieval API needs promotion to network scope. Apps: ~10% built; the canonical knowledge marketplace is the biggest piece of new construction.
+Protocol: ~80% built; royalty-split primitives are the main near-term addition. Infrastructure: ~60% built; gating leak is the load-bearing fix; retrieval path needs network-scope promotion. Apps: ~5% built; the agent-discovery surface is the *first* piece of new construction and gates everything that depends on the loop.
 
-The encouraging shape: **the smallest amount of new construction is at the protocol layer; the bulk of the work is infrastructure ops + the first apps.** That's the right shape — protocol is supposed to be slow-changing once correct.
+The encouraging shape: **the smallest amount of new construction is at the protocol layer; the bulk of the work is infrastructure ops + the first app, both fairly contained.** That's the right shape — protocol is supposed to be slow-changing once correct.
 
 ---
 
 ## 5. Phases
 
-The phasing follows from layer dependencies. Infrastructure must work before apps can sit on top. The protocol must support royalty primitives before apps can split payments correctly. Apps come last in the dependency chain but first in the user-visible chain.
+The phasing follows from layer dependencies *and* from the load-bearing role of the first app. Infrastructure must work before apps can sit on top. The first app must exist before the compounding loop is more than a thought experiment. Royalty primitives must exist before the loop pays the right people. Human-facing surfaces and the broader ecosystem come once the loop is demonstrably working.
 
-### Phase A — Close the gating leak. Promote retrieval to network scope. (Weeks.)
+### Phase A — Infrastructure: close the gating leak; promote retrieval to network scope. (Weeks.)
 
-The smallest set of changes that makes pricing structurally possible.
+The smallest set of changes that makes the path *structurally possible*.
 
 - Stop publishing `x402-gated` content to IPFS. Publish manifest + access pointer only. Serve content via the existing x402 routes from operator nodes. (`client/src/restorer/engine/packaging.ts`.)
-- Promote MCP `search_artifacts` / `acquire_artifact` to talk to the subgraph and to peer operators' x402 endpoints, not just the local store.
-- Default new envelopes to **gated-at-zero**. Forces the path through subgraph + retrieval-API + x402 acquire even when content is currently free. Prices kick in later by setting `priceUsdc` non-zero. The Captain's instinct that the path itself is the structural prerequisite, not the price.
+- Promote MCP `search_artifacts` / `acquire_artifact` to talk to the subgraph and to peer operators' x402 endpoints, not just the local store. This is the proto-agent-discovery path.
+- Default new envelopes to **gated-at-zero**. Forces the path through subgraph + retrieval + x402 acquire even when content is currently free. Prices kick in later by setting `priceUsdc` non-zero. The path itself is the structural prerequisite, not the price.
 - Subgraph: surface a "purchasable / x402-endpoint" face on `Execution` so retrieval clients know where to acquire.
 
-Acceptance: a buyer (human or agent) can query the subgraph for envelopes matching a predicate and pay-and-fetch the content from the producing operator's node. End-to-end on testnet. The gate actually gates.
+Acceptance: an operator (human-driven or agent-driven) can query the subgraph for envelopes matching a predicate and pay-and-fetch the content from the producing operator's node. End-to-end on testnet. The gate actually gates.
 
-### Phase B — Royalty primitives. Stand up the canonical knowledge marketplace.
+### Phase B — The first app: agent-discovery surface. Royalty primitives. (The loop becomes real.)
 
-Now that the path exists, build the first app and the protocol primitives it needs.
+The first app on top of Jinn. Targeted primarily at agents in the network — the operators who need to discover and consume past trajectories during their own work. Without this app, the compounding loop is theoretical; with it, it becomes operational.
 
-- Define royalty-split semantics at the protocol layer: when a retrieval settles, payment splits across the original envelope's operator, evaluator, and any cited components' creators in declared shares. v0: declared in envelope metadata, executed off-chain in the retrieval API. Move to on-chain settlement when volume warrants.
-- Decide whether to add component-level access policy (gating per-component within an envelope, not just at envelope boundary) — Phase B or Phase B.5 depending on demand.
-- Stand up the canonical knowledge-marketplace app: search, request creation, retrieval, billing, royalty bundling. Could be one unified UI or split into "request" and "search" surfaces — product call.
+- Promote the Phase A retrieval primitives into a first-class **agent-discovery SDK / API**. Designed for programmatic use from inside restorer phases: query → result-set → pay → acquire, with hooks for selection rules and royalty splitting.
+- Define royalty-split semantics at the protocol layer: when a retrieval settles, payment splits across the original envelope's operator, evaluator, and any cited components' creators in declared shares. v0: declared in envelope metadata, executed off-chain in the retrieval/SDK layer. Move to on-chain settlement when volume warrants.
+- Wire the default learning restorer's Orient and Debrief phases to consume the corpus over the SDK — the spec already calls for "others' run history when accessible," and this is what "accessible" means structurally now that the SDK exists.
+- Ship the harness adapter contract (Claude Code + Pi.dev) per the learner spec §8, with the network retrieval API as a required capability.
 - Begin metering retrieval usage in subgraph state so reputation and supply-side incentives can read it.
 
-Acceptance: a buyer can issue a request OR a query through the marketplace app; the marketplace handles either path; payment splits correctly across upstream creators on settlement. End-to-end on testnet with a cohort of test buyers.
+Acceptance: a default-learning-restorer executes an intent, queries the corpus mid-run for analogous past trajectories via the SDK, pays the upstream creators, applies what it learned, produces a measurably-better trajectory in its `Improve` phase. **The compounding loop demonstrably runs.** Other restorer impls that add a discovery phase plug into the same SDK and become participants in the same loop.
 
-### Phase C — Agent-as-buyer SDK. Wire the default learning restorer.
+This is where the harness pattern earns its keep. The default learning restorer is **the canonical agent-as-buyer** — the first restorer designed to consume Jinn's market in production. The agent-discovery SDK is the surface that makes it possible. Phase B's deliverable is the loop, not just the app.
 
-The compounding loop becomes real.
+### Phase C — Human-facing knowledge marketplace. Selection / search / billing UIs.
 
-- Promote MCP tools to a first-class agent SDK that talks to the network retrieval API + posts requests through the protocol, paying via the agent's wallet.
-- Wire the default learning restorer's Orient and Debrief phases to consume the corpus over the network — the spec already calls for "others' run history when accessible," and this is what "accessible" means structurally now that the path exists.
-- Ship the harness adapter contract (Claude Code + Pi.dev) per the learner spec §8, with the network retrieval API as a required capability.
-- Acceptance test: a learner restorer executes an intent, queries the corpus mid-run for analogous past trajectories, pays the upstream creators, applies what it learned, produces a measurably-better trajectory in its `Improve` phase. The agent-to-agent loop demonstrably compounds.
+Once the agent-driven loop is producing demonstrable compounding value (richer corpus, better operators, evaluator signals worth trusting), expose it to humans and human-shaped buyers.
 
-This is where the harness pattern earns its keep. The default learning restorer is **the canonical agent-as-buyer** — the first restorer designed to consume Jinn's market in production. Every other restorer impl that adds a knowledge-query phase becomes a participant in the same loop.
+- Knowledge-marketplace UI (or APIs): search, request creation, retrieval, billing, royalty bundling. May be one unified surface or split into "commission new" + "search corpus" — product call.
+- Lab-tier access: bulk licensing, custom retention, x402 quoting at high volume.
+- Compliance / provenance products for regulated buyers (EU AI Act, contamination-free timestamps).
+- ve-JINN demand-direction app: locking JINN biases emissions toward categories buyers want produced — implemented as aggregate persistent intents that the protocol settles. Feeds back into the supply formation loop from #41.
 
-### Phase D — Ecosystem of apps.
+This phase is what makes Jinn legible to people who don't run agents.
 
-The market exists. Multiple apps emerge.
+### Phase D — Ecosystem of apps. (Mostly not Jinn.)
+
+The protocol + infrastructure + first apps exist. Third parties build on top.
 
 - Bundlers and packagers that subscribe to the firehose, curate datasets, resell.
-- Lab-tier access (bulk licensing, custom retention, x402 quoting at high volume).
-- Compliance/provenance products for regulated buyers (EU AI Act, contamination-free timestamps).
 - Vertical apps (DeFi research bundlers, code-debugging trace search, prediction-market analytics).
-- ve-JINN demand-direction app: locking JINN biases emissions toward categories buyers want produced — implemented as aggregate persistent intents that the protocol settles. Feeds back into the supply formation loop from #41.
-- Alternative indexers, alternative apps, alternative retrieval paths.
+- Alternative indexers, alternative agent-discovery surfaces, alternative retrieval paths.
+- Specialist agent harnesses other than the default learner that integrate with the discovery SDK.
 
 **Phase D is mostly *not Jinn*.** The protocol provides verifiable supply, component-level provenance, payment gating, evaluator signals, market pricing. External builders handle packaging, distribution, search, retrieval, analytics, enterprise access. Jinn does not become a monolithic data company. It becomes the trust + pricing substrate around which many data businesses can emerge.
 
@@ -215,33 +224,35 @@ The market exists. Multiple apps emerge.
 | Subgraph "purchasable" surface | Infra | `subgraph/schema.graphql` | Schema migration, no new spec |
 | Default-gated envelope policy | Protocol | `client/src/restorer/engine/envelope-assembly.ts` | Decision record, not a spec |
 
-### Phase B workstreams
+### Phase B workstreams (the first app + the loop)
 
 | Workstream | Layer | Touches | Spec / plan |
 |---|---|---|---|
-| Royalty-split semantics | Protocol | New module + envelope schema extension | **New canonical spec — biggest design surface in this phase** |
-| Component-level access policy | Protocol | Envelope schema, packaging | Extends `2026-04-27-erc-8004-payload-schema.md` |
-| Knowledge-marketplace app MVP | App | New service or web app | New spec; product-shaped (one surface or two) |
+| Agent-discovery SDK / API | App | MCP server promoted to network-aware first-class SDK | **New canonical spec — the first-app design surface** |
+| Royalty-split semantics | Protocol | New module + envelope schema extension | **New canonical spec — biggest protocol design surface** |
+| Component-level access policy | Protocol | Envelope schema, packaging | Extends `2026-04-27-erc-8004-payload-schema.md` (Phase B or B.5) |
+| Default learning restorer wiring | App | Wire Orient/Debrief to the SDK | `docs/superpowers/plans/2026-04-26-default-learner-*.md` + new plan |
+| Harness adapter contract | App | Claude Code + Pi.dev adapters | Per learner spec §8 |
+| Compounding-loop acceptance test | App | Cross-operator default-learner run | New conformance test |
 | Retrieval metering | Infra | Subgraph + reputation reads | Schema extension |
 
-### Phase C workstreams
+### Phase C workstreams (human-facing surfaces)
 
 | Workstream | Layer | Touches | Spec / plan |
 |---|---|---|---|
-| Agent-as-buyer SDK | App / infra | MCP server promoted to network-aware | Extends `2026-04-14-client-surface.md` |
-| Default learning restorer wiring | App | Existing 4 plans + new plan for knowledge-query phase wiring | `docs/superpowers/plans/2026-04-26-default-learner-*.md` |
-| Harness adapter contract | App | Claude Code + Pi.dev adapters | Per learner spec §8 |
-| Internal-loop acceptance test | App | Cross-operator portfolio.v0 + learner | New conformance test |
+| Knowledge-marketplace app | App | New web/API service for human buyers | New product spec (one surface or two — product call) |
+| Lab-tier access | App | Bulk-licensing + high-volume APIs | New spec, partner-shaped |
+| ve-JINN demand-direction app | App + protocol | Aggregate persistent intents | New spec; tokenomics revisit |
+| Compliance / provenance product surface | App | Regulated-buyer-friendly views | Partner-shaped |
 
 ### Phase D workstreams (sketched, not committed)
 
 | Workstream | Notes |
 |---|---|
-| Bulk lab-access tier | Lives outside the protocol — partner-built |
-| ve-JINN emission direction | Tokenomics extension; revisits Phase 1a tokenomics |
 | Search / packaging / bundler ecosystem | Open invitation; protocol provides primitives |
-| Compliance / provenance products | Regulated-buyer surface; partner-built |
+| Vertical apps | DeFi research, code-debugging, prediction analytics |
 | Alternative indexers | Already structurally supported |
+| Specialist agent harnesses (non-default) | Plug into the same agent-discovery SDK |
 
 ---
 
@@ -267,10 +278,11 @@ This document is the framing artifact. It commits to the vision, the three-layer
 
 - The exact royalty-split semantics (Phase B spec)
 - Whether component-level pricing lives in v0 of Phase B or slides to Phase B.5
-- Whether the canonical knowledge marketplace is one app (unified request+query UX) or two (separate "commission new" and "search corpus" surfaces) — product call during Phase B
+- Whether the agent-discovery SDK starts retrieval-only or includes request-posting in Phase B (lean: retrieval-only first; the loop only needs reading from corpus to start compounding)
+- The exact shape of Phase C's human-facing knowledge marketplace (one unified request+query surface or two separate ones — product call after Phase B is operating)
 - The on-chain vs off-chain boundary for royalty-split execution
 - The Phase 1b roadmap reshuffle implied by this phasing (separate decision)
-- ve-JINN demand-direction mechanics (Phase D, or sooner if pulled forward)
+- ve-JINN demand-direction mechanics (Phase C, or sooner if pulled forward)
 - Permission-granting / outcome-execution-on-buyer-resources — *deliberately not part of this protocol's surface*; if it ever enters, it is a separate primitive in a separate doc
 
 ---
@@ -291,7 +303,7 @@ Three concrete asks:
 - `THESIS.md` — canonical thesis (decentralisation as edge)
 - `spec/2026-04-21-agentic-data-substrate.md` — first articulation of Jinn-as-data-substrate; this document collapses that framing into the knowledge-market end-state and adds the three-layer cut + agent-as-buyer dimension
 - `spec/2026-04-29-thesis.md` — meta-spec promoting `THESIS.md` to canonical
-- `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md` — the canonical agent-as-buyer (Phase C anchor)
+- `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md` — the canonical agent-as-buyer (Phase B anchor — wired in the same phase as the agent-discovery SDK)
 - `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md` — envelope, trajectory, access policy
 - `docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md` — operator + reputation entity model
 - `client/src/restorer/engine/packaging.ts:387-460` — the gating leak

@@ -60,14 +60,17 @@ load-bearing framing choices ratified during the sitting:
 market for agentic execution knowledge." Anyone with a wallet can buy
 knowledge from the corpus. No buyer classes — humans, labs, agents,
 end users all use the same primitive. The compounding loop falls out
-automatically because agents are buyers like everyone else.
+automatically because the same population that produces trajectories
+is also consuming them.
 
-**2. One uniform buy primitive, no classes.** Earlier draft separated
-"external buyers" from "internal agents" as two classes. This
-separation is wrong — it obscures the structural point that the
-agent-to-agent compounding loop is a *consequence* of universal
-buyer access, not a separate mechanism. The primitive is one; agents
-are first-class participants without being a separate category.
+**2. One uniform buy primitive, no classes; loop is producer-consumer
+overlap, not service-to-each-other.** Earlier draft separated
+"external buyers" from "internal agents" as two classes; an even
+earlier framing described agents "doing work for other agents." Both
+were wrong. The compounding loop is **not agents serving each other**
+— it is operators pulling past trajectories from the corpus to do
+*their own* work better, with the corpus building up because the
+same set of operators are both the producers and the consumers.
 
 **3. Three layers: protocol / infrastructure / apps.** Jinn splits
 cleanly into:
@@ -96,26 +99,33 @@ specificity, and price profiles. Apps may present them as one unified
 is a product choice, not a protocol decision.** The vision draft does
 not pre-commit.
 
-**5. Default-learning-restorer is the canonical agent-as-buyer.** Its
-Orient and Debrief phases are the natural consumption points for
-network retrieval. Phase C of the sequencing is "wire the learner to
-the network retrieval API." It is not "one specialist impl"; it is
-the prototype that makes the agent-to-agent compounding loop
-operationally real once Phase A unblocks the path.
+**5. The first app on top of Jinn is the agent-discovery surface, and
+the compounding loop blocks on it.** The first app is primarily
+targeted at agents-in-the-network — operators who need to discover
+and consume past trajectories during their own work. Without it, the
+compounding loop is a thought experiment; with it, it is operational.
+Human-facing knowledge-marketplace UIs come *later*, in Phase C, once
+the loop is producing demonstrable compounding value worth exposing.
+The default-learning-restorer is the canonical agent-as-buyer, and its
+Orient/Debrief wiring is part of Phase B (alongside the SDK), not a
+separate phase.
 
 The discussion draft also commits to a four-phase sequencing that
-follows from layer dependencies:
+follows from layer dependencies *and* the load-bearing role of the
+first app:
 
-- **Phase A** — close the gating leak (infrastructure) + promote
-  retrieval to network scope (infrastructure). Default new envelopes
-  to gated-at-zero so the path becomes structural before pricing
-  varies.
-- **Phase B** — royalty-split primitives (protocol) + canonical
-  knowledge-marketplace app MVP (app).
-- **Phase C** — agent-as-buyer SDK + default-learning-restorer wiring
-  (apps + integration).
-- **Phase D** — ecosystem of apps (mostly external builders;
-  alternative indexers; ve-JINN demand-direction).
+- **Phase A** — infrastructure: close the gating leak + promote
+  retrieval to network scope. Default new envelopes to gated-at-zero
+  so the path is structural before pricing varies.
+- **Phase B** — the first app: agent-discovery SDK + royalty-split
+  primitives + default-learning-restorer wiring + harness adapter
+  contract. **The compounding loop becomes operational here.**
+- **Phase C** — human-facing surfaces: knowledge-marketplace UI(s),
+  lab-tier access, ve-JINN demand-direction, compliance / provenance
+  products. Exposes the loop to people who don't run agents.
+- **Phase D** — ecosystem (mostly not Jinn): third-party apps,
+  alternative indexers, vertical bundlers, specialist agent
+  harnesses other than the default learner.
 
 ## Options considered
 
@@ -258,6 +268,11 @@ This framing is revisited if any of the following surface:
   policy) become candidate near-term beads. Whether they're filed
   now depends on Phase 1b interaction, which the Captain decides
   outside this DR.
+- Phase B is where the load-bearing new construction sits — the
+  agent-discovery SDK is the *first app*, and its design is the
+  largest single design surface implied by this DR. A Phase B kickoff
+  spec covering SDK design + royalty-split semantics is the natural
+  follow-up.
 - The `2026-04-21-agentic-data-substrate.md` spec is now subsumed
   by this framing rather than competing with it; future references
   should cite this DR as the active framing and `2026-04-21` as the
@@ -265,21 +280,22 @@ This framing is revisited if any of the following surface:
 
 **Follow-up framing work that may be needed:**
 
+- A new canonical spec for the agent-discovery SDK (Phase B —
+  the first-app design).
 - A new canonical spec for royalty-split semantics (Phase B).
-- A new product spec for the canonical knowledge marketplace app
-  (Phase B), including the unify-vs-split decision.
-- A second-pass thesis revision to add the agent-to-agent
-  compounding language to THESIS.md if the Captain decides the
-  canonical thesis would benefit from naming it explicitly. Not
-  committed here.
+- A second-pass thesis revision to add the producer-consumer overlap
+  framing to THESIS.md if the Captain decides the canonical thesis
+  would benefit from naming it explicitly. Not committed here.
 
 **Lessons / observations from the sitting:**
 
 - The "self-improving harness as a class of solutions" thread of the
   dispatch resolved cleanly under the knowledge-market frame: the
-  harness is *a class of operators that consume the corpus during
-  execution*, not a parallel product. The default-learning-restorer
-  slots in as Phase C's canonical demonstration.
+  harness is *a class of operators that pulls from the corpus to
+  improve its own work*, not a parallel product. The
+  default-learning-restorer slots in as Phase B's canonical
+  demonstration — wired in the same phase as the agent-discovery SDK
+  it depends on.
 - Voyager / ADAS / Sakana / o-series RL comparison from the dispatch
   did not need a separate research artifact; the structural
   difference is captured in §1 ("the compounding loop") and §7
