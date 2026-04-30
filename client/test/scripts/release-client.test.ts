@@ -158,7 +158,21 @@ describe('release-client runner', () => {
       'build',
       'pack:smoke',
       'release:operator-gate',
+      'install --immutable',
+      'test',
     ]);
+    const forgeCalls = calls
+      .filter((call) => call.command === 'forge')
+      .map((call) => call.args.join(' '));
+    expect(forgeCalls).toEqual([
+      'install foundry-rs/forge-std --no-git',
+      'test --match-contract Invariant',
+    ]);
+    expect(calls.some((call) =>
+      call.command === 'yarn' &&
+      call.args.join(' ') === 'test' &&
+      call.cwd?.endsWith('/contracts'),
+    )).toBe(true);
   });
 
   it('fails before gates when HEAD is behind origin/main', async () => {

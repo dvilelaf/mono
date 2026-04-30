@@ -17,6 +17,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from './config.js';
@@ -26,7 +27,7 @@ import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
-import { getChainConfig } from './earning/contracts.js';
+import { DEFAULT_TESTNET_ARTIFACTS, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
@@ -62,7 +63,8 @@ const PASSWORD: string = (() => {
 
 // ── Load config ─────────────────────────────────────────────────────────────
 
-const config = loadConfig(getConfigPathFromArgs());
+const CONFIG_PATH = getConfigPathFromArgs();
+const config = loadConfig(CONFIG_PATH);
 
 const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
 const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
@@ -72,8 +74,35 @@ const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
   testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
   testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
 });
+const MESSENGER_MODE_EXPLICIT =
+  process.env['JINN_MESSENGER_MODE'] !== undefined ||
+  configFileHasTopLevelKey(CONFIG_PATH, 'jinnMessengerMode');
+const JINN_MVI_CONFIG = loadJinnMviConfig({
+  l1ArtifactPath:
+    config.jinnMviL1DeploymentPath ??
+    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL1 : undefined),
+  l2ArtifactPath:
+    config.jinnMviL2DeploymentPath ??
+    (config.network === 'testnet' ? DEFAULT_TESTNET_ARTIFACTS.jinnMviL2 : undefined),
+  distributorAddress: config.jinnDistributorAddress,
+  messengerAddress: config.jinnMessengerAddress,
+  claimEmitterAddress: config.jinnClaimEmitterAddress,
+  messengerMode: MESSENGER_MODE_EXPLICIT ? config.jinnMessengerMode : undefined,
+});
+const JINN_CLAIM_MESSENGER_MODE = JINN_MVI_CONFIG.messengerMode ?? config.jinnMessengerMode;
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
 const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
+
+function configFileHasTopLevelKey(configPath: string | undefined, key: string): boolean {
+  const filePath = configPath ?? join(process.env['HOME'] ?? '', '.jinn-client', 'config.json');
+  if (!filePath || !existsSync(filePath)) return false;
+  try {
+    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+    return !!raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
+  } catch {
+    return false;
+  }
+}
 
 const STANDARD_SERVICE_PROGRESSION: readonly ServiceStep[] = [
   'awaiting_stake',
@@ -410,16 +439,29 @@ export async function main(): Promise<DaemonStartupInfo> {
   // ── RestorationEngine wiring ─────────────────────────────────────────────────
 
   // Build agent viem clients (same creds as MechAdapter uses internally).
+  const viemChains = await import('viem/chains');
   const agentChain = config.network === 'testnet'
-    ? (await import('viem/chains')).baseSepolia
-    : (await import('viem/chains')).base;
+    ? viemChains.baseSepolia
+    : viemChains.base;
+  const l1Chain = config.jinnL1Network === 'sepolia' ? viemChains.sepolia : viemChains.mainnet;
+  const agentChainContracts = agentChain.contracts as {
+    portal?: Record<number, { address: `0x${string}` }>;
+    disputeGameFactory?: Record<number, { address: `0x${string}` }>;
+  } | undefined;
+  const optimismPortalAddress =
+    agentChainContracts?.portal?.[l1Chain.id]?.address;
+  const disputeGameFactoryAddress =
+    agentChainContracts?.disputeGameFactory?.[l1Chain.id]?.address;
+  const l2ProofClient = config.l2ProofRpcUrl
+    ? createJinnPublicClient(config.l2ProofRpcUrl, NETWORK_CHAIN)
+    : undefined;
   const agentClients = createClients(config.rpcUrl, agentPrivateKey, agentChain);
 
   // ── L1 (Sepolia / Ethereum mainnet) clients for cross-chain JINN claim loop ──
   // Uses the agent EOA because MockMessenger.owner is the agent on testnet.
   // Same key as L2; only the chain differs.
   const l1ClientsForJinnClaim =
-    config.jinnDistributorAddress && config.ethereumRpcUrl
+    JINN_MVI_CONFIG.distributor && config.ethereumRpcUrl
       ? {
           public: createJinnL1PublicClient(config.ethereumRpcUrl, config.jinnL1Network),
           wallet: createJinnL1WalletClient(
@@ -431,13 +473,13 @@ export async function main(): Promise<DaemonStartupInfo> {
       : undefined;
   if (l1ClientsForJinnClaim) {
     console.log(
-      `[main] JinnClaimLoop: enabled (mode=${config.jinnMessengerMode}, ` +
-      `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${config.jinnDistributorAddress}, ` +
-      `emitter=${config.jinnClaimEmitterAddress})`,
+      `[main] JinnClaimLoop: enabled (mode=${JINN_CLAIM_MESSENGER_MODE}, ` +
+      `interval=${config.jinnClaimLoopIntervalMs}ms, distributor=${JINN_MVI_CONFIG.distributor}, ` +
+      `emitter=${JINN_MVI_CONFIG.claimEmitter})`,
     );
   } else {
     console.log(
-      `[main] JinnClaimLoop: disabled (JINN_DISTRIBUTOR_ADDRESS or JINN_ETHEREUM_RPC_URL not set)`,
+      `[main] JinnClaimLoop: disabled (JinnDistributor artifact/override or JINN_ETHEREUM_RPC_URL not set)`,
     );
   }
 
@@ -679,22 +721,25 @@ export async function main(): Promise<DaemonStartupInfo> {
         : undefined,
     jinnClaim:
       l1ClientsForJinnClaim &&
-      config.jinnClaimEmitterAddress &&
-      config.jinnMessengerAddress &&
-      config.jinnDistributorAddress &&
+      JINN_MVI_CONFIG.claimEmitter &&
+      JINN_MVI_CONFIG.messenger &&
+      JINN_MVI_CONFIG.distributor &&
       config.jinnClaimLoopIntervalMs > 0
         ? {
             intervalMs: config.jinnClaimLoopIntervalMs,
             l2Client: agentClients.publicClient,
+            l2ProofClient,
             l2Wallet: agentClients.walletClient,
             l1Client: l1ClientsForJinnClaim.public,
             l1Wallet: l1ClientsForJinnClaim.wallet,
             store: earningStore,
             chain: NETWORK_CHAIN,
-            claimEmitterAddress: config.jinnClaimEmitterAddress as `0x${string}`,
-            distributorAddress: config.jinnDistributorAddress as `0x${string}`,
-            messengerAddress: config.jinnMessengerAddress as `0x${string}`,
-            messengerMode: config.jinnMessengerMode,
+            claimEmitterAddress: JINN_MVI_CONFIG.claimEmitter as `0x${string}`,
+            distributorAddress: JINN_MVI_CONFIG.distributor as `0x${string}`,
+            messengerAddress: JINN_MVI_CONFIG.messenger as `0x${string}`,
+            messengerMode: JINN_CLAIM_MESSENGER_MODE,
+            optimismPortalAddress,
+            disputeGameFactoryAddress,
           }
         : undefined,
     restorationEngine: {
