@@ -117,6 +117,8 @@ Honest take, layer by layer. References point at real paths so the gaps are conc
 
 `JinnRouter` request creation + delivery is live. `IdentityRegistry`, `ValidationRegistry`, `ReputationRegistry`, `ClaimRegistry` are deployed. Envelope schema is well-defined (`client/src/types/envelope.ts`, the envelope-tee-scope spec). Evaluator restorer impls exist per kind (`client/src/restorer/impls/{portfolio,prediction,prediction-apy}-v0-evaluator/`). Multi-evaluator consensus is single-evaluator today; that's a Phase B concern, not a structural protocol gap.
 
+**Executor provenance is already in the schema.** Every envelope carries an `Executor` field naming the harness that ran (`implName`, `implVersion`, `clientGitSha`, `codeDigest`, `signingKey`). At self-signed and committed tiers these are references; at attested tier the envelope additionally carries a `SourceBundle` (publicly-fetchable IPFS CID + build recipe + enclave measurement) so anyone can fetch the source, build it from the recipe, verify the measurement matches the TEE's output, and confirm exactly what code ran. This means at attested tier (Phase B.1), every harness-builder's source becomes part of the verifiable provenance graph — fetchable, buildable, comparable per envelope it produced.
+
 No new protocol surface is needed for Phase A. Protocol additions are deferred to Phase B research.
 
 ### 4.2 Infrastructure — the gating leak is here
