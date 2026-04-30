@@ -39,6 +39,7 @@ import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import conformanceCommand from './commands/conformance.js';
+import createCommand from './commands/create.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -67,6 +68,7 @@ const COMMANDS: CommandModule[] = [
   mcpCommand,
   migrateAgentIdCommand,
   conformanceCommand,
+  createCommand,
 ];
 
 /**
