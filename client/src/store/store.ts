@@ -47,6 +47,55 @@ export interface BalanceCacheEntry {
   error?: string | null;
 }
 
+export interface ServedArtifactInput {
+  sha256: string;
+  artifactType: string;
+  requestId?: string | null;
+  envelopeCid?: string | null;
+  content: Buffer;
+  priceUsdc: string;
+  createdAt: string;
+}
+
+export interface ServedArtifactRow {
+  sha256: string;
+  artifactType: string;
+  requestId: string | null;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  priceUsdc: string;
+  createdAt: string;
+}
+
+export type NetworkArtifactSource = 'origin' | 'route-resolver' | 'self-store-mirror';
+
+export interface NetworkArtifactInput {
+  sha256: string;
+  artifactType: string;
+  envelopeCid?: string | null;
+  content: Buffer;
+  source: NetworkArtifactSource;
+  sourceOperator?: string | null;
+  sourceEndpoint?: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+}
+
+export interface NetworkArtifactRow {
+  sha256: string;
+  artifactType: string;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  source: NetworkArtifactSource;
+  sourceOperator: string | null;
+  sourceEndpoint: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  lastUsedAt: string;
+}
+
 export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
 
 export interface IntentPostRecord {
@@ -143,6 +192,37 @@ CREATE TABLE IF NOT EXISTS intent_posts (
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_intent_posts_desired_state ON intent_posts (desired_state_id);
+
+CREATE TABLE IF NOT EXISTS served_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  request_id TEXT,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  price_usdc TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (request_id);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
+
+CREATE TABLE IF NOT EXISTS network_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('origin', 'route-resolver', 'self-store-mirror')),
+  source_operator TEXT,
+  source_endpoint TEXT,
+  paid_amount_usdc TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_last_used ON network_artifacts (last_used_at DESC);
 
 CREATE TABLE IF NOT EXISTS intent_post_locks (
   creator_safe_address TEXT NOT NULL,
@@ -738,6 +818,145 @@ export class Store {
     ).get(requestId, `%${tag}%`) as { id: string; title: string; content: string; tags: string; outcome: string } | undefined;
     if (!row) return null;
     return { ...row, tags: JSON.parse(row.tags) as string[] };
+  }
+
+  saveServedArtifact(input: ServedArtifactInput): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO served_artifacts
+         (sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at)
+       VALUES
+         (@sha256, @artifactType, @requestId, @envelopeCid, @content, @contentSize, @priceUsdc, @createdAt)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      requestId: input.requestId ?? null,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      priceUsdc: input.priceUsdc,
+      createdAt: input.createdAt,
+    });
+  }
+
+  getServedArtifact(sha256: string): ServedArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    };
+  }
+
+  setServedArtifactEnvelopeCid(sha256: string, envelopeCid: string): void {
+    this.db.prepare(
+      `UPDATE served_artifacts SET envelope_cid = ? WHERE sha256 = ?`,
+    ).run(envelopeCid, sha256);
+  }
+
+  getServedArtifactsByRequestId(requestId: string): ServedArtifactRow[] {
+    const rows = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE request_id = ? ORDER BY created_at ASC`,
+    ).all(requestId) as Array<{
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    }));
+  }
+
+  saveNetworkArtifact(input: NetworkArtifactInput): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO network_artifacts
+         (sha256, artifact_type, envelope_cid, content, content_size, source,
+          source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at)
+       VALUES
+         (@sha256, @artifactType, @envelopeCid, @content, @contentSize, @source,
+          @sourceOperator, @sourceEndpoint, @paidAmountUsdc, @fetchedAt, @fetchedAt)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      source: input.source,
+      sourceOperator: input.sourceOperator ?? null,
+      sourceEndpoint: input.sourceEndpoint ?? null,
+      paidAmountUsdc: input.paidAmountUsdc,
+      fetchedAt: input.fetchedAt,
+    });
+  }
+
+  getNetworkArtifact(sha256: string): NetworkArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content, content_size, source,
+              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at
+       FROM network_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      source: NetworkArtifactSource;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+      last_used_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      source: row.source,
+      sourceOperator: row.source_operator,
+      sourceEndpoint: row.source_endpoint,
+      paidAmountUsdc: row.paid_amount_usdc,
+      fetchedAt: row.fetched_at,
+      lastUsedAt: row.last_used_at,
+    };
+  }
+
+  touchNetworkArtifactUsage(sha256: string, ts: string): void {
+    this.db.prepare(
+      `UPDATE network_artifacts SET last_used_at = ? WHERE sha256 = ?`,
+    ).run(ts, sha256);
   }
 
   cacheRemoteContent(id: string, content: string): void {
