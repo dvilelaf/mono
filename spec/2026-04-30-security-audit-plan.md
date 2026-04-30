@@ -1,325 +1,197 @@
-# Security Audit Plan — Mainnet Gate
+# Jinn Security Plan — Mainnet Gate and Standing Posture
 
-> Version: 0.1.0-draft
+> Version: 0.1.0-strawman
 > Date: 2026-04-30
 > Author: Oak, Claude (audit-lead seat)
-> Status: **Proposal — ratification pending Captain + community sign-off**
+> Status: **Strawman — community review open**
+> Companion artifact: a GitHub Discussion linking to this spec (draft in
+> Appendix A) for community review by Alex, Andre, and others.
 > Related:
 > - `docs/security/2026-04-jinn-v0-threat-model.md` — v0 threat model (testnet scope)
 > - `docs/security/2026-04-jinn-v0-slither.md` — v0 Slither pass
 > - `docs/security/2026-04-v2-checker-audit.md` — V2 checker hardening audit
 > - `spec/2026-04-06-phase-1a-design.md` — Phase 1a design lock
-> - bd `jinn-mono-cze` — Canonical messenger blacklist + retirement (mainnet-swap blocker)
+> - bd `jinn-mono-cze` — Canonical messenger blacklist + retirement
 > - bd `jinn-mono-g9j4` — Governance-flow exercise on testnet
 
 ## 1. Motivation
 
-The v0 testnet threat model and Slither pass concluded with the explicit
-disclaimer that **mainnet hardening, formal verification, and a third-party
-auditor pass are out of scope for the v0 review and gated on later
-milestones**. This document is that gate.
-
-This plan ratifies *how* we audit the deployed contract stack before the
-JINN token, governance, distributor, messenger, emitter, and V2
-router/checker move from Sepolia / Base Sepolia to mainnet (Ethereum L1 +
-Base L2). It does **not** commission the audit (separate spend decision)
-and does **not** itself perform any review.
+Mainnet readiness for Jinn is broader than a smart-contract audit. The
+v0 testnet review, Slither pass, and V2 checker audit explicitly defer
+mainnet-grade assurance to a later milestone. This plan is that gate —
+*and* it sits inside a wider security posture for a protocol that is
+being developed in the open.
 
 Three forces shape the plan:
 
 1. **Mainnet asset value is real.** Inflated mints on testnet are
-   recoverable by redeploy; on mainnet they are not. Per the v0 threat
-   model, every severity goes up one notch on mainnet.
-2. **The ecosystem already includes capable adversarial reviewers.**
-   Community Solidity reviewers (Alex, Andre, others surfaced via the
-   Phase A funnel) can deliver real findings at low marginal cost — *if*
-   we engage them with structured deliverables and a clear comp model.
-3. **AI-enabled audit tooling has matured fast.** Slither + Aderyn +
-   Halmos already caught zero high/medium on v0; layering specialised
-   AI auditors (Cyfrin Codex, Olympix) on top is now cheap and produces
-   a coverage diff worth running before any external firm engages.
+   recoverable by redeploy; on mainnet they are not.
+2. **Open development changes the threat model of the *project*, not
+   just the protocol.** A public repo means public CI, public
+   dependency graph, public discussion threads, public threat model,
+   public incident response. Hygiene at this layer is part of "is Jinn
+   safe to use," not adjacent to it.
+3. **AI-augmented security tooling is a fast-moving frontier.** Beyond
+   smart-contract scanners, AI-native general SAST, autofix bots, and
+   agentic review tooling have matured fast in 2026. We need a
+   deliberate research pass to pick a stack rather than defaulting to
+   familiar names.
 
-The plan composes these forces into five parallel workstreams with
-explicit gating criteria for the mainnet deploy.
+The plan organises the response into **three top-level sections**, each
+with **two layers**: pre-mainnet **gates** (bright-line, can ratify
+pass/fail) and **standing commitments** (ongoing cadences with named
+owners that survive mainnet deploy).
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Section 1                                │
+│              Protocol security                              │
+│       (smart contracts going to mainnet)                    │
+│   ─────────────────────────────────────────                 │
+│   Gates: audit + FV + invariants + canary + ...             │
+│   Commitments: continuous audit, upgrade review             │
+├─────────────────────────────────────────────────────────────┤
+│                    Section 2                                │
+│            Operational security                             │
+│      (the codebase + the project's operations)              │
+│   ─────────────────────────────────────────                 │
+│   Gates: secret-clean, signed releases, IR runbook, ...     │
+│   Commitments: dep review cadence, scorecard target, ...    │
+├─────────────────────────────────────────────────────────────┤
+│                    Section 3                                │
+│          Methodology + tooling research                     │
+│   (how we do 1 and 2, and what we use to do it)             │
+│   ─────────────────────────────────────────                 │
+│   Strawman shortlist + evaluation criteria + integration    │
+│   plan. This section feeds Sections 1 and 2.                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+This document does **not** commission audits, select an external firm,
+fix budget numbers, or file follow-up bd issues. Those are explicit
+follow-up dispatches once the strawman is ratified.
 
 ## 2. Scope
 
-### 2.1 In-scope contracts (bespoke + modified)
+### 2.1 In scope
 
-Mainnet variants of the contracts deployed on testnet under Phase 1a /
-Phase 1b. All paths relative to `cargo/contracts/src/`:
+- **Section 1 (protocol security):** mainnet variants of all bespoke +
+  modified contracts in `cargo/contracts/src/jinn/**`,
+  `cargo/contracts/src/staking/**`, and `cargo/contracts/src/claiming/**`,
+  plus the OLAS forks we deploy with code changes. Vendored OLAS
+  contracts deployed unchanged are reviewed at the deploy-and-config
+  level only.
+- **Section 2 (operational security):** the public repository
+  (`jinn-network/jinn-mono` and its current development branches), the
+  CI/CD pipeline, dependency graph (TypeScript + Solidity sides), the
+  release artifacts (when releases begin), the incident-response
+  posture, and the open-development surface (discussions, issues, PRs,
+  threat model maintenance).
+- **Section 3 (methodology + tooling research):** the candidate stack
+  of OSS and AI-native security tooling that supports Sections 1 and 2,
+  including evaluation criteria, integration plan, and licensing /
+  cost / OSS-compatibility analysis.
 
-| Contract | Status | Audit depth |
+### 2.2 Out of scope
+
+- **Operator-side daemon hardening.** Agent operators running Jinn
+  daemons hold keys, environment secrets, and signing material. That is
+  a separate plan ("running Jinn securely") with a different audience.
+  This plan touches operator security only where the *protocol*
+  enforces or undermines it.
+- **OP-Stack canonical contracts** (DisputeGameFactory, OptimismPortal2,
+  L1Block, L2OutputOracle) — third-party.
+- **OLAS MechMarketplace, ServiceRegistry, OLAS staking contract** —
+  third-party.
+- **Subgraph + alerting infrastructure code paths.** Operationally
+  critical but on a separate audit track.
+- **External audit firm RFP / commercial selection.** Separate spend
+  decision; this plan reserves the slot.
+- **Compliance / legal posture (SOC2, etc.).** Premature for testnet
+  protocol. Future work once revenue and user data warrant it.
+
+---
+
+## 3. Section 1 — Protocol security
+
+This section subsumes the existing v0 threat model + Slither + V2
+audit work, layered with the additional mainnet-gate work documented
+below. Refer to those documents for current state; this section
+specifies *what changes* for mainnet.
+
+### 3.1 In-scope contract surface
+
+Bespoke + modified contracts (full audit):
+
+| Contract | Path | Status |
 |---|---|---|
-| `jinn/token/JINN.sol` | bespoke (OZ ERC20Votes composition) | full |
-| `jinn/distribution/JinnDistributor.sol` | bespoke (sole minter) | full + formal verification |
-| `jinn/governance/JinnGovernor.sol` | bespoke (OZ Governor composition) | full |
-| `jinn/cross-chain/CanonicalOpStackMessenger.sol` | bespoke (OP-Stack storage proof) | full + formal verification |
-| `jinn/cross-chain/JinnClaimEmitter.sol` | bespoke (stateless emitter) | full |
-| `jinn/interfaces/IClaimMessenger.sol` | interface | review only |
-| `staking/RestorationActivityCheckerV2.sol` | modified OLAS fork | full |
-| `staking/JinnRouterV2.sol` | modified OLAS fork | full |
-| `staking/JinnRouterProxy.sol` | bespoke proxy | full |
-| `staking/ActivityCheckerProxy.sol` | bespoke proxy | full |
-| `claiming/ClaimRegistry.sol` | Phase 0 deployed (still active) | change-impact review |
-| `claiming/AcceptAllChecker.sol` | Phase 0 deployed (still active) | change-impact review |
-| `claiming/IEligibilityChecker.sol` | interface | review only |
+| `JINN` | `jinn/token/JINN.sol` | bespoke (OZ ERC20Votes composition) |
+| `JinnDistributor` | `jinn/distribution/JinnDistributor.sol` | bespoke (sole minter) |
+| `JinnGovernor` | `jinn/governance/JinnGovernor.sol` | bespoke (OZ Governor composition) |
+| `CanonicalOpStackMessenger` | `jinn/cross-chain/CanonicalOpStackMessenger.sol` | bespoke (OP-Stack storage proof) |
+| `JinnClaimEmitter` | `jinn/cross-chain/JinnClaimEmitter.sol` | bespoke (stateless emitter) |
+| `RestorationActivityCheckerV2` | `staking/RestorationActivityCheckerV2.sol` | modified OLAS fork |
+| `JinnRouterV2` (+ proxy) | `staking/JinnRouterV2.sol`, `JinnRouterProxy.sol` | modified OLAS fork |
+| `ActivityCheckerProxy` | `staking/ActivityCheckerProxy.sol` | bespoke proxy |
+| `ClaimRegistry`, `AcceptAllChecker` | `claiming/*.sol` | Phase 0 deployed; change-impact only |
 
-Phase 1b adds (when those contracts land — separate dispatch):
+Phase 1b additions land in scope when those contracts ship: veJINN,
+JINN gauge (VoteWeighting fork), Treasury / Dispenser / Tokenomics
+configuration, bridge adapters.
 
-- `vendor/governance/veOLAS.sol` → veJINN (modified OLAS fork) — full
-- `vendor/governance/VoteWeighting.sol` → JINN gauge (modified) — full
-- `vendor/tokenomics/Treasury.sol`, `Dispenser.sol`, `Tokenomics.sol` —
-  configuration + governance review (see §2.2)
+### 3.2 Audit workstreams
 
-### 2.2 In-scope but reduced — vendored OLAS we deploy
+Five parallel workstreams, layered defence-in-depth:
 
-These contracts are forks of upstream OLAS that we deploy with
-configuration changes (not code changes), or with surgical no-op stubs
-satisfying interface dependencies. They are upstream-audited; we audit
-the *deploy* and the *governance configuration*, not the code.
+**WS-1 — AI-enabled static + symbolic analysis.**
+Required toolchain: Slither, Aderyn, Halmos, Foundry invariants,
+`forge inspect storageLayout`, `forge coverage`. AI-augmented layer:
+Aderyn-MCP, Olympix, and at least one general-purpose LLM auditor (see
+§5 for the strawman). Deliverable: per-tool findings docs +
+coverage-diff reasoning. **Gate:** zero High, zero Medium across
+required tools at the mainnet-target SHA; lows triaged.
 
-| Contract | Source | Audit depth |
-|---|---|---|
-| `vendor/tokenomics/Treasury.sol` | OLAS upstream | deploy + config audit |
-| `vendor/tokenomics/Dispenser.sol` | OLAS upstream | deploy + config audit |
-| `vendor/tokenomics/Tokenomics.sol` | OLAS upstream | deploy + config audit |
-| `vendor/bridge/DefaultDepositProcessorL1.sol` | OLAS upstream | deploy + config audit |
-| `vendor/bridge/OptimismTargetDispenserL2.sol` | OLAS upstream | deploy + config audit |
-| `vendor/registries/staking/StakingBase.sol` (and derivatives) | OLAS upstream | deploy + config audit |
-| `vendor/stolas/*` | OLAS / stOLAS adaptation | deploy + config audit |
-| OZ libraries (`Ownable2Step`, `TimelockController`, `Governor*`, `ERC20Votes`, `TrieProof`) | OpenZeppelin v5.6.1 | accept upstream audit; pin SHA |
+**WS-2 — Internal + community human review.**
+Reviewers: internal (Oak, audit lead) + committed community (Alex,
+Andre) + invited via the Phase A funnel. Per-reviewer review packet
+covering one bespoke contract (or a tightly-coupled pair). Findings
+land as Markdown PRs to a private branch, public after a 14-day
+disclosure window. Audit lead aggregates into one mainnet-audit summary.
+Compensation model is open question §8.1. **Gate:** every bespoke
+contract has at least one community reviewer; every Critical and High
+finding is fixed.
 
-Deploy + config audit covers:
+**WS-3 — External audit firm.**
+Out of scope for *this* plan (separate spend decision). The plan
+reserves the slot. Expected shape: one reputable firm; full report;
+remediation pass; final retest with sign-off letter. **Gate:** sign-off
+letter; zero open Critical / High; Mediums fixed or explicitly accepted.
 
-- That the deployed bytecode matches the upstream-audited source at the
-  pinned commit.
-- That constructor parameters and post-deploy `setX` calls produce a
-  configuration consistent with the threat model assumptions.
-- That dormant features (Bonding / Depository / IDF / donator top-up
-  inside Tokenomics) are either dead code paths in our config or wired
-  to no-op stubs whose stub correctness is asserted in the bespoke
-  audit.
+**WS-4 — Formal verification on critical contracts.**
+Targets: `JinnDistributor` (mint-equals-delta, accumulator monotonicity,
+`totalSupply` upper bound, CEI ordering), `CanonicalOpStackMessenger`
+(dispute-game finality preconditions, output-root preimage equality,
+account/storage MPT correctness, snapshot-tuple binding), `JINN`
+(minter-only mint, ERC20Votes invariants). Tool allocation is open
+question §8.2 (Certora vs Halmos vs hevm). **Gate:** all stated
+properties prove or have an explicit accept-with-rationale disposition.
 
-### 2.3 Out of scope
+**WS-5 — Pre-mainnet bounty + canary.**
+Pre-mainnet private bounty for community reviewers: 14-day window
+before deploy. Public bounty (Immunefi or equivalent) listing live
+*before* mainnet, funded after. Mainnet messenger canary: N consecutive
+real OP-Stack proofs verified through `CanonicalOpStackMessenger` on
+testnet (recommend N=100) and on mainnet via verifier-only canary
+(recommend N=10). Combined with bd `jinn-mono-cze` (canonical messenger
+blacklist + retirement + properness checks). **Gate:** N canaries pass
+clean; bounty live; no open Critical / High from the bounty window.
 
-- **Off-chain client (`client/`).** Operational risks documented in the
-  threat model; cryptographic guarantees do not depend on it. Client
-  hardening is a separate workstream.
-- **OP-Stack canonical contracts (DisputeGameFactory, OptimismPortal2,
-  L1Block, L2OutputOracle).** Third-party. The messenger trusts these.
-- **OLAS MechMarketplace, ServiceRegistry, OLAS staking contract.**
-  Third-party, deployed and operated by OLAS. Trusted.
-- **Subgraph + alerting infrastructure.** Operationally critical but not
-  on the cryptographic critical path.
-- **Audit firm RFP / commercial selection.** Separate spend decision —
-  see §8.
+### 3.3 Coverage matrix
 
-## 3. Audit workstreams
-
-Five workstreams run in three temporal bands. Workstreams in the same
-band run in parallel.
-
-```
-Band 1 (continuous, starts now):
-  WS-1: AI-enabled static + symbolic analysis
-  WS-2: Internal + community human review
-
-Band 2 (post Band 1; commissioned via §8):
-  WS-3: External audit firm
-  WS-4: Formal verification on critical contracts
-
-Band 3 (post Band 2):
-  WS-5: Pre-mainnet bounty + canary
-```
-
-### 3.1 WS-1 — AI-enabled static and symbolic analysis
-
-**Owner:** contracts (audit lead).
-
-**Required toolchain:**
-
-| Tool | Role | Prior use |
-|---|---|---|
-| Slither 0.11.x | static analysis (detector pack) | v0 pass complete |
-| Aderyn (Cyfrin) | static analysis (Rust-based, complementary detectors) | new for mainnet |
-| Halmos (a16z) | symbolic / formal-verification adjacent | new for mainnet |
-| `forge inspect storageLayout` | storage-layout regression CI lint | pending — bd `jinn-mono-sz0` follow-up |
-| `forge coverage` | line coverage of the test suite | exists; mandate ≥ 90% on bespoke contracts before audit |
-
-**AI-augmented toolchain (layered on top of required):**
-
-| Tool | Role | Notes |
-|---|---|---|
-| Cyfrin Codex | Solidity-specialised LLM auditor | run on every bespoke contract; coverage diff against Slither |
-| Olympix Auditor | LLM auditor with detector library | run on every bespoke contract; coverage diff against Aderyn |
-| GPT-5 / Claude Opus 4.7 with structured prompts | open-ended reviewer | document the prompt library used, attach to audit artifact |
-
-**Deliverables:**
-
-1. Mainnet-target SHA Slither pass — same shape as
-   `docs/security/2026-04-jinn-v0-slither.md`, on the mainnet candidate
-   commit. Baseline must be **zero high, zero medium**.
-2. Aderyn report on the same SHA. Triage the same way as Slither.
-3. Halmos symbolic-execution suite on `JinnDistributor.claim`,
-   `JinnRouterV2.claimDelivery`, `RestorationActivityCheckerV2.recordRestorationEvidence`,
-   `CanonicalOpStackMessenger.verifyClaim`. Document the symbolic
-   properties and the path-completeness verdict.
-4. AI-tool coverage diff: which findings did the AI tools surface that
-   the static analysers missed (and vice versa)? File any
-   non-overlapping findings as bd issues with severity tags.
-5. `forge inspect` storage-layout snapshot for every proxied contract
-   (`JinnRouterV2`, `ActivityCheckerProxy`, others as introduced).
-   Snapshot is checked into `cargo/contracts/storage-layouts/` and a CI
-   lint asserts no drift.
-
-**Gate condition:** zero high, zero medium across all four required
-tools at the mainnet-target SHA. Lows triaged and dispositioned
-(accepted with rationale, or fixed).
-
-### 3.2 WS-2 — Internal + community human review
-
-**Owner:** audit lead; community coordinator (TBD).
-
-**Reviewers (initial slate):**
-
-- **Internal:** Oak (author of v0 stack), audit lead.
-- **Community (committed):** Alex, Andre.
-- **Community (invited):** open recruitment via the Phase A funnel.
-
-**Engagement structure:**
-
-Each community reviewer signs an engagement agreement covering scope,
-deliverables, comp, confidentiality (the audit is on a public branch but
-findings stay private until disclosure), and disclosure timing.
-
-A reviewer is assigned a **review packet** consisting of:
-
-- One bespoke contract (or a tightly-coupled pair like
-  `JinnRouterV2` + `RestorationActivityCheckerV2`).
-- Read-only access to the repo + the v0 threat model + the v0 Slither
-  doc + the V2 checker audit.
-- A standing 1:1 with the audit lead for clarification.
-- A findings template (Markdown) with severity bands (Critical / High /
-  Medium / Low / Informational), pre-condition + impact + reproducer
-  + suggested fix per finding.
-
-**Per-reviewer deliverable:** a findings doc per assigned contract,
-landed as a PR to `docs/security/2026-MM-<reviewer>-<contract>.md`.
-
-**Aggregation:** the audit lead consolidates findings across reviewers
-into `docs/security/2026-MM-mainnet-audit-summary.md` with deduplicated,
-severity-triaged findings. Reviewers see each other's work after their
-own is submitted (post-cutoff), to avoid groupthink during the review
-itself.
-
-**Compensation model — RATIFICATION REQUIRED:** three options:
-
-- (A) **Per-finding bounty.** Tiered by severity (e.g. 5/2/1/0.25 ETH for
-  C/H/M/L), capped per contract. Aligns reviewers with offence.
-- (B) **Flat consulting rate.** Day-rate × hours, capped per packet.
-  Lower variance for the reviewer; lower offence-alignment.
-- (C) **Hybrid.** Flat retainer covering minimum effort, plus per-finding
-  bonus on top. Highest alignment, highest cost.
-
-Recommendation: **(C) Hybrid**, sized so a clean-pass reviewer earns
-their retainer and a finding-heavy reviewer earns a multiple. Captain
-ratifies the actual numbers.
-
-**Disclosure window:** community reviewers' findings are private for 14
-days after submission, during which the audit lead and the contract
-owner produce remediation PRs. After 14 days, findings disclose to the
-project's public security log unless extended by mutual agreement.
-
-**Gate condition:** every bespoke contract has at least one community
-reviewer's findings doc landed; severity-Critical and severity-High
-findings are either fixed or have an explicit accept-with-mitigation
-disposition signed by the audit lead.
-
-### 3.3 WS-3 — External audit firm
-
-**Owner:** Captain (commercial sign-off); audit lead drives.
-
-**Out of scope for THIS task — separate spend decision.**
-
-The plan reserves the slot. The expected shape:
-
-- One reputable Solidity audit firm (selection process is its own bd
-  issue — see §8).
-- Engagement covers all bespoke + modified contracts in §2.1.
-- Deliverable: full audit report (findings + remediation suggestions),
-  remediation pass on the team's fixes, final retest with sign-off
-  letter.
-- Schedule estimate: 6–10 weeks engagement + 2–4 weeks remediation +
-  1–2 weeks retest = 9–16 weeks elapsed.
-
-**Gate condition:** sign-off letter from the firm. All Critical / High
-findings fixed (no exceptions). Mediums fixed or explicitly accepted in
-the public audit response.
-
-### 3.4 WS-4 — Formal verification on critical contracts
-
-**Owner:** contracts.
-
-**Targets:**
-
-| Contract | Properties |
-|---|---|
-| `JinnDistributor` | per-service accumulator monotonicity; mint-equals-delta; `totalSupply ≤ Σ Claimed.{operator,dao}Minted`; CEI ordering on `claim()`; ratio bound checks |
-| `CanonicalOpStackMessenger` | dispute-game finality preconditions; output-root preimage equality; account/storage MPT correctness against pinned `TrieProof`; snapshot-tuple binding correctness |
-| `JINN` | `setMinter` is the only path to minter change; `mint` reverts unless `msg.sender == minter`; ERC20Votes `_transferVotingUnits` invariants (delegate to OZ proofs at the pinned version) |
-
-**Tool — RATIFICATION REQUIRED:** Certora (commercial, polished) versus
-internal Halmos work (open source, ~3× engineering effort, no licence
-cost). Recommendation: **Certora for `JinnDistributor` and
-`CanonicalOpStackMessenger`** because mint-integrity and proof-soundness
-warrant the highest tool maturity; **Halmos for `JINN`** because the
-properties are simpler and well-trodden via OZ's own proofs. Captain
-ratifies vendor choice.
-
-**Deliverable:** formal-verification reports per contract committed
-into `docs/security/2026-MM-fv-<contract>.md`. Counter-examples (if
-any) are filed as Critical bd issues with reproducer.
-
-**Gate condition:** all stated properties prove or have an explicit
-accept-with-rationale disposition signed by the audit lead AND the
-external firm (cross-check).
-
-### 3.5 WS-5 — Pre-mainnet bounty + canary
-
-**Owner:** audit lead; operations.
-
-**Pre-mainnet private bounty:** open to community reviewers (Alex,
-Andre, anyone who signed an engagement agreement under §3.2) for
-findings in the post-WS-1/WS-2/WS-3/WS-4 codebase. Window: 14 days
-before the planned mainnet deploy date. Findings tier per §3.2.
-
-**Public bounty:** Immunefi (or equivalent) listing live BEFORE the
-mainnet deploy, but funded only after deploy. Tier matches the bounty
-table in WS-2.
-
-**Mainnet messenger canary:** before any mainnet `setMessenger` call to
-the canonical messenger, the deployed messenger must successfully
-verify N (recommended: 100) consecutive real Base Sepolia → Sepolia
-proofs against the canonical OP-Stack pipeline, and N (recommended:
-10) on Base mainnet → Ethereum mainnet via the verifier-only canary
-path. This complements bd `jinn-mono-cze` (canonical messenger
-blacklist + retirement + properness checks).
-
-**Canonical-messenger blacklist:** the messenger MUST be deployed with
-the blacklist + retirement + properness checks from bd `jinn-mono-cze`
-landed and proven on testnet before any mainnet activation.
-
-**Gate condition:** N canaries pass cleanly; bounty live; no Critical /
-High findings open from the bounty within the 14-day window.
-
-## 4. Coverage matrix
-
-Who reviews what, by method. Each row is one bespoke / modified
-contract; each column is a workstream. `R` = required; `O` = opt-in;
+Per-contract × workstream coverage. `R` = required; `O` = opt-in;
 `-` = out of scope.
 
-| Contract | WS-1 AI/Static | WS-2 Community | WS-3 Firm | WS-4 FV | WS-5 Bounty |
+| Contract | WS-1 | WS-2 | WS-3 | WS-4 | WS-5 |
 |---|:-:|:-:|:-:|:-:|:-:|
 | `JINN` | R | R | R | R | R |
 | `JinnDistributor` | R | R | R | R | R |
@@ -329,288 +201,710 @@ contract; each column is a workstream. `R` = required; `O` = opt-in;
 | `RestorationActivityCheckerV2` | R | R | R | O | R |
 | `JinnRouterV2` (+ proxy) | R | R | R | O | R |
 | `ActivityCheckerProxy` | R | O | R | O | R |
-| `ClaimRegistry` (Phase 0, change-impact) | R | O | O | - | R |
-| `AcceptAllChecker` (Phase 0, change-impact) | R | O | O | - | R |
+| `ClaimRegistry`, `AcceptAllChecker` | R | O | O | - | R |
 | Vendored OLAS (deploy + config only) | O | O | R | - | R |
 
-## 5. Tooling shortlist (decided)
+### 3.4 Gates (block mainnet)
 
-The static / symbolic / AI tooling mix for WS-1 is:
+1. **WS-1 clean** — required toolchain returns zero High and zero Medium
+   on the mainnet-target SHA. Lows triaged.
+2. **WS-2 complete** — every bespoke contract has at least one community
+   findings doc landed; all Critical + High fixed.
+3. **WS-3 sign-off** — external firm letter on file; zero open Critical
+   or High.
+4. **WS-4 proofs** — stated properties on `JinnDistributor` and
+   `CanonicalOpStackMessenger` formally verified or bounded-checked
+   without counter-examples.
+5. **Foundry invariant suite green** — the three invariant stubs filled
+   in and passing (referenced in the v0 Slither summary).
+6. **Storage-layout CI lint live** — `forge inspect ... storageLayout`
+   regression check on every PR; mainnet-target snapshot committed.
+7. **Multisig handover runbook executed cleanly on testnet** — Phase A6
+   → B handover end-to-end, all post-deploy verifier checks pass
+   (`getRoleMemberCount(DEFAULT_ADMIN_ROLE) == 0`, etc.).
+8. **Canonical-messenger canary passing** — N testnet + N mainnet
+   verifier-only canaries clean.
+9. **bd `jinn-mono-cze` closed** — canonical messenger blacklist +
+   retirement + properness checks landed and proven.
+10. **Mainnet threat-model addendum published** — a +1-severity rewrite
+    of the v0 threat model reflecting mainnet asset value, landed at
+    `docs/security/2026-MM-mainnet-threat-model.md`.
 
-| Tool | Required | Scope |
-|---|:-:|---|
-| Slither 0.11.x | yes | every bespoke + modified contract |
-| Aderyn (Cyfrin) | yes | every bespoke + modified contract |
-| Halmos | yes | targeted symbolic suite on the four high-stakes functions in §3.1 |
-| Cyfrin Codex | yes | every bespoke contract; coverage diff vs Slither |
-| Olympix Auditor | yes | every bespoke contract; coverage diff vs Aderyn |
-| `forge inspect` storage-layout | yes | every proxied contract; CI lint |
-| `forge coverage` | yes | ≥ 90% line coverage on bespoke contracts before audit |
-| Mythril | optional | as a third symbolic-analysis cross-check if Halmos coverage is incomplete |
-| Echidna | optional | property-based fuzzing on `JinnDistributor` + `RestorationActivityCheckerV2` if Foundry invariants are insufficient |
-| Certora | yes (formal verification, WS-4) | `JinnDistributor`, `CanonicalOpStackMessenger` |
+### 3.5 Standing commitments (post-mainnet)
 
-Tools NOT selected:
+| Commitment | Cadence | Owner |
+|---|---|---|
+| Re-run WS-1 toolchain on every protocol-touching PR | per-PR (CI) | contracts |
+| Targeted human review (WS-2 shape) for every protocol upgrade | per upgrade | audit lead |
+| Public bug bounty live + funded | continuous | audit lead + ops |
+| Threat-model addendum kept in sync with deployed code | per upgrade | contracts |
+| Quarterly "audit-results in summary" report | quarterly | audit lead |
+| Annual external review (firm or rotating community panel) | annually | Captain |
 
-- **Mythril as required.** Halmos covers the symbolic-execution slot at
-  lower noise and faster cycle.
-- **Trail of Bits' Crytic suite full pack.** Slither is included;
-  manticore is superseded by Halmos for our properties.
-- **Custom LLM auditor pipelines.** Cyfrin and Olympix are running
-  productised pipelines; building our own is wasted engineering at this
-  stage.
+---
 
-## 6. Engagement model — community reviewers
+## 4. Section 2 — Operational security
 
-Detailed in §3.2; summarised here as a workflow:
+The eleven items below are the scope of operational security for a
+protocol developed in the open. Each item gets a gate (if applicable)
+and a standing commitment.
 
-```
-1. Recruit: surface candidate reviewers via Phase A funnel + direct
-   outreach to Alex, Andre, and 2–4 additional community Solidity
-   reviewers. Track via bd (suggested issue: "Recruit mainnet audit
-   community reviewers — Phase 0").
+### 4.1 Repo posture
 
-2. Onboard: each reviewer signs an engagement agreement (template to be
-   drafted in a follow-up bd issue). Agreement covers:
-     - Scope (which contracts)
-     - Deliverable shape (findings template)
-     - Compensation (per §3.2 ratification — A / B / C)
-     - Disclosure window (14 days private)
-     - Conflict of interest (no participation in bounty for the same
-       contract during the engagement window; bounty re-opens to them
-       post-disclosure)
+- **Branch protection on `main`:** required reviews ≥ 2 for canonical
+  paths (`spec/`, `BRAND.md`, `THESIS.md`, `GROWTH.md`, `GLOSSARY.md`,
+  `cargo/contracts/src/`); required CI green.
+- **CODEOWNERS:** sensitive paths (contracts, deploy scripts, security
+  docs, this file) require named owners.
+- **Commit signing:** required for all merges to `main`. Sigstore /
+  gitsign acceptable for OSS contributors without managed PGP.
+- **OSSF Scorecard target:** ≥ 8.0 across all categories before mainnet.
+  Repo wired to publish scorecard score in README.
+- **Allstar policies enabled** (OSSF) for branch protection drift,
+  binary artifacts, and admin-permission policies.
 
-3. Review: 4–6 week window. Per-contract review packet. Standing 1:1
-   access to audit lead. Findings landed as Markdown PRs to a private
-   `security-private/` branch, merged to public `docs/security/` post
-   disclosure window.
+**Gates:** branch protection enabled; CODEOWNERS for sensitive paths;
+OSSF Scorecard ≥ 8.0 published.
 
-4. Aggregate: audit lead consolidates findings into a single mainnet
-   audit summary. Severity-triaged. Disposition documented per finding.
+**Standing commitments:** Scorecard score reviewed monthly; drift
+auto-triaged via Allstar; OpenSSF Best Practices Badge maintained.
 
-5. Pay: per the ratified comp model. Disbursement on summary publish.
-```
+### 4.2 CI/CD hardening
 
-**Conflict-of-interest note:** community reviewers in WS-2 are excluded
-from the WS-5 bounty for contracts they reviewed, during the WS-5
-window. They re-qualify for the bounty on contracts they did not
-review, and on all contracts after the WS-5 window closes (i.e. on
-mainnet).
+- **Pinned actions** — every third-party GitHub Action pinned to commit
+  SHA, not version tag. Dependabot-style automation for SHA bumps.
+- **Minimum-permissions `GITHUB_TOKEN`** — every workflow declares the
+  minimum permissions block; default-readonly elsewhere.
+- **OIDC for cloud auth** — no long-lived cloud credentials in repo
+  secrets. OIDC federation for AWS / GCP / Azure if/when used.
+- **Ephemeral runners** for any workflow that handles secrets.
+- **No plaintext secrets** in workflows or matrix strategies.
+- **`pull_request_target` audit** — every workflow that uses the
+  privileged event reviewed by audit lead before landing.
 
-**Public credit:** every community reviewer who lands a findings doc
-is credited in the published audit summary and on the project's
-security page. Anonymous credits permitted on reviewer request.
+**Gates:** all actions pinned to SHA; minimum-permissions enforced;
+zero plaintext secrets in workflows; pre-mainnet `pull_request_target`
+audit complete.
 
-## 7. Gating criteria — mainnet pass conditions
+**Standing commitments:** CI security review on every workflow PR;
+quarterly audit of pinned-SHA bumps for any vendor hijack signals.
 
-### 7.1 Hard gates (must pass; no exceptions)
+### 4.3 Dependency / supply chain
 
-1. **WS-1 clean.** Slither, Aderyn, Cyfrin Codex, Olympix Auditor, and
-   Halmos all return zero High and zero Medium findings on the
-   mainnet-target SHA. Lows are triaged and dispositioned.
-2. **WS-2 complete.** Every bespoke contract has at least one
-   community reviewer's findings landed; all Critical and High findings
-   are fixed.
-3. **WS-3 sign-off.** External firm letter on file. Zero open Critical
-   or High findings.
-4. **WS-4 proofs.** Stated properties on `JinnDistributor` and
-   `CanonicalOpStackMessenger` formally verified (or, at minimum,
-   bounded-model-checked with no counter-examples up to the configured
-   bound). Documented.
-5. **Foundry invariant suite green.** The three invariant stubs
-   (`JINN.invariant.t.sol`, `JinnDistributor.invariant.t.sol`,
-   `CanonicalOpStackMessenger.invariant.t.sol`) are filled in and
-   passing in CI on the mainnet-target SHA.
-6. **Storage-layout CI lint live.** `forge inspect ... storageLayout`
-   regression check runs in CI on every PR; the snapshot for the
-   mainnet-target SHA is checked in.
-7. **`DeployL1Stack.test.ts:234` green.** Pre-existing failure cleared
-   (referenced as v0 §7.1).
-8. **Off-chain alerting runbook in production.** Subgraph + alerting
-   covers `MessengerUpdated`, `WeightsUpdated`, `RatiosUpdated`,
-   `MinterUpdated`, `OwnershipTransferStarted`, `OwnershipTransferred`,
-   abnormal `Claimed` magnitudes. Alerts route to a 24/7-staffed
-   channel.
-9. **Multisig handover runbook executed cleanly on testnet.** The Phase
-   A6 → B handover (multisig → Timelock) executes end-to-end on testnet
-   with all post-deploy verifier checks passing
-   (`getRoleMemberCount(DEFAULT_ADMIN_ROLE) == 0`, etc.). Refer to bd
-   `jinn-mono-g9j4` (governance flows on testnet).
-10. **Canonical-messenger canary passing.** N consecutive real OP-Stack
-    proofs verified through `CanonicalOpStackMessenger` on Base Sepolia
-    → Sepolia, and N proofs verified through the verifier-only canary
-    on Base mainnet → Ethereum mainnet. Recommendation: N = 100 testnet,
-    N = 10 mainnet canary.
-11. **bd `jinn-mono-cze` closed.** Canonical messenger blacklist +
-    retirement + properness checks landed and proven.
+- **Lockfile hygiene** — `yarn.lock` (TS sides) and `Cargo.lock`-style
+  pins (Solidity tooling via Foundry) committed; lockfile-only changes
+  reviewed for drift.
+- **Renovate or Dependabot** wired for automatic PRs against
+  dependency drift. Strawman: Renovate (more configurable; better
+  monorepo support) — open question §8.4.
+- **OSV-Scanner or Trivy** on every PR to flag known-CVE deps.
+- **Socket / Endor Labs (commercial OSS plan) or OSV-only?** —
+  open question §8.3.
+- **SLSA target:** Level 1 minimum at mainnet; Level 2 commitment
+  within 90 days post-mainnet.
+- **Sigstore / cosign for release artifacts** — every released artifact
+  signed; verification documented in release notes.
 
-### 7.2 Soft gates (must be reasoned; can be waived with documented rationale)
+**Gates:** Renovate/Dependabot live; OSV-Scanner CI gate; SLSA L1
+provenance attached to mainnet-deploy artifacts; release signing in
+place before first mainnet-affecting release.
 
-1. AI-tool coverage diff has been reviewed; non-overlapping findings
-   resolved or accepted with rationale.
-2. Community reviewers have signed off on the published audit summary.
-3. WS-5 private bounty closes with no Critical / High open beyond the
-   14-day disclosure window.
-4. Public bounty (Immunefi) listing is live (funded post-deploy).
-5. Threat-model addendum for mainnet — `docs/security/2026-MM-mainnet-threat-model.md`
-   — is published. This is a +1-severity rewrite of the v0 threat model
-   reflecting mainnet asset value.
+**Standing commitments:** weekly automated dep-PR review (named
+reviewer rota); 14-day SLA on Critical / High CVE patches; SLSA L2 by
+mainnet+90.
 
-### 7.3 Out-of-band — not a gate but tracked
+### 4.4 Secret scanning
 
-- Initial JINN distribution diversity. The v0 threat model flagged
-  "concrete commitments on initial distribution diversity" as a mainnet
-  prerequisite (§3.4). This is a tokenomics decision, not an audit
-  decision. Tracked separately under the Phase A workstream; the audit
-  plan only asserts that the diversity was delivered before mainnet
-  deploy.
-- Multisig `PROPOSER_ROLE` post-handover cooldown runbook (21 days from
-  threat-model §7.4). Operational, tracked separately.
+- **Pre-receive secret scanning** via GitHub native secret scanning
+  (free for public repos) AND a CI-side gitleaks or TruffleHog pass to
+  catch patterns GitHub misses.
+- **History scan** before mainnet — full git history scanned for any
+  leaked secret in a deleted commit. Any finding triggers rotation +
+  history rewrite.
+- **Pre-commit hook** offered (not enforced) for contributors:
+  detect-secrets or gitleaks pre-commit.
 
-## 8. Timeline relative to Phase A and mainnet community-formation gate
+**Gates:** zero open secret-scanner findings on the mainnet-target SHA;
+full history scan complete with all findings dispositioned (rotated
+or accepted-as-non-secret).
 
-### 8.1 Workstream timing
+**Standing commitments:** pre-receive scanning continuous; weekly
+review of pre-receive blocked attempts; quarterly history re-scan.
+
+### 4.5 General SAST (beyond smart contracts)
+
+The TypeScript daemon (`client/src/**`) is unaudited as of v0. This is
+a real surface — it handles keys, signs transactions, calls cross-chain
+contracts. The mainnet gate must include SAST on the daemon and on
+deploy-time scripts.
+
+- **Semgrep / Opengrep** with the security ruleset on every PR. (Note:
+  Semgrep moved to a paid tier for some advanced rules in 2025;
+  Opengrep is the OSS-friendly fork maintained by Arnica.)
+- **CodeQL** (free for public repos via GitHub Advanced Security) for
+  TypeScript + Solidity.
+- **Bearer** for data-flow + sensitive-data tracking on the TypeScript
+  side (key handling, env var leakage).
+- **AI-native general SAST**: ZeroPath or Aikido (commercial; both have
+  OSS-friendly engagements). Open question §8.3.
+
+**Gates:** Semgrep/Opengrep + CodeQL clean (zero High) on
+mainnet-target SHA; AI-native pass run with findings triaged.
+
+**Standing commitments:** SAST tools wired in CI for every PR;
+quarterly review of triaged findings.
+
+### 4.6 Code review process
+
+- **PR templates** with security-affecting checklist (touches keys?
+  touches contracts? touches CI?).
+- **CODEOWNERS-driven reviewer routing** for sensitive paths.
+- **Security-review trigger** on any PR that touches `cargo/contracts/`,
+  `client/src/earning/`, `client/src/auth/`, deploy scripts, or CI
+  workflows. Trigger means: audit lead or designated security reviewer
+  is required, not optional.
+- **AI code review augmentation** as opt-in second-pair-of-eyes:
+  PR-Agent (OSS) or CodeRabbit (commercial OSS plan). Open question
+  §8.3.
+
+**Gates:** PR template live with security checklist; CODEOWNERS
+configured for security-sensitive paths; security-review trigger
+enforced via branch protection.
+
+**Standing commitments:** monthly review of bypassed security-review
+flags; quarterly PR-template revision based on lessons-learned.
+
+### 4.7 Vulnerability disclosure
+
+- **`SECURITY.md`** at repo root with: contact (security@jinn.network
+  or equivalent), scope, response SLA (recommend 48h initial response
+  / 14d triage / 90d disclosure window), embargo policy, safe-harbor
+  statement.
+- **Private reporting channel** — GitHub Security Advisories (free for
+  public repos) as the primary intake; encrypted email backup.
+- **GH Security Advisories CVE workflow** — CVEs requested for disclosed
+  bugs that affect downstream consumers.
+
+**Gates:** `SECURITY.md` live; private reporting channel monitored;
+embargo / disclosure / CVE workflow documented.
+
+**Standing commitments:** 48h initial-response SLA; 14d triage;
+quarterly review of incoming reports.
+
+### 4.8 Incident response
+
+- **Runbook** at `docs/runbooks/incident-response.md` with:
+  - Detection (alerts, monitoring, tip-offs)
+  - Triage (severity matrix; on-call roster — **named** people, not
+    "TBD")
+  - Response (privileged-action playbooks per scenario: messenger swap,
+    weights-to-zero, minter rotation, multisig key compromise)
+  - Communication templates (status page, X post, GH Discussion,
+    holder-comms email)
+  - Post-incident review template
+- **Tabletop exercises** — at least one full tabletop run before
+  mainnet, simulating a Critical scenario from the v0 threat model
+  (recommend §3.5 hostile messenger swap or §6.1 minter compromise).
+- **Status page** — basic uptime + protocol-state status board live
+  before mainnet.
+
+**Gates:** runbook landed with named on-call roster; tabletop
+exercise complete; status page live.
+
+**Standing commitments:** quarterly tabletop exercise; runbook
+revision after every real incident; status-page uptime ≥ 99.9% target.
+
+### 4.9 Release security
+
+- **Tagged releases** for the client daemon and contracts deployments,
+  not just rolling-main deploys.
+- **Signed release artifacts** via Sigstore / cosign (also covered in
+  §4.3).
+- **GitHub artifact attestations** (free tier; SLSA L2-compatible).
+- **Release notes** call out security-affecting changes explicitly,
+  with a "Security" header section.
+- **Reproducible builds** — Foundry deterministic builds for contracts;
+  pinned-Node + lockfile reproducibility for the daemon. Open question
+  §8.5 (whether to commit to bit-for-bit reproducibility or
+  metadata-equivalent).
+
+**Gates:** first mainnet release is signed, attestation-attached, and
+has explicit security-section release notes.
+
+**Standing commitments:** every release ships signed + attested +
+security-noted; quarterly review of supply-chain provenance.
+
+### 4.10 Deploy / handover hygiene
+
+- **Multisig key custody** — every signer's key is on a hardware
+  device or a physically-separated air-gapped signer. Documented per
+  signer (without revealing identity-bound info publicly).
+- **Post-deploy verifier scripts** — every mainnet deploy step has a
+  scripted verifier (e.g. `getRoleMemberCount(DEFAULT_ADMIN_ROLE) == 0`
+  asserted, ownership-transferred, etc.) that runs immediately and on a
+  recurring schedule for the first 30 days.
+- **Handover runbook executed on testnet first** — already a §3.4 gate
+  (item 7); referenced here for cross-section traceability.
+- **Address book** — public, documented, signed list of every
+  authoritative address (multisig, governor, timelock, contracts) with
+  the deploy commit + verification steps.
+
+**Gates:** post-deploy verifier suite landed and tested on testnet;
+multisig key-custody policy documented; address book published with
+mainnet deploy.
+
+**Standing commitments:** verifier suite re-run on a cron + monitored;
+quarterly key-custody attestation from each signer.
+
+### 4.11 Open-development specifics
+
+The fact that the project is developed in the open changes the
+threat surface beyond the code itself. This section makes that
+explicit.
+
+- **Public threat-model maintenance** — the threat-model addendum
+  (mainnet-grade) is itself a public artifact that gets updated as
+  contracts evolve. Edits go through CODEOWNERS-reviewed PRs.
+- **Discussion-thread moderation** — the project's GitHub Discussions
+  / forum needs a moderation policy (impersonation, social engineering,
+  scams targeting holders). Recommend lightweight policy modelled on
+  Ethereum Magicians / OZ Forum.
+- **Issue / PR sanitisation** — contributors who paste logs or
+  reproducers into issues / PRs will sometimes leak environment data
+  (RPC keys, API tokens). Pre-receive secret scanning (§4.4) catches
+  some; an explicit "what not to paste" section in `CONTRIBUTING.md`
+  + a sanitising bot for logs is the additional layer.
+- **Social-engineering exposure** — public maintainer accounts are
+  high-value targets. Recommend: 2FA mandatory on all maintainer
+  accounts; hardware-key auth where possible; passwordless preferred.
+- **Sock-puppet / sybil reviewer detection** — for community reviewer
+  programmes (WS-2, bounties), basic reviewer-vetting (account age,
+  prior contributions, optional KYC for high-bounty tiers) reduces
+  collusive findings.
+- **Public DR / spec discipline** — when a discussion lands a
+  decision, it lands as a DR (`log/decisions/`) or a spec, not just a
+  comment thread. Otherwise the decision evaporates.
+
+**Gates:** moderation policy live; `CONTRIBUTING.md` sanitisation
+section live; 2FA + hardware-key requirement on maintainer accounts;
+reviewer-vetting policy for community programmes documented.
+
+**Standing commitments:** quarterly review of moderation incidents;
+DR discipline audited monthly (count of "decisions reached in
+discussion that didn't land as DRs").
+
+---
+
+## 5. Section 3 — Methodology + tooling research
+
+This section is **research-driven**: the strawman shortlist below is a
+first cut from a brief 2026-04-30 research pass, intended to be
+sharpened by community input. Each category lists the candidate tools
+with one-line rationale, license / cost notes, and an open question
+where the strawman is genuinely uncertain.
+
+The output of this section feeds Sections 1 and 2 — i.e. the tools
+selected here are the ones we use to satisfy the gates and standing
+commitments above.
+
+### 5.1 Evaluation criteria
+
+A candidate tool earns a place in the stack if it scores well on:
+
+1. **OSS-friendly licensing** — preferred order: permissive OSS (MIT,
+   Apache 2.0) > copyleft OSS (GPL, AGPL) > commercial with OSS plan >
+   commercial. We will use commercial tools where the OSS option is
+   materially weaker, but we want to know that.
+2. **Public-development compatibility** — works against a public repo,
+   findings can be triaged in public-or-private (own choice), no
+   forced disclosure to vendor of source.
+3. **CI / agentic integration** — usable as a non-interactive CI step
+   AND/OR as an MCP-style tool callable by an agent (Claude Code,
+   Cursor, etc.).
+4. **Maintenance signal** — recent commits, responsive issue tracker,
+   active community.
+5. **Coverage diff** — does it find things the *other* tools in our
+   stack don't? A tool that overlaps 95% with a free alternative isn't
+   worth the integration cost.
+6. **Cost** — sustainable for an early-stage protocol; preferably
+   free-tier-meets-needs at this stage.
+
+### 5.2 Strawman shortlist by category
+
+Notation: **[OSS]** = open-source, permissively licensed;
+**[OSS-GPL]** = open-source, copyleft;
+**[Comm]** = commercial; **[Comm-OSS]** = commercial with OSS-friendly
+free plan; **[Free-OSS-only]** = free for public repositories.
+
+#### Category A — Smart-contract static + symbolic + FV
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| Slither | [OSS] | Trail of Bits; industry standard; 80+ detectors | required (WS-1) |
+| Aderyn | [OSS-GPL] | Cyfrin; Rust-based; complementary detectors; MCP server for AI integration | required (WS-1) |
+| Halmos | [OSS] | a16z; bounded symbolic execution; Solidity-native | required (WS-1, WS-4) |
+| Echidna / Medusa | [OSS] | Trail of Bits; property-based fuzzing | recommended for `JinnDistributor` |
+| Foundry invariant suite | [OSS] | built-in; v0 stubs already in repo | required (WS-1) |
+| hevm | [OSS] | dapp-tools; SMT-backed | recommended cross-check vs Halmos |
+| Certora Prover | [Comm] | most mature commercial FV; the heavy artillery | open question §8.2 |
+| KEVM | [OSS] | K-framework EVM semantics; rigorous but expensive | optional |
+
+#### Category B — Smart-contract AI auditors
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| Aderyn-MCP | [OSS-GPL] | bridges Aderyn into agentic LLM pipelines (Claude Code, Cursor) | required (WS-1) |
+| Olympix Auditor | [Comm] | LLM auditor with detector library; coverage-diff vs Aderyn | strawman: required |
+| Cyfrin Codex | [Comm] | Solidity-specialised LLM | strawman: optional, evaluate alongside Olympix |
+| ChainPatrol | [Comm] | runtime + audit-time SC monitoring | optional |
+
+Open question: which of Olympix vs Cyfrin Codex (or both) earns a slot.
+Recommendation: pilot both on `JinnDistributor` and pick the one with
+higher non-overlap findings.
+
+#### Category C — General SAST (beyond smart contracts)
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| Opengrep | [OSS] | Arnica's fork of Semgrep; OSS-friendly continuation | required (WS-1, §4.5) |
+| Semgrep | [OSS-GPL/Comm] | original; some advanced rules paywalled | optional (free tier) |
+| CodeQL | [Free-OSS-only] | GitHub Advanced Security; deep dataflow analysis | required (§4.5) |
+| Bearer | [OSS] | data-flow + sensitive-data tracking | recommended for client/ TS code |
+| Trivy | [OSS] | Aqua Security; broad scanner (deps, IaC, secrets) | required (§4.3, §4.4) |
+
+#### Category D — AI-native general SAST
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| ZeroPath | [Comm-OSS?] | LLM-native SAST; high recent profile (Aptos Labs case study); claims complement to Semgrep/Snyk | strawman: pilot |
+| Aikido | [Comm-OSS] | bundles SAST + secrets + deps + container; OSS-friendly free plan | strawman: pilot |
+| Mobb / Autofix Bot | [Comm] | autofix-focused | optional |
+| Pixee | [Comm] | autofix; security-hardening PRs | optional (Java/Python/JS — limited overlap with our TS/Solidity) |
+
+Open question §8.3: which of ZeroPath vs Aikido (or both) earns the
+slot. Recommendation: pilot both for a 30-day window; pick on
+findings-density and integration cost.
+
+#### Category E — Secret scanning
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| GitHub native secret scanning | [Free-OSS-only] | free for public repos; pre-receive | required (§4.4) |
+| gitleaks | [OSS] | history + CI; mature | required (§4.4) |
+| TruffleHog | [OSS] | high-entropy + verifier mode | recommended |
+| detect-secrets (Yelp) | [OSS] | pre-commit hook; baseline-tracking | optional |
+
+#### Category F — Dependency / supply chain
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| Renovate | [OSS] | most configurable; monorepo-friendly | strawman: required (§4.3) |
+| Dependabot | [Free-OSS-only] | GitHub native; less configurable | alternative |
+| OSV-Scanner | [OSS] | Google; canonical OSV data | required (§4.3) |
+| Trivy (deps mode) | [OSS] | broad scanner | required (§4.3) |
+| Socket | [Comm-OSS] | malicious-package detection; runtime behaviour | strawman: pilot |
+| Endor Labs | [Comm] | reachability analysis; reduces noise | optional |
+
+#### Category G — Repo posture / OSS hygiene
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| OSSF Scorecard | [OSS] | OpenSSF; 18+ checks; runs on every public OSS repo | required (§4.1) |
+| Allstar | [OSS] | OSSF; policy enforcement (branch protection drift, etc.) | required (§4.1) |
+| OpenSSF Best Practices Badge | [Free] | self-attested; signals maturity | recommended |
+
+#### Category H — Signing / attestations / SLSA
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| Sigstore + cosign | [OSS] | OpenSSF; keyless signing | required (§4.3, §4.9) |
+| SLSA generators (GH Actions) | [OSS] | provenance attestations | required (§4.3) |
+| GitHub artifact attestations | [Free-OSS-only] | SLSA L2-compatible; native | required (§4.3) |
+| in-toto | [OSS] | supply-chain framework | optional |
+
+#### Category I — AI code review augmentation
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| PR-Agent (Qodo) | [OSS] | mature; supports Claude / GPT / Gemini; v0.32+ active | recommended (§4.6) |
+| GitHub Copilot Autofix | [Free-OSS-only] | free for public repos via GHAS; integrates with CodeQL | required if available |
+| CodeRabbit | [Comm-OSS] | OSS-friendly free plan; well-regarded review quality | strawman: pilot |
+| Cursor Bugbot | [Comm] | Cursor's review agent; high autofix rate per Cloudflare write-up | optional (developer-IDE-side) |
+
+Open question §8.3: which of PR-Agent + CodeRabbit configurations
+becomes the default. Recommendation: PR-Agent in CI as the canonical
+review (controllable, OSS, predictable cost via our own LLM keys);
+Copilot Autofix opt-in for individual contributors.
+
+#### Category J — Threat modelling
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| OWASP Threat Dragon | [OSS] | diagram-driven; STRIDE | recommended (§3.4 mainnet threat-model) |
+| PyTM | [OSS] | code-driven threat models | optional |
+
+#### Category K — Fuzzing (general)
+
+| Tool | License | Why | Use |
+|---|---|---|---|
+| OSS-Fuzz | [Free-OSS-only] | Google; free fuzzing infra for OSS | recommended for client/ TS-native libs (where supported) |
+| libFuzzer / cargo-fuzz | [OSS] | language-native fuzzers | optional |
+
+### 5.3 Integration plan
+
+Tools selected from the strawman get integrated in this order, with
+the goal that **by mainnet** the full stack is wired into CI and into
+human review workflows:
+
+1. **Week 0–4 (now → mainnet -22w):** Required CI gates. Slither,
+   Aderyn, Halmos, Foundry invariants, OSV-Scanner, Renovate, gitleaks,
+   GH native secret scanning, OSSF Scorecard, Allstar, Sigstore release
+   signing.
+2. **Week 4–10:** AI-augmented layer. Aderyn-MCP, Opengrep + CodeQL +
+   Bearer in CI, ZeroPath / Aikido pilots, PR-Agent in CI.
+3. **Week 10–18:** External-firm integration. WS-3 firm picks up the
+   stack; their own tooling layers on top.
+4. **Week 18–22:** Bounty + canary. WS-5 bounty live (private then
+   public). Canonical-messenger canary on testnet + mainnet
+   verifier-only.
+
+### 5.4 Tooling research: what stays open
+
+These are the calls that **only the community discussion can sharpen**
+because they are about feel, not analysis:
+
+- ZeroPath vs Aikido vs both (Category D)
+- Olympix vs Cyfrin Codex vs both (Category B)
+- Renovate vs Dependabot (Category F)
+- PR-Agent vs CodeRabbit vs both (Category I)
+- Certora vs Halmos for `JinnDistributor` FV (Category A)
+- Whether to commission a Trail of Bits / Spearbit / Halborn / OZ /
+  Code4rena audit firm (out of scope for this plan; surfaced in §8)
+
+---
+
+## 6. Engagement model — community plan reviewers
+
+This section addresses a meta-issue: Alex, Andre, and others are being
+asked to review **this plan** *and* may be reviewers **inside** this
+plan (WS-2). That dual role needs structure.
+
+### 6.1 Plan reviewers (this discussion thread)
+
+Anyone with stake in Jinn's security posture is welcome to comment on
+this plan in the GitHub Discussion (Appendix A). The strawman is open
+for sharpening.
+
+**Compensation for plan review:** none (pre-mainnet community work,
+contributing to a public discussion). Credits in the published spec
+when ratified.
+
+**Disclosure:** none (the discussion is public).
+
+**Crediting:** every reviewer who lands a substantive
+suggestion-shaping-the-spec gets named in the ratified spec's
+acknowledgements section (anonymous on request).
+
+### 6.2 Audit reviewers (WS-2 inside this plan)
+
+The structured engagement that pays per-finding:
+
+- Per-contract review packet (one bespoke contract or a tightly-coupled
+  pair).
+- Engagement agreement covering scope, deliverables, comp, disclosure.
+- 14-day private window after submission before public.
+- Compensation per the model in §8.1.
+
+### 6.3 Conflict of interest between roles
+
+A reviewer who participates in §6.1 (plan review) is **not** prevented
+from participating in §6.2 (audit review). They are different
+engagements with different deliverables. The plan's structure should
+not be informed by what would maximise a reviewer's audit fees, so
+the plan-review channel asks reviewers to declare any audit
+conflict-of-interest in their first comment.
+
+---
+
+## 7. Timeline
+
+### 7.1 Hot-path
 
 ```
 Week 0 (now):
-  - This plan is ratified.
-  - WS-1 begins (AI + static + symbolic): ~3-4 weeks elapsed.
-  - WS-2 reviewer recruitment + onboarding begins: ~2 weeks elapsed.
+  - This strawman ratifies (post-discussion).
+  - WS-1 begins; Section 4 gates begin (repo posture, secret scan,
+    SECURITY.md, etc.).
 
 Week 2:
-  - WS-2 reviews begin (4-6 week window).
+  - WS-2 reviewer recruitment + onboarding.
 
 Week 4:
-  - WS-1 deliverables complete; coverage diff filed.
-  - External firm RFP closes; firm engaged (commences WS-3).
+  - WS-1 deliverables complete.
+  - WS-2 reviews begin (4-6 week window).
+  - External-firm RFP closes; firm engaged (commences WS-3).
 
 Week 8:
-  - WS-2 deliverables complete; aggregation summary published
-    (private; 14-day disclosure window applies).
-  - WS-4 formal verification engagement begins (parallel with WS-3).
+  - WS-2 deliverables complete; aggregation summary published.
+  - WS-4 formal verification begins (parallel with WS-3).
 
 Week 14:
   - WS-3 firm report received; remediation begins.
 
 Week 18:
   - WS-3 retest complete; sign-off letter received.
-  - WS-4 formal verification reports received.
+  - WS-4 reports received.
+  - All Section 4 gates verified.
 
 Week 20:
-  - WS-5 pre-mainnet private bounty opens (14-day window).
-  - Final invariant + storage-layout + alerting + handover gates
-    verified (§7.1 items 5-11).
+  - WS-5 pre-mainnet private bounty (14-day window).
+  - Mainnet threat-model addendum landed.
 
 Week 22:
-  - WS-5 closes; gating audit complete.
-  - Mainnet deploy candidate; pending the mainnet community-formation
-    gate (separate workstream).
+  - WS-5 closes; mainnet deploy candidate.
+
+Week 22+:
+  - Mainnet community-formation gate (separate workstream) gates final
+    deploy.
 ```
 
-This is the **hot-path** timeline. Slack of 2–4 weeks is realistic
-across WS-3 and WS-4 due to firm calendars and remediation iteration.
-Plan to mainnet on Week 24–28 from ratification.
+Slack of 2-4 weeks is realistic; plan to mainnet on Week 24-28.
 
-### 8.2 Relationship to Phase A and mainnet community-formation
+### 7.2 Relationship to Phase A and mainnet community-formation
 
-The audit gate runs in parallel with Phase A (testnet campaign launch
-and operator recruitment) and the mainnet community-formation gate
-(separate workstream — see DR-2026-04-30).
+The audit + ops gate runs in parallel with Phase A (testnet campaign,
+operator funnel) and the mainnet community-formation gate. Phase A
+provides the funnel for community reviewers + bounty hunters. The two
+mainnet-readiness gates (this one + community-formation) plus the
+technical pre-flight (deploy verifier on testnet) compose the full
+readiness check.
 
-```
-Phase A (in flight, testnet)          ──────────────────────────── ▶
-                                        ▲
-                                        │ provides operator + creator funnel
-                                        │
-Audit gate (this plan)                  ────────────[~22 weeks]────▶
-                                                                    ▲
-                                                                    │
-Mainnet community-formation gate      ────────[separate]────────────▶
-(initial distribution, handover                                     │
-runbook ratification, etc.)                                         ▼
-                                                                Mainnet deploy
-```
+---
 
-Phase A drives the funnel that provides community reviewers (WS-2) and
-bounty hunters (WS-5). The audit gate must complete before the mainnet
-deploy. The community-formation gate can complete in parallel with the
-audit gate and is **not** blocked by it; the audit gate is **not**
-blocked by community-formation either, but neither gate alone is
-sufficient for mainnet. Both gates plus the technical pre-flight
-(deploy script verifier + simulated deploy on Sepolia) compose the
-full mainnet readiness check.
+## 8. Open ratification questions
 
-## 9. Out of scope (explicit)
+These are the calls that need a Captain answer, a community-discussion
+answer, or both. Numbered for discussion-thread reference.
 
-- **Performing the audits.** This plan ratifies how; execution is
-  separate dispatches per workstream.
-- **External audit firm selection / RFP / commercial negotiation.**
-  Separate spend decision. File as bd issue once this plan is ratified.
-- **Compensation amounts for community reviewers.** This plan
-  recommends the comp *model* (hybrid retainer + per-finding bonus);
-  the *amounts* are a Captain decision.
-- **Specific Certora vs Halmos vendor allocation beyond §3.4
-  recommendation.** Captain ratifies.
-- **Audit budget envelope.** This plan does not propose a budget; that
-  rolls up to the broader mainnet-readiness budget.
-- **Bug bounty platform selection** (Immunefi vs Code4rena vs Sherlock
-  vs self-hosted). File as bd issue when WS-5 is dispatched.
-- **Post-mainnet audit cadence.** Continuous audit for upgrades is its
-  own plan; not in scope here.
+1. **Comp model for community audit reviewers (WS-2)** —
+   (A) per-finding bounty / (B) flat consulting / (C) hybrid retainer
+   + per-finding bonus. Recommend C; Captain ratifies amounts.
+2. **Formal verification vendor allocation** — Certora (commercial)
+   for `JinnDistributor` + `CanonicalOpStackMessenger`; Halmos (OSS)
+   for `JINN`. Captain ratifies vendor; community input welcome.
+3. **AI-tooling pilot picks** — for Categories B, D, F, I in §5.2,
+   which of the candidates are piloted and which are skipped. Community
+   input is the central question here.
+4. **Renovate vs Dependabot** (Category F) — recommend Renovate; minor
+   call, community can flip.
+5. **Reproducible builds commitment** — bit-for-bit (expensive,
+   strong) vs metadata-equivalent (cheaper, weaker). Recommend
+   metadata-equivalent at v0; bit-for-bit by mainnet+90.
+6. **Phase 0 contracts** (`ClaimRegistry`, `AcceptAllChecker`) —
+   change-impact only or full re-audit. Recommend change-impact.
+7. **Disclosure window for community findings** — 14d (recommended),
+   shorter, longer.
+8. **Canary N for canonical messenger** — 100 testnet + 10 mainnet
+   recommended; flex up to 1000 + 100.
+9. **Mainnet threat-model addendum** — required gate (recommended) or
+   soft commitment.
+10. **Bounty platform** — Immunefi vs Code4rena vs Sherlock vs
+    self-hosted. Out of scope for this plan; flagged for follow-up.
 
-## 10. Open questions for ratification
+## 9. Acceptance and follow-ups
 
-These need a Captain answer (or a delegated answer with clear
-ownership) before the plan is considered ratified.
+This task ratifies the plan, not its execution. Follow-up bd issues
+to file once the plan is ratified (the community discussion may
+sharpen this list):
 
-1. **Comp model for community reviewers** — A (per-finding bounty) /
-   B (flat consulting) / **C (hybrid)** recommended.
-2. **Formal verification vendor allocation** —
-   Certora (`JinnDistributor`, `CanonicalOpStackMessenger`) +
-   Halmos (`JINN`) recommended.
-3. **AI tooling vendor commitments** — Cyfrin Codex + Olympix Auditor
-   recommended; need access agreements (some require enterprise
-   contracts). Open question whether to layer in a third (e.g. a
-   GPT-5-based bespoke pipeline) — recommend **no** at this stage.
-4. **Phase 0 contracts (`ClaimRegistry`, `AcceptAllChecker`) scope** —
-   change-impact only (recommended) or full re-audit. Recommended
-   posture: change-impact, since they have been in production since
-   Phase 0 with no incidents and the mainnet variant is bytecode-equal
-   to the testnet-deployed variant.
-5. **Disclosure window length for community reviewers** — 14 days
-   (recommended) or shorter / longer.
-6. **N for canonical-messenger canary** — 100 testnet + 10 mainnet
-   canary recommended; can flex up to 1000 testnet + 100 mainnet
-   canary if Captain wants stronger evidence.
-7. **Mainnet threat-model addendum** — required (recommended) or
-   optional. Recommended: required, as a soft gate (§7.2.5).
+- WS-1 dispatch (mainnet-target SHA toolchain run)
+- WS-2 dispatch (community reviewer recruitment + engagement)
+- WS-3 RFP (external firm selection)
+- WS-4 dispatch (formal verification)
+- WS-5 dispatch (bounty + canary)
+- §4 ops gates: repo posture, CI hardening, dep/supply chain, secret
+  scanning, SAST, code review, vuln disclosure, IR, release security,
+  deploy/handover, open-dev — each as its own issue or grouped
+- §5 tooling pilots: ZeroPath, Aikido, Olympix, Cyfrin Codex, PR-Agent,
+  CodeRabbit (one per pilot, scoped 30 days)
+- §3.4.10: mainnet threat-model addendum draft
+- §8.1: comp-amounts decision for community audit reviewers
+- §8.2: FV vendor commitment
+- §8.10: bounty-platform selection
 
-## 11. Acceptance for THIS task
+## 10. Acknowledgements
 
-This task ratifies the plan, not its execution. Acceptance is:
+To be populated in the ratified spec. Plan reviewers, drafters, and
+community contributors who shape the strawman get named here unless
+they request otherwise.
 
-- This document lands at `spec/2026-04-30-security-audit-plan.md`.
-- The §10 ratification questions are answered (or explicitly deferred
-  with named owners).
-- bd follow-up issues are filed for each workstream dispatch
-  (WS-1 through WS-5) plus the firm-RFP, comp-amounts, and bounty-
-  platform-selection sub-tasks. Filing is a separate dispatch — this
-  task does not file them automatically; it surfaces the list:
+---
 
-**Suggested follow-up bd issues** (for the Captain to file or delegate
-when ratifying):
+## Appendix A — Discussion-post draft
 
-- WS-1 dispatch: run AI + static + symbolic toolchain on mainnet-target SHA.
-- WS-2 dispatch: recruit + engage community reviewers; produce findings.
-- WS-3 RFP: external audit firm selection.
-- WS-4 dispatch: formal verification on `JinnDistributor` and
-  `CanonicalOpStackMessenger`.
-- WS-5 dispatch: bounty platform selection + listing.
-- Comp-amounts decision for community reviewers (depends on §10.1).
-- Mainnet threat-model addendum draft (depends on §7.2.5).
-- Storage-layout CI lint task (referenced as v0 §7.2 follow-up).
-- `DeployL1Stack.test.ts:234` fix (v0 §7.1 follow-up).
+> Posted at: TBD — GitHub Discussions (`Security` category)
+> Title: "RFC: Mainnet security plan — strawman v0.1 open for community review"
 
-Closing this task without filing those follow-ups means the audit
-workstream does not start; the Captain may want to file them in the
-same session.
+---
+
+**TL;DR.** We've drafted a strawman security plan for Jinn's mainnet
+deploy and standing post-mainnet posture. It covers three sections —
+**protocol security** (smart contract audit), **operational security**
+(repo/CI/supply-chain/disclosure/IR/open-development hygiene), and
+**methodology + tooling research** (which OSS / AI-native tools we
+adopt to do 1 and 2). We want your input before we commission audits,
+pick tools, or land this as a ratified spec.
+
+Strawman lives at: [`spec/2026-04-30-security-audit-plan.md`](../spec/2026-04-30-security-audit-plan.md).
+
+**Why this RFC.** Jinn is being developed in the open, and the
+mainnet security gate is broader than a smart-contract audit. We want
+this plan ratified by the same community that will help operate the
+network — not just signed off by us.
+
+**What we're asking.** Section-level comments on the strawman. The
+specific points we most want input on:
+
+1. **Section 1 — Protocol security.** Does the five-workstream layout
+   (AI/static + community + firm + FV + bounty/canary) make sense?
+   What's missing or over-specified?
+2. **Section 2 — Operational security.** Eleven items (repo posture,
+   CI hardening, supply chain, secret scanning, general SAST, code
+   review, vuln disclosure, incident response, release security,
+   deploy/handover, open-development specifics). Any gaps? Anything
+   you'd cut?
+3. **Section 3 — Tooling research.** The strawman shortlist in §5.2 is
+   our first cut. We are most uncertain about:
+   - AI-native general SAST: ZeroPath vs Aikido vs both?
+   - SC AI auditors: Olympix vs Cyfrin Codex vs both?
+   - AI code review: PR-Agent vs CodeRabbit vs both?
+   - Formal verification: Certora vs Halmos for `JinnDistributor`?
+   What have you used that should be on this list? What should come
+   off?
+4. **Section 6 — Engagement model.** If you're a reviewer who'd consider
+   doing WS-2 (paid per-contract audit review), is the proposed
+   structure (per-contract review packets, 14d disclosure, hybrid comp)
+   workable? What would change to make it better?
+5. **Section 8 — Open questions.** Ten open ratification points. Pick
+   any that you have a view on.
+
+**Process.** We'll leave this open for at least 14 days. After that,
+we ratify a v1.0 of the spec, file the follow-up bd issues for each
+workstream, and start commissioning. We'll respond inline; concrete
+suggestions that shift the spec are credited in the ratified version's
+acknowledgements.
+
+**A note on roles.** Some of you may end up as paid audit reviewers
+(WS-2). Plan reviewers and audit reviewers are *different* engagements;
+participating here doesn't disqualify you from WS-2. We do ask: if you
+have a financial interest in any specific tool, vendor, or audit firm
+mentioned, please disclose it in your first comment.
+
+Thank you for reading. Direct any sensitive points to security@jinn.network
+(or via GH Security Advisories) instead of in-thread.
+
+— Oak (audit lead, drafter)
+
+---
+
+End of strawman.
