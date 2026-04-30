@@ -4,7 +4,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { runCreate } from '../../../src/cli/commands/create.js';
+import {
+  runCreate,
+  runCreatePlugIn,
+} from '../../../src/cli/commands/create.js';
 
 let TMP: string;
 
@@ -200,5 +203,135 @@ describe('runCreate (alternative-harness pattern)', () => {
         outDir: TMP,
       }),
     ).rejects.toThrow(/unsupported pattern/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Path 1 plug-in scaffolder — six slot patterns.
+// ---------------------------------------------------------------------------
+
+describe('runCreatePlugIn (phase-agent-override)', () => {
+  it('emits a phase-agent-override package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'phase-agent-override',
+      packageName: '@example/calib',
+      phase: 'execute',
+      agent: 'step-worker',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'package.json'))).toBe(true);
+    expect(existsSync(join(target, 'jinn-plugin.json'))).toBe(true);
+    expect(existsSync(join(target, 'agents/execute-step-worker.md'))).toBe(true);
+    expect(existsSync(join(target, 'test/manifest.test.ts'))).toBe(true);
+    expect(existsSync(join(target, 'README.md'))).toBe(true);
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('@example/calib');
+    expect(manifest.slots[0].type).toBe('phase-agent-override');
+    expect(manifest.slots[0].phase).toBe('execute');
+    expect(manifest.slots[0].agent).toBe('step-worker');
+    expect(manifest.slots[0].entry).toBe('agents/execute-step-worker.md');
+    const agent = readFileSync(
+      join(target, 'agents/execute-step-worker.md'),
+      'utf8',
+    );
+    expect(agent).not.toContain('{{');
+  });
+});
+
+describe('runCreatePlugIn (topic-explorer)', () => {
+  it('emits a topic-explorer package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'topic-explorer',
+      packageName: '@example/news',
+      phase: 'orient',
+      topic: 'news-context',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'agents/news-context-explorer.md'))).toBe(
+      true,
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.slots[0].type).toBe('topic-explorer');
+    expect(manifest.slots[0].topic).toBe('news-context');
+    expect(manifest.slots[0].phase).toBe('orient');
+  });
+});
+
+describe('runCreatePlugIn (mcp-tool)', () => {
+  it('emits an mcp-tool package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'mcp-tool',
+      packageName: '@example/poly',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'src/server.ts'))).toBe(true);
+    expect(existsSync(join(target, 'test/server.test.ts'))).toBe(true);
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.slots[0].type).toBe('mcp-tool');
+    expect(manifest.slots[0].command).toBe('node');
+  });
+});
+
+describe('runCreatePlugIn (skill-bundle)', () => {
+  it('emits a skill-bundle package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'skill-bundle',
+      packageName: '@example/skills',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, '.claude-plugin/plugin.json'))).toBe(true);
+    expect(existsSync(join(target, 'skills/example/SKILL.md'))).toBe(true);
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.slots[0].type).toBe('skill-bundle');
+    expect(manifest.slots[0].skillsDir).toBe('skills');
+  });
+});
+
+describe('runCreatePlugIn (memory-backend)', () => {
+  it('emits a memory-backend package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'memory-backend',
+      packageName: '@example/vec',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'src/server.ts'))).toBe(true);
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.slots[0].type).toBe('memory-backend');
+  });
+});
+
+describe('runCreatePlugIn (hook)', () => {
+  it('emits a hook package', async () => {
+    const target = await runCreatePlugIn({
+      kind: 'plug-in',
+      pattern: 'hook',
+      packageName: '@example/precheck',
+      event: 'pre-phase',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'hooks/pre-phase.sh'))).toBe(true);
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn-plugin.json'), 'utf8'),
+    );
+    expect(manifest.slots[0].type).toBe('hook');
+    expect(manifest.slots[0].event).toBe('pre-phase');
+    expect(manifest.slots[0].entry).toBe('hooks/pre-phase.sh');
+    const hook = readFileSync(join(target, 'hooks/pre-phase.sh'), 'utf8');
+    expect(hook).not.toContain('{{');
   });
 });
