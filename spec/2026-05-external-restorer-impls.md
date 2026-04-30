@@ -516,6 +516,13 @@ hand-off list.
     Inherits the manifest, trust flow, capability shape, and §3.5
     `entry` extension from this spec.
 
+Phase A.2 (`spec/2026-04-30-plug-in-surface.md` §3.3) ships three
+prediction-shaped worked examples (`forecaster`, `evaluator`,
+`alternative-harness`) under `examples/external-restorer-impls/`,
+exercising the loader contract end-to-end. The §3.6
+`@jinn-network/restorer-sdk` package is promoted from "follow-up" to a
+Phase A.2 hard acceptance criterion.
+
 ### 7.3 Open questions deferred
 
 - Whether `ExternalRestorerEnv` should carry `network` as an enum
