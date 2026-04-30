@@ -237,6 +237,25 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * Optional gas runway override for bootstrap/top-up targets (wei string).
+   * Used by Docker testnet acceptance to match the bundled faucet budget.
+   * Env: JINN_MIN_EOA_GAS_WEI
+   */
+  minEoaGasWei: z
+    .string()
+    .regex(/^\d+$/, 'must be a non-negative integer string')
+    .optional(),
+
+  /**
+   * Optional Safe ETH target override for bootstrap/top-up targets (wei string).
+   * Env: JINN_MIN_SAFE_ETH_WEI
+   */
+  minSafeEthWei: z
+    .string()
+    .regex(/^\d+$/, 'must be a non-negative integer string')
+    .optional(),
+
+  /**
    * Operator-controlled impl dispatch for the restorer engine.
    *
    * Wired by daemon (jinn-mono-bv5); engine consumes via RestorerImplRegistry config.
@@ -453,6 +472,12 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MASTER_ETH_DAILY_WEI']) {
     merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
   }
+  if (env['JINN_MIN_EOA_GAS_WEI']) {
+    merged.minEoaGasWei = env['JINN_MIN_EOA_GAS_WEI'].trim();
+  }
+  if (env['JINN_MIN_SAFE_ETH_WEI']) {
+    merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
+  }
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
   if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
@@ -599,6 +624,8 @@ const TRACKED_ENV_VARS = [
   'JINN_DEBUG',
   'JINN_RUN_LEGACY_MIGRATIONS',
   'JINN_MASTER_ETH_DAILY_WEI',
+  'JINN_MIN_EOA_GAS_WEI',
+  'JINN_MIN_SAFE_ETH_WEI',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',

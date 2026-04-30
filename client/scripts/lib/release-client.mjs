@@ -485,7 +485,7 @@ export function releaseGateSteps(skipAcceptance = false) {
   ];
   if (!skipAcceptance) {
     steps.push(
-      ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator', 'yarn', ['setup:testnet-acceptance-operator'], 'clientRoot'],
+      ['gate-acceptance-setup', 'yarn setup:testnet-acceptance-operator --bootstrap', 'yarn', ['setup:testnet-acceptance-operator', '--bootstrap'], 'clientRoot'],
       ['gate-acceptance', 'yarn release:testnet-acceptance', 'yarn', ['release:testnet-acceptance'], 'clientRoot'],
     );
   }

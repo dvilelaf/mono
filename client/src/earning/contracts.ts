@@ -158,6 +158,31 @@ export interface ChainConfig {
   routerClaimDeliveryVersion: 'v1' | 'v2';
 }
 
+export interface ChainGasOverrides {
+  minEoaGasWei?: string;
+  minSafeEthWei?: string;
+}
+
+function parseWeiOverride(value: string | undefined, name: string): bigint | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${name} must be a non-negative wei integer string`);
+  }
+  return BigInt(value);
+}
+
+export function applyChainGasOverrides(config: ChainConfig, overrides: ChainGasOverrides): ChainConfig {
+  const minEoaGasEth = parseWeiOverride(overrides.minEoaGasWei, 'minEoaGasWei');
+  const minSafeEth = parseWeiOverride(overrides.minSafeEthWei, 'minSafeEthWei');
+  if (minEoaGasEth !== undefined) {
+    config.minEoaGasEth = minEoaGasEth;
+  }
+  if (minSafeEth !== undefined) {
+    config.minSafeEth = minSafeEth;
+  }
+  return config;
+}
+
 interface ChainConfigOverrides {
   testnetL2DeploymentPath?: string;
   testnetL2TokenDeploymentPath?: string;

@@ -16,7 +16,8 @@ export function normalizeTags(rawTags) {
   }
 }
 
-export function summarizeArtifactRows(rows, desiredStateIds) {
+export function summarizeArtifactRows(rows, desiredStateIds, options = {}) {
+  const cycleMode = options.cycleMode ?? 'restoration-and-evaluation';
   const byRestorationJob = Object.fromEntries(
     desiredStateIds.map((id) => [id, {
       restorationArtifacts: 0,
@@ -53,7 +54,8 @@ export function summarizeArtifactRows(rows, desiredStateIds) {
   const completedCycles = desiredStateIds.reduce((sum, desiredStateId) => {
     const state = byRestorationJob[desiredStateId];
     return sum + (
-      state.successfulRestorations > 0 && state.successfulEvaluations > 0
+      state.successfulRestorations > 0 &&
+        (cycleMode === 'restoration' || state.successfulEvaluations > 0)
         ? 1
         : 0
     );

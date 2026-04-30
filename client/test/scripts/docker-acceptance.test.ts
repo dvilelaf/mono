@@ -139,5 +139,8 @@ describe('artifact cycle summaries', () => {
     expect(summary.byRestorationJob.one.successfulEvaluations).toBe(1);
     expect(summary.byRestorationJob.two.successfulRestorations).toBe(1);
     expect(summary.byRestorationJob.two.successfulEvaluations).toBe(0);
+
+    const restorationOnly = summarizeArtifactRows(summary.rows, ['one', 'two'], { cycleMode: 'restoration' });
+    expect(restorationOnly.completedCycles).toBe(2);
   });
 });

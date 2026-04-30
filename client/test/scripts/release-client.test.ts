@@ -6,6 +6,7 @@ import {
   clientReleaseTag,
   parseStableVersion,
   redactSecrets,
+  releaseGateSteps,
   runRelease,
 } from '../../scripts/lib/release-client.mjs';
 
@@ -125,6 +126,12 @@ describe('release-client helpers', () => {
     expect(redacted).not.toContain('sk-ant-oat01-secret');
     expect(redacted).toContain('CLAUDE_CODE_OAUTH_TOKEN=[REDACTED]');
     expect(redacted).toContain('JINN_PASSWORD=[REDACTED]');
+  });
+
+  it('bootstraps the Docker acceptance operator during release gates', () => {
+    const setup = releaseGateSteps(false).find((step: { id: string }) => step.id === 'gate-acceptance-setup');
+
+    expect(setup?.args).toEqual(['setup:testnet-acceptance-operator', '--bootstrap']);
   });
 });
 

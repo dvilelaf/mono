@@ -44,22 +44,16 @@ export function resolveAcceptanceRpcUrl(env = process.env) {
 }
 
 export function buildAcceptanceDesiredStates(runIdSuffix) {
-  return [
-    {
-      id: `release-acceptance-${runIdSuffix}-1`,
-      description:
-        'The Jinn client service is healthy and operational. '
-        + 'Confirm the service is running by checking its status via the available tools, '
-        + 'then report that the service is healthy.',
-    },
-    {
-      id: `release-acceptance-${runIdSuffix}-2`,
-      description:
-        'A basic connectivity check has been performed. '
-        + 'Verify the protocol tools are reachable and responsive, '
-        + 'then report that connectivity is confirmed.',
-    },
+  const descriptions = [
+    'The Jinn client service is healthy and operational. Confirm the service is running by checking its status via the available tools, then report that the service is healthy.',
+    'A basic connectivity check has been performed. Verify the protocol tools are reachable and responsive, then report that connectivity is confirmed.',
+    'The release acceptance daemon has durable state available. Inspect the daemon status and report that the fleet state is available.',
+    'The release acceptance operator can read recent history. Inspect recent history and report that the history surface is responsive.',
   ];
+  return descriptions.map((description, index) => ({
+    id: `release-acceptance-${runIdSuffix}-${index + 1}`,
+    description,
+  }));
 }
 
 /**
@@ -78,6 +72,11 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     rewardClaimIntervalMs: 0,
     pollIntervalMs: toInt(env['JINN_TESTNET_ACCEPTANCE_POLL_INTERVAL_MS'], 5000),
     targetServices: toInt(env['JINN_TESTNET_ACCEPTANCE_TARGET_SERVICES'], 1),
+    minEoaGasWei: env['JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI'] ?? '1000000000000000',
+    minSafeEthWei: env['JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI'] ?? '200000000000000',
+    restorers: {
+      wrapWith: null,
+    },
     desiredStates: buildAcceptanceDesiredStates(runIdSuffix),
   };
 

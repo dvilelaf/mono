@@ -39,6 +39,7 @@ const composeService = 'jinn-acceptance-daemon';
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_POLL_MS = 15_000;
 const DEFAULT_TARGET_CYCLES = 2;
+const DOCKER_ACCEPTANCE_CYCLE_MODE = 'restoration';
 
 function printHelp() {
   console.log(`Usage: node scripts/testnet-acceptance-docker.mjs [options]
@@ -493,7 +494,9 @@ async function main() {
     const baselineRewards = parseJsonStdout(runJinn(['rewards', '--json'], '12-rewards-before').stdout, 'rewards-before');
     const baselineHistory = parseJsonStdout(runJinnRaw(['history', '--limit', '500', '--json'], '13-history-before').stdout, 'history-before');
     const baselineRows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '14-artifacts-before'));
-    const baselineArtifacts = summarizeArtifactRows(baselineRows, desiredStateIds);
+    const baselineArtifacts = summarizeArtifactRows(baselineRows, desiredStateIds, {
+      cycleMode: DOCKER_ACCEPTANCE_CYCLE_MODE,
+    });
     writeJson(join(evidenceDir, 'baseline-summary.json'), {
       historyCounts: countHistoryKinds(baselineHistory),
       desiredStateIds,
@@ -541,7 +544,9 @@ async function main() {
     while (Date.now() - pollStartedAt < timeoutMs) {
       const status = parseJsonStdout(runJinn(['status', '--json'], '17-status-poll').stdout, 'status-poll');
       const rows = queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '17-artifacts-poll'));
-      const artifactProgress = summarizeArtifactRows(rows, desiredStateIds);
+      const artifactProgress = summarizeArtifactRows(rows, desiredStateIds, {
+        cycleMode: DOCKER_ACCEPTANCE_CYCLE_MODE,
+      });
       const snapshot = {
         at: new Date().toISOString(),
         desiredStateIds,
@@ -579,6 +584,7 @@ async function main() {
     const artifactsAfter = summarizeArtifactRows(
       queryDockerArtifactRows(composeEnvPath, desiredStateIds, join(evidenceDir, '24-artifacts-after')),
       desiredStateIds,
+      { cycleMode: DOCKER_ACCEPTANCE_CYCLE_MODE },
     );
     writeJson(join(evidenceDir, '24-artifacts-after.json'), artifactsAfter);
 

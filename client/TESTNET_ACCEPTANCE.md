@@ -83,15 +83,13 @@ These are intentionally distinct from the normal operator compose volumes.
    cp -n .env.acceptance.example .env.acceptance
    set -a && . ./.env && set +a
    ```
-2. One-time setup and funding checklist:
-   ```bash
-   yarn setup:testnet-acceptance-operator
-   ```
-3. Fund what `fund-requirements` printed, then finish bootstrap:
+2. One-time setup and bootstrap. On Base Sepolia, bootstrap attempts the
+   bundled CDP faucet automatically; manual ETH funding is only a fallback if
+   the faucet is unavailable or rate-limited:
    ```bash
    yarn setup:testnet-acceptance-operator --bootstrap
    ```
-4. Authenticate Claude for Docker (one-time, on your host machine):
+3. Authenticate Claude for Docker (one-time, on your host machine):
    ```bash
    claude setup-token
    ```
@@ -103,11 +101,11 @@ These are intentionally distinct from the normal operator compose volumes.
    infrastructure.
    Do not put this only in `.acceptance/docker-compose.env`; the next run will
    overwrite that file.
-5. Run the steady-state release gate:
+4. Run the steady-state release gate:
    ```bash
    yarn release:testnet-acceptance
    ```
-6. Review `client/acceptance-runs/<timestamp>-<runId>/summary.json`.
+5. Review `client/acceptance-runs/<timestamp>-<runId>/summary.json`.
 
 ## First-time setup
 
@@ -127,11 +125,31 @@ That script:
 - initializes the operator keystore inside `jinn-acceptance-data-volume`
 - prints Base Sepolia funding requirements
 
-After funding, finish bootstrap:
+To complete bootstrap, run:
 
 ```bash
 yarn setup:testnet-acceptance-operator --bootstrap
 ```
+
+On Base Sepolia, `bootstrap` attempts to fund the master wallet through the
+bundled CDP faucet. If the faucet is unavailable, rate-limited, or still cannot
+reach the bootstrap floor, the command prints the remaining manual funding
+requirement and can be re-run after funding.
+
+Docker acceptance sets testnet-specific gas floors in
+`client/.acceptance/config.json` (`minEoaGasWei=0.001 ETH`,
+`minSafeEthWei=0.0002 ETH`) so the release gate matches the bundled faucet
+budget. Override them with `JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI` and
+`JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI` only when intentionally testing a
+larger runway.
+
+The generated acceptance config also sets `restorers.wrapWith: null` and posts
+four run-scoped health-check jobs while the gate requires two completed cycles.
+That keeps the release gate focused on the legacy health-check flow and gives
+the public testnet room for an occasional claim race with another operator.
+For Docker acceptance, a completed cycle is a successful delivered restoration
+artifact for one of those run-scoped health checks; the legacy health-check flow
+does not require a separate `evaluation-verdict` artifact.
 
 Then authenticate Claude for Docker (on your host machine, one-time):
 

@@ -88,8 +88,9 @@ npx @jinn-network/client@canary --help
    cd client
    yarn release:client --prepare
    ```
-   This runs the local client gates, contract gates, Docker testnet acceptance,
-   and writes a report under `client/release-runs/<version>-<timestamp>/`.
+   This runs the local client gates, contract gates, Docker testnet acceptance
+   setup with bootstrap, the Docker acceptance gate itself, and writes a report
+   under `client/release-runs/<version>-<timestamp>/`.
 4. Publish from that report:
    ```bash
    yarn release:client --publish --resume release-runs/<version>-<timestamp>

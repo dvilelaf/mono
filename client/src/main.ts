@@ -27,7 +27,7 @@ import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
-import { DEFAULT_TESTNET_ARTIFACTS, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
+import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
 import { FleetStateStore } from './earning/store.js';
 import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
@@ -67,12 +67,15 @@ const CONFIG_PATH = getConfigPathFromArgs();
 const config = loadConfig(CONFIG_PATH);
 
 const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
-const CHAIN_CONFIG = getChainConfig(NETWORK_CHAIN, {
+const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
   testnetL2DeploymentPath: config.testnetL2DeploymentPath,
   testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
   testnetMechDeploymentPath: config.testnetMechDeploymentPath,
   testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
   testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
+}), {
+  minEoaGasWei: config.minEoaGasWei,
+  minSafeEthWei: config.minSafeEthWei,
 });
 const MESSENGER_MODE_EXPLICIT =
   process.env['JINN_MESSENGER_MODE'] !== undefined ||
@@ -180,6 +183,8 @@ async function bootstrap(): Promise<{
     testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+    minEoaGasWei: config.minEoaGasWei,
+    minSafeEthWei: config.minSafeEthWei,
     pollIntervalMs: config.pollIntervalMs,
   });
 
