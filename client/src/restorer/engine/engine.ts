@@ -883,8 +883,17 @@ export class RestorationEngine {
 
     // 5. Assemble + sign envelope → envelope CID now known.
     // trajectoryRef was computed in step 1b above (emitted after artifact upload).
+    // Per the post-gating-fix schema, trajectory references carry sha256 + access
+    // (the operator HTTP endpoint that serves the bytes). Phase 3 wires real
+    // operator config; Phase 2 falls back to a JINN_OPERATOR_PUBLIC_ENDPOINT env
+    // stopgap so tests / dev runs work unchanged.
+    const operatorEndpointForTraj =
+      process.env.JINN_OPERATOR_PUBLIC_ENDPOINT ?? 'http://localhost:7331';
     const envelopeTrajectory = trajectoryRef
-      ? { cid: trajectoryRef.cid, sha256: trajectoryRef.sha256 }
+      ? {
+          sha256: trajectoryRef.sha256,
+          access: { endpoint: operatorEndpointForTraj, priceUsdc: '0' },
+        }
       : null;
 
     // evidenceTier reflects the on-chain commitment state at the time of signing.
