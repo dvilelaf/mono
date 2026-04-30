@@ -49,6 +49,8 @@ Three things to notice about that framing.
 
 **"Knowledge," not "outputs."** A prediction, a swap, a scored answer is an output. The trajectory that produced it — context, plan, prompts, tool calls, sources, intermediate observations, failed branches, evaluator notes, outcome proof — is the knowledge. Pricing knowledge dominates pricing outputs because the output is consumed once and the knowledge is reusable forever.
 
+This isn't pricing knowledge *instead* of caring about outputs — it's pricing knowledge *because* it makes outputs better. When operators read each other's trajectories to inform their own work, predictions get more accurate, trades better-timed, answers more reliable, decisions better-grounded. The corpus compounds *and* the outputs the network delivers get better. Both are true; they reinforce each other.
+
 **"Anyone."** No buyer classes. No "labs vs. end users vs. agents." Anyone with a wallet who wants knowledge issues a request and pays. The market does not care who they are or why. This is the property that makes the compounding loop fall out for free — operators-as-buyers don't need a separate mechanism, they just use the same primitive everyone else uses.
 
 **"Compounds faster than closed labs."** Open population × open corpus × producer-consumer overlap > closed institution × internal corpus × employee compounding. The structural advantage runs in two dimensions: more people producing, and producing happens against a richer base than any one institution can match. Closed systems cannot replicate this because the moment they open the loop, they stop being closed.
@@ -174,7 +176,7 @@ Phase B does not gate Phase A's launch. The optimistic-mode loop runs in low-tru
 
 | Sub-phase | Gate |
 |---|---|
-| **Mainnet readiness** | 15–20 distinct people meeting at least one of the four bars in #57 §1.1 (component contribution / sustained operation / substantive code contribution / sustained substantive participation) simultaneously. |
+| **Mainnet readiness** | Three conditions simultaneously: (a) 15–20 distinct people meeting at least one of the four bars in #57 §1.1 (community formation); (b) Phase B trust infrastructure has shipped at least the verifiability tier (B.1) and the first stake-based evaluator run (B.2); (c) **the security audit of the deployed contract stack is complete with findings addressed and signed off** (cross-cutting workstream below). |
 | **C.1 Flagship marketplace API** | First non-agent buyer (a lab, a researcher, an end-user) transacts through the API. *The flagship is the API, not the UI — UIs are downstream.* |
 
 ### Phase D — Ecosystem (no hard gate; emergent)
@@ -239,6 +241,7 @@ Phase A consolidates into roughly two new canonical specs (umbrella spec coverin
 | Telemetry / metrics on compounding signal AND Brier accuracy | Phase A acceptance requires this; named workstream |
 | Operator outreach to component-builders | Phase A.4 → ongoing |
 | Operator broadcast (forecast accuracy posts) | Starts when A.3 dashboard ships |
+| **Security audit of the deployed contract stack** | Tangential to the substrate vision but **necessary for mainnet readiness**. Runs parallel to Phase A/B. Workstream has three rough stages: (1) **tooling survey** — what audit tools are available now, including AI-enabled analysers (Slither, Mythril, newer LLM-driven static-analysis tools); (2) **audit plan** — scope, methodology, prioritisation, draws on community expertise (Alex, Andre); (3) **execution** — running the audit, addressing findings, sign-off. Has its own spec and is gated by the mainnet readiness criterion below. |
 | Phase 1a/1b roadmap reconciliation | Operational, not a spec |
 | **Future discussion: evaluator economics** | Opens parallel to / triggered by Phase B research |
 | **Future discussion: ve-JINN demand-direction** | Tokenomics design surface; opened separately |
@@ -286,6 +289,7 @@ This document is the framing artifact. It commits to the vision, the three-layer
 - **Evaluator economics design.** Phase B research workstream + parallel future discussion.
 - **Permission-granting / outcome-execution-on-buyer-resources.** Deliberately *not* part of the protocol. Outcome-acting-in-the-world is the buyer's concern, off-protocol.
 - **THESIS.md updates.** Possible §5b addition (per #57) lives in its own spec PR.
+- **Security audit plan + tooling shortlist.** The audit workstream is named here as mainnet-readiness-blocking; the actual plan, tooling shortlist, scope, and sign-off process are owned by an audit lead and live in their own spec, drawing on community expertise.
 
 ---
 

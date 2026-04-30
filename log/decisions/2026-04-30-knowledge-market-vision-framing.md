@@ -312,6 +312,9 @@ This framing is revisited if any of the following surface:
 - New canonical spec for the corpus library design (Phase A umbrella).
 - New canonical spec for the default-harness plug-in surface (Phase A.2).
 - New research note + canonical spec for evaluator economics (Phase B.2).
+- New canonical spec for the security audit workstream (audit plan +
+  tooling shortlist) — drawn up by audit lead, draws on community
+  expertise (Alex, Andre); gates mainnet readiness.
 - Future discussion thread for ve-JINN demand-direction.
 - Possible THESIS.md §5b update per #57 — naming the
   producer-consumer-overlap mechanism explicitly.
@@ -344,6 +347,17 @@ This framing is revisited if any of the following surface:
 - "No royalties / no DRM" was a Captain-led ratification mid-sitting
   that dramatically simplified the substrate. Worth being explicit
   in the final framing.
+- "Outputs improve as a consequence of pricing knowledge" was a
+  Captain-led tightening of the §2 thesis-line treatment. The two
+  framings (knowledge-as-priced-asset, outputs-improve-as-consequence)
+  are not opposed; they reinforce. Worth landing explicitly because
+  readers might otherwise assume "knowledge market" means "we don't
+  care about outcomes."
+- Security audit of the deployed contract stack added as a cross-
+  cutting workstream gating mainnet readiness. Tangential to the
+  substrate vision but necessary; the discussion draft would have
+  been incomplete without surfacing it. Draws on AI-enabled audit
+  tooling and community expertise.
 - The relationship to #57: the two discussions are *paired*, not
   competing. This document is the substrate vision; #57 is the GTM.
   The technical spec follow-up #57 asks for sits underneath both.
