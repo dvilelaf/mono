@@ -63,6 +63,18 @@ export interface RestorerEnv {
    */
   externalImpls?: readonly RestorerImpl[];
   /**
+   * Pre-built serialised slot registry for Path 1 plug-ins (the bundled
+   * claude-code-learner impl's plug-in surface). Built once in main.ts
+   * by calling `loadPlugIns` + `serialiseRegistry` against
+   * `config.learnerPlugIns[]`. Threaded into the learner shim so it can
+   * forward the registry into the harness via `JINN_SLOT_REGISTRY_JSON`.
+   *
+   * See spec/2026-04-30-plug-in-surface.md §4 and plan
+   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md
+   * Tasks 4–5.
+   */
+  slotRegistryJson?: string;
+  /**
    * Impl names to filter out of the returned list entirely (different from
    * `RestorerImplRegistry.disabled`, which only suppresses dispatch). Useful
    * when a fleet wants to construct without paying the cost of an in-repo
@@ -186,7 +198,10 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
   });
-  const learnerShim = new ClaudeCodeLearnerImpl({ adapter: learnerAdapter });
+  const learnerShim = new ClaudeCodeLearnerImpl({
+    adapter: learnerAdapter,
+    slotRegistryJson: env.slotRegistryJson,
+  });
   const learnerWrapper = new ClaudeCodeLearnerWrapper({
     shim: learnerShim,
     specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself

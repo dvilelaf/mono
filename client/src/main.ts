@@ -549,6 +549,33 @@ export async function main(): Promise<DaemonStartupInfo> {
     }
   }
 
+  // ── Path 1 plug-ins (claude-code-learner slot registry) ──────────────────────
+  // Load operator-installed Path 1 plug-ins from `config.learnerPlugIns[]`,
+  // assemble the in-memory slot registry, and serialise it for hand-off to
+  // the learner shim (which forwards via env to the spawned harness).
+  // See spec/2026-04-30-plug-in-surface.md §4.
+  let slotRegistryJson: string | undefined;
+  const learnerPlugIns = config.learnerPlugIns ?? [];
+  if (learnerPlugIns.length > 0) {
+    const { loadPlugIns, serialiseRegistry } = await import(
+      './restorer/plug-ins/index.js'
+    );
+    const learnerVersion = '0.1.0'; // bundled plugin version (synced with claude-code-learner/.claude-plugin/plugin.json)
+    const result = await loadPlugIns({
+      entries: learnerPlugIns,
+      learnerVersion,
+    });
+    for (const w of result.warnings) console.warn(`[plug-ins] ${w}`);
+    for (const e of result.errors)
+      console.error(`[plug-ins] ${e.plugInName}: ${e.reason}`);
+    slotRegistryJson = JSON.stringify(
+      serialiseRegistry(result.registry, learnerVersion),
+    );
+    console.log(
+      `[main] Loaded ${learnerPlugIns.length - result.errors.length}/${learnerPlugIns.length} Path 1 plug-in(s)`,
+    );
+  }
+
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
   for (const impl of buildRestorerImpls({
     rpcUrl: config.rpcUrl,
@@ -563,6 +590,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     implStateDirRoot: config.engine.implStateDirRoot,
     externalImpls,
     disabledNames: config.restorers?.disabled,
+    slotRegistryJson,
   })) {
     implRegistry.register(impl);
   }

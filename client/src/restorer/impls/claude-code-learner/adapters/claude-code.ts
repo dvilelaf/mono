@@ -128,6 +128,10 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
     const env = buildAgentEnv({
       IMPL_STATE_DIR: inputs.implStateDir,
+      // Surfaced for the session-start hook so Path 1 plug-in slot
+      // registry can be materialised into workingDir/.coordinator/slots.json.
+      WORKING_DIR: inputs.workingDir,
+      JINN_WORKING_DIR: inputs.workingDir,
       JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT: pluginRoot,
       ...(inputs.adapterEnv ?? {}),
     });
