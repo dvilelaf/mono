@@ -159,6 +159,21 @@ export interface RestorationEngineOptions {
     client: ReputationRegistryClient;
     resolveAgentId: (manifestHash: `0x${string}`) => Promise<ResolvedAgent | null>;
   };
+  /**
+   * Operator-local artifact serving config (Phase A.1, jinn-mono-vy37.1.3).
+   *
+   * `publicEndpoint` is the externally-reachable base URL stamped onto every
+   * artifact + trajectory `access.endpoint`. `defaultPriceUsdc` and
+   * `perArtifactTypePrice` are pinned here so the engine doesn't have to thread
+   * them through `packagingDeps` separately for trajectory refs.
+   *
+   * Required for production wiring; tests may construct a synthetic value.
+   */
+  operatorConfig?: {
+    publicEndpoint: string;
+    defaultPriceUsdc: string;
+    perArtifactTypePrice: Record<string, string>;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -182,6 +197,7 @@ export class RestorationEngine {
   protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
   protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
+  protected readonly operatorConfig: RestorationEngineOptions['operatorConfig'];
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -216,6 +232,7 @@ export class RestorationEngine {
     this.implRegistry = opts.implRegistry;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
+    this.operatorConfig = opts.operatorConfig;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -889,11 +906,14 @@ export class RestorationEngine {
     // 5. Assemble + sign envelope → envelope CID now known.
     // trajectoryRef was computed in step 1b above (emitted after artifact upload).
     // Per the post-gating-fix schema, trajectory references carry sha256 + access
-    // (the operator HTTP endpoint that serves the bytes). Phase 3 wires real
-    // operator config; Phase 2 falls back to a JINN_OPERATOR_PUBLIC_ENDPOINT env
-    // stopgap so tests / dev runs work unchanged.
+    // (the operator HTTP endpoint that serves the bytes). Phase 3 (jinn-mono-vy37.1.3)
+    // sources this from the engine's operatorConfig; absent operatorConfig (e.g. test
+    // fixtures) falls back to packagingDeps.operatorEndpoint, then to a localhost
+    // sentinel so suites that don't exercise the publish path still pack cleanly.
     const operatorEndpointForTraj =
-      process.env.JINN_OPERATOR_PUBLIC_ENDPOINT ?? 'http://localhost:7331';
+      this.operatorConfig?.publicEndpoint
+      ?? this.packagingDeps?.operatorEndpoint
+      ?? 'http://localhost:7331';
     const envelopeTrajectory = trajectoryRef
       ? {
           sha256: trajectoryRef.sha256,

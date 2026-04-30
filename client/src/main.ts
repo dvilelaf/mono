@@ -536,13 +536,30 @@ export async function main(): Promise<DaemonStartupInfo> {
   // SQLite) and served via the operator's HTTP server with x402 gating per
   // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
   // The `store` field is filled by Daemon (which owns the SQLite handle); here
-  // we just configure the endpoint + price defaults. Phase 3 plumbs operator
-  // config into the daemon config schema; Phase 2 honours env stopgaps.
+  // we just configure the endpoint + price defaults from `config.operator`
+  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
+  // block fall back to the daemon's local API port so dev/test runs still work
+  // — but the resulting envelopes won't be reachable from outside the host.
+  const operatorPublicEndpoint =
+    config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
+  const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
+  const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
+  if (!config.operator?.publicEndpoint) {
+    console.warn(
+      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
+        'External evaluators will not be able to fetch artifacts from this operator. ' +
+        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
+    );
+  }
   const packagingDeps = {
-    operatorEndpoint:
-      process.env.JINN_OPERATOR_PUBLIC_ENDPOINT ?? `http://localhost:${config.apiPort}`,
-    defaultPriceUsdc: process.env.JINN_OPERATOR_DEFAULT_PRICE_USDC ?? '0',
-    perArtifactTypePrice: {} as Record<string, string>,
+    operatorEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
+  };
+  const operatorConfig = {
+    publicEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key
@@ -767,6 +784,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       implRegistry,
       identityPublisher,
       reputationFeedback,
+      operatorConfig,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
