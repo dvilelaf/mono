@@ -1,6 +1,25 @@
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 
+/**
+ * SQLite stores `artifacts.created_at` via the default CURRENT_TIMESTAMP
+ * format: `YYYY-MM-DD HH:MM:SS` (space separator, no fractional seconds, no
+ * trailing 'Z'). ISO 8601 timestamps from JS (e.g. new Date().toISOString())
+ * use `T` and `Z`. SQLite's TEXT comparison is lexicographic, and 'T' > ' ',
+ * so `created_at >= '2026-04-30T10:18:50.041Z'` excludes EVERY row dated
+ * `'2026-04-30 ...'` regardless of clock order.
+ *
+ * Convert ISO 8601 to the SQLite TEXT format before binding so the
+ * comparison is meaningful.
+ */
+export function isoToSqliteTimestamp(iso) {
+  if (typeof iso !== 'string' || iso.length === 0) return iso;
+  // Match `YYYY-MM-DDTHH:MM:SS(.sss)?Z?` and rewrite to `YYYY-MM-DD HH:MM:SS`.
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?$/);
+  if (!m) return iso;
+  return `${m[1]} ${m[2]}`;
+}
+
 export function normalizeTags(rawTags) {
   if (Array.isArray(rawTags)) {
     return rawTags.map((tag) => String(tag));
@@ -156,7 +175,7 @@ export function readRunWindowArtifactProgress(dbPath, runStartAt) {
         WHERE desired_state_id LIKE 'pred-v0-auto-%'
           AND created_at >= ?
         ORDER BY created_at ASC`,
-    ).all(runStartAt);
+    ).all(isoToSqliteTimestamp(runStartAt));
     return summarizeRunWindowArtifacts(rows, runStartAt);
   } finally {
     db.close();

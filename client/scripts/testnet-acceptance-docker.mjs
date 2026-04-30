@@ -30,7 +30,7 @@ import {
   resolveDockerAcceptanceBaseEnv,
 } from './lib/docker-acceptance.mjs';
 import { PASSWORD_RESOLUTION_HINT, resolveAcceptancePassword } from './lib/resolve-acceptance-password.mjs';
-import { summarizeRunWindowArtifacts } from './lib/acceptance-artifacts.mjs';
+import { isoToSqliteTimestamp, summarizeRunWindowArtifacts } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -267,7 +267,7 @@ function queryDockerArtifactRows(composeEnvPath, runStartAt, evidenceBase) {
       '--input-type=module',
       '-e',
       script,
-      runStartAt,
+      isoToSqliteTimestamp(runStartAt),
     ]),
     {
       cwd: clientRoot,

@@ -13,7 +13,7 @@ import {
   hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from '../../scripts/lib/docker-acceptance.mjs';
-import { summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
+import { isoToSqliteTimestamp, summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
 
 const tempDirs: string[] = [];
 
@@ -219,5 +219,27 @@ describe('summarizeRunWindowArtifacts', () => {
     const summary = summarizeRunWindowArtifacts([], runStartAt);
     expect(summary.completedCycles).toBe(0);
     expect(summary.byDesiredStateId).toEqual([]);
+  });
+});
+
+describe('isoToSqliteTimestamp', () => {
+  it('rewrites ISO 8601 with milliseconds and Z to SQLite TEXT format', () => {
+    expect(isoToSqliteTimestamp('2026-04-30T10:18:50.041Z')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('rewrites ISO 8601 without milliseconds to SQLite TEXT format', () => {
+    expect(isoToSqliteTimestamp('2026-04-30T10:18:50Z')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('leaves SQLite-style timestamps unchanged', () => {
+    expect(isoToSqliteTimestamp('2026-04-30 10:18:50')).toBe('2026-04-30 10:18:50');
+  });
+
+  it('preserves comparison ordering against SQLite-stored timestamps', () => {
+    // Lexicographic check: with the bug, '2026-04-30T10:18:50.041Z' > '2026-04-30 10:35:00'
+    // (because 'T' > ' '), so a row dated 10:35 would be excluded by `>= '2026-04-30T10:18...'`.
+    // After conversion, '2026-04-30 10:18:50' < '2026-04-30 10:35:00' as expected.
+    const since = isoToSqliteTimestamp('2026-04-30T10:18:50.041Z');
+    expect(since < '2026-04-30 10:35:06').toBe(true);
   });
 });
