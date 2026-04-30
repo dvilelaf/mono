@@ -6,11 +6,11 @@ verb: steer
 artifact: spec/2026-04-30-knowledge-market-vision-discussion.md (discussion draft)
 captain: ritsukai
 operator: jinn-mono/crew/opus (jinn-mono-3lc)
-status: ratified 2026-04-30 — vision sitting; framing chosen over alternatives
+status: in-flight 2026-04-30 — vision sitting; framing iterated in chat
 flare_id: null
 ---
 
-# DR-2026-04-30 — Steer Jinn's vision toward "knowledge market with internal + external buyer classes"
+# DR-2026-04-30 — Steer Jinn's vision toward "knowledge market with three-layer cut"
 
 ## Context
 
@@ -33,137 +33,194 @@ of [discussion #41](https://github.com/Jinn-Network/mono/discussions/41)
 ("Sharpening Jinn's value proposition"), structured as **end-state →
 phases → workstreams + related specs**.
 
+The framing went through several iterations during the sitting:
+
+- An initial sketch with "two buyer classes" (external + internal) was
+  flattened to a uniform buy primitive (anyone is a buyer; no classes).
+- A two-protocol-primitives model (outcome-intent + knowledge-query)
+  was proposed, then collapsed by the Captain toward a single
+  user-facing request shape with two latency paths.
+- That collapse was then sharpened by recognising the cut belongs at
+  the **app** layer, not the protocol layer — the protocol genuinely
+  has two distinct mechanisms (post-intent and read-corpus); apps may
+  unify or split them as a product choice.
+- The subgraph was clarified as **infrastructure**, not protocol —
+  yielding a three-layer cut: protocol / infrastructure / apps.
+- Permission-granting / outcome-execution-on-buyer-resources was
+  scoped *out* of this discussion entirely, deliberately.
+
 ## Decision
 
-**Steer Jinn's framing toward the knowledge-market vision** as captured
-in `spec/2026-04-30-knowledge-market-vision-discussion.md`. The four
+**Steer Jinn's framing toward the knowledge-market vision with a
+three-layer cut**, captured in
+`spec/2026-04-30-knowledge-market-vision-discussion.md`. The five
 load-bearing framing choices ratified during the sitting:
 
-**1. End-state is the knowledge market, not the harness substrate.**
-Jinn is "the open verifiable market for agentic execution knowledge."
-The protocol is canonical; the self-improving harness is a *class of
-solutions that runs on Jinn*, not a parallel product surface. This
-preserves THESIS.md as canonical and answers thread (2) of the dispatch:
-the harness pattern stays underneath the protocol.
+**1. End-state is the knowledge market.** Jinn is "the open verifiable
+market for agentic execution knowledge." Anyone with a wallet can buy
+knowledge from the corpus. No buyer classes — humans, labs, agents,
+end users all use the same primitive. The compounding loop falls out
+automatically because agents are buyers like everyone else.
 
-**2. One market, any buyer class.** External buyers (labs, vertical AI
-companies, regulated enterprises, end users) and internal buyers (agents
-within the network learning from each other) transact on the *same*
-market substrate — same envelopes, same gating, same x402 rails, same
-evaluator scores, same reputation. They differ only in consumption
-pattern and price elasticity, not in mechanism. This unifies #41's
-external-data-substrate framing with the agent-to-agent compounding loop
-the Captain emphasised.
+**2. One uniform buy primitive, no classes.** Earlier draft separated
+"external buyers" from "internal agents" as two classes. This
+separation is wrong — it obscures the structural point that the
+agent-to-agent compounding loop is a *consequence* of universal
+buyer access, not a separate mechanism. The primitive is one; agents
+are first-class participants without being a separate category.
 
-**3. Two demand-side primitives with deep symmetry.** Outcome-intent
-(producer-side: "do this work, deliver this outcome" — today's
-`JinnRouter` flow) and knowledge-query (consumer-side: "find/retrieve
-existing trajectories matching predicate P" — new). They share supply,
-storage, settlement rails, and trust signals; they diverge only at the
-demand layer. The internal agent-to-agent loop *requires* the
-knowledge-query primitive — outcome-intent latency and operator margin
-break the economics of mid-execution lookups.
+**3. Three layers: protocol / infrastructure / apps.** Jinn splits
+cleanly into:
+   - **Protocol** — on-chain contracts, envelope/manifest schemas,
+     signing/verification rules, tokenomics. Neutral, slow-changing.
+     Anyone can post intents at this layer (load-bearing for the
+     decentralisation claim).
+   - **Infrastructure** — subgraph indexers, storage backends, x402
+     facilitators, retrieval APIs. Replaceable, plural, *not*
+     load-bearing for decentralisation. Where the gating leak lives.
+   - **Apps** — user-facing surfaces. The first product on top is
+     the "knowledge marketplace" but multiple apps can coexist.
 
-**4. Default-learning-restorer is the canonical agent-as-buyer.** Its
+   Subgraph in particular is **infrastructure**, not protocol — it is
+   one canonical indexer over the protocol's public state, replaceable
+   by alternatives. Calling it protocol would centralise a piece
+   meant to be plural.
+
+**4. Two distinct protocol mechanisms, optional unification at app
+layer.** The protocol has two distinct mechanisms: posting an intent
+(production path → fresh trajectory commissioned, deferred, bounty-
+priced) and reading the corpus (retrieval path → existing trajectories,
+immediate, retrieval-priced). They have different freshness, latency,
+specificity, and price profiles. Apps may present them as one unified
+"ask Jinn for knowledge" surface or as two separate products. **This
+is a product choice, not a protocol decision.** The vision draft does
+not pre-commit.
+
+**5. Default-learning-restorer is the canonical agent-as-buyer.** Its
 Orient and Debrief phases are the natural consumption points for
-knowledge-query. It is not "one specialist impl"; it is the prototype
-that makes the internal loop economically real. Phase C of the
-sequencing is "wire the learner to the network retrieval API."
+network retrieval. Phase C of the sequencing is "wire the learner to
+the network retrieval API." It is not "one specialist impl"; it is
+the prototype that makes the agent-to-agent compounding loop
+operationally real once Phase A unblocks the path.
 
-The discussion draft also commits to a seven-layer architecture (Production,
-Verification & quality, Gated storage, Discovery & retrieval, Demand,
-Settlement & royalties, Reputation & memory) and a four-phase sequencing
-(A: close the gating leak + buyer-side path; B: knowledge-query primitive
-+ royalty splits; C: agent-as-buyer SDK + learner wiring; D: external
-ecosystem surfaces). These follow from the framing above and are the
-operational consequences of accepting it.
+The discussion draft also commits to a four-phase sequencing that
+follows from layer dependencies:
+
+- **Phase A** — close the gating leak (infrastructure) + promote
+  retrieval to network scope (infrastructure). Default new envelopes
+  to gated-at-zero so the path becomes structural before pricing
+  varies.
+- **Phase B** — royalty-split primitives (protocol) + canonical
+  knowledge-marketplace app MVP (app).
+- **Phase C** — agent-as-buyer SDK + default-learning-restorer wiring
+  (apps + integration).
+- **Phase D** — ecosystem of apps (mostly external builders;
+  alternative indexers; ve-JINN demand-direction).
 
 ## Options considered
 
-- **α1 — Knowledge-market end-state, harness underneath (chosen).**
-  Preserves THESIS.md canon, handles the internal-loop dimension via the
-  same market with two buyer classes, makes the harness pattern legible
-  as a class of operators rather than a separate product. Best fit with
-  existing thesis and #41 lineage.
+- **α1 — Knowledge-market end-state with three-layer cut (chosen).**
+  Preserves THESIS.md canon, surfaces the agent-to-agent loop as a
+  consequence of uniform buy access, and cleanly separates protocol
+  (neutral substrate) from infrastructure (operational stack) from
+  apps (where UX choices live). Best fit with existing thesis and
+  #41 lineage. Operationally it puts the bulk of new construction at
+  the app layer, which is the right shape — protocol should be slow
+  to change once correct.
 
 - **α2 — Vision-expansion: promote the self-improving harness pattern
-  into canonical thesis alongside the protocol.** Would require revising
-  THESIS.md to add a third pillar ("Jinn is the open substrate for self-
-  improving agent harnesses"). Rejected because the harness pattern is
-  a *consumer* of Jinn's market, not a parallel system. Putting it in
-  canon confuses the protocol-vs-implementation cut.
+  into canonical thesis alongside the protocol.** Would require
+  revising THESIS.md to add a third pillar. Rejected because the
+  harness pattern is a *class of operators that consume Jinn's
+  market*, not a parallel system. Putting it in canon confuses the
+  protocol-vs-implementation cut.
 
-- **α3 — Layered positioning: protocol stays canonical; ship a separate
-  "Jinn-powered self-improving harness substrate" product surface
-  ("Kubernetes for self-improving agents").** Rejected as premature
-  product proliferation; the same substrate is delivered structurally
-  by the knowledge-market frame without inventing a second brand.
+- **α3 — Layered positioning: ship a separate "Jinn-powered
+  self-improving harness substrate" product surface alongside the
+  protocol.** Rejected as premature product proliferation; the same
+  substrate is delivered structurally by the knowledge-market frame
+  with the three-layer cut.
 
-- **α4 — One primitive (Oak's framing in #41 thread): collapse
-  knowledge-query into outcome-intent semantically.** Rejected as a
-  user-experience mistake even though the abstraction is correct in the
-  limit. Operator margin and async latency on every lookup break the
-  internal loop, which is the load-bearing distinctive feature.
+- **α4 — Two protocol-level primitives (outcome-intent +
+  knowledge-query).** Rejected once the protocol/app cut clarified
+  that the unification choice belongs at the app layer, not the
+  protocol layer. The protocol genuinely has two distinct mechanisms;
+  what an app does with them is a product decision.
 
-α1 chosen because it preserves canon (THESIS.md unchanged), lands the
-internal-loop bet structurally rather than as a brand pivot, and yields
-a phasing where most of Phase A is surgical edits rather than new
-construction.
+- **α5 — Two buyer classes (external + internal) with shared
+  infrastructure.** Rejected as it obscures the actual point: the
+  internal compounding loop is a *consequence* of universal buy
+  access, not a separate buyer category requiring separate mechanics.
+
+α1 chosen because it preserves canon (THESIS.md unchanged), lands
+the internal-loop bet structurally, and yields a phasing where Phase
+A is surgical infrastructure work rather than new construction.
 
 ## Charter criterion
 
 **Principle 1 (decentralisation as edge) and Constraint 6 (legibility)**
-govern this choice. The knowledge-market framing makes the
-decentralisation thesis operationally concrete: the four properties
-(less extractive, more neutral, more composable, more efficient)
-manifest at specific layers — extraction at settlement, neutrality at
-the access layer, composability at component-level provenance,
-efficiency at direct buyer→creator payment. Legibility is served by
-phasing the work so each phase has a clean externally-visible
-deliverable rather than a long ambiguous build.
+govern this choice. The three-layer cut makes the decentralisation
+thesis operationally concrete: the four properties (less extractive,
+more neutral, more composable, more efficient) manifest at specific
+layers — extraction at the protocol's settlement primitives,
+neutrality at the protocol's open intent posting and infrastructure's
+plural indexers, composability at component-level provenance and the
+infrastructure-app boundary, efficiency at direct buyer→creator
+payment routing. Legibility is served by phasing the work so each
+phase has a clean externally-visible deliverable rather than a long
+ambiguous build.
 
 ## Door type and reversibility
 
-**Two-way, reversible-within-discussion.** This is a framing decision
-expressed as a discussion draft, not a code commit, contract change, or
-public commitment. Reversal cost is the cost of authoring a competing
-discussion draft; the sunk cost of code is zero. The most likely
-reversal vector is Oak (or another team member) arguing the
-one-primitive collapse should hold for v0 or that the layered-
-positioning option (α3) is worth the brand spend.
+**Two-way, reversible-within-discussion.** This is a framing
+decision expressed as a discussion draft, not a code commit, contract
+change, or public commitment. Reversal cost is the cost of authoring
+a competing discussion draft; the sunk cost of code is zero. The
+most likely reversal vectors are:
+
+- A team member arguing the unify-or-split decision should be made
+  at the protocol layer rather than left to apps;
+- Discovery during Phase A scoping that the gating-leak fix is
+  materially larger than "few-day surgical edit";
+- A buyer-side discovery that materially changes the assumption
+  that all buyers transact through the same primitive.
 
 ## Kill criteria
 
 This framing is revisited if any of the following surface:
 
 - Captain or another canon owner concludes during discussion comments
-  that the two-primitive model is over-engineering for v0 and that
-  knowledge-query should be subsumed into outcome-intent until volume
-  warrants splitting.
-- Phase A scoping reveals the gating-leak fix is materially larger than
-  "few-day surgical edit" — would force re-sequencing.
+  that the protocol/infrastructure/apps cut is wrong (e.g., subgraph
+  *should* be canonised as protocol, or apps *should* unify request
+  and query at the protocol level).
+- Phase A scoping reveals the gating-leak fix requires a protocol
+  change rather than infrastructure-only work.
 - A buyer-side discovery in the next 30 days that materially changes
-  the buyer-class assumptions (e.g., labs flatly refuse to transact in
-  the same market as agents, or the agent-to-agent volume turns out to
-  be negligible).
-- The Phase 1b roadmap conflicts with Phase A in a way that forces a
-  pick rather than coexistence.
+  the buyer-class assumptions (e.g., labs flatly refuse to transact
+  in the same market as agents, or the agent-to-agent volume turns
+  out to be negligible without further protocol work).
+- The Phase 1b roadmap conflicts with Phase A in a way that forces
+  a pick rather than coexistence.
 
 ## Out of scope
 
-- **Phase 1b reshuffle.** This framing implies Phase A wants near-term
-  attention; whether it slots alongside Phase 1b or displaces a piece
-  of it is a separate operational decision (see "Asks of the team" §10
-  of the discussion draft).
-- **Knowledge-query schema design.** Phase B work; gets its own spec.
-- **Royalty-split mechanism design.** Phase B work; gets its own spec.
-  On-chain vs off-chain for v0 deferred.
+- **Permission-granting / outcome-execution-on-buyer-resources.**
+  Deliberately excluded. If it ever enters, it is a separate
+  primitive in a separate document. The current vision is a
+  knowledge market only; what buyers do with the knowledge they
+  acquire is their concern, off-protocol.
+- **Phase 1b reshuffle.** This framing implies Phase A wants
+  near-term attention; whether it slots alongside Phase 1b or
+  displaces a piece of it is a separate operational decision.
+- **Royalty-split mechanism design.** Phase B work; gets its own
+  spec. On-chain vs off-chain for v0 deferred.
+- **Knowledge-marketplace app shape (one surface or two).** Phase B
+  product call; not committed here.
 - **ve-JINN demand-direction mechanics.** Phase D, possibly pulled
   forward, but not committed here.
 - **The exact GitHub Discussion post wording.** The draft at
   `spec/2026-04-30-knowledge-market-vision-discussion.md` is the
-  authoritative content; minor editing for the Discussion post itself
-  (tone, framing of the asks, removal of internal references) is
+  authoritative content; minor editing for the Discussion post is
   Captain's call when posting.
 
 ## Cross-references
@@ -171,15 +228,18 @@ This framing is revisited if any of the following surface:
 - **Discussion lineage:** [#41 Sharpening Jinn's value proposition](https://github.com/Jinn-Network/mono/discussions/41)
 - **Canonical thesis:** `THESIS.md`
 - **Substrate framing:** `spec/2026-04-21-agentic-data-substrate.md`
-  (collapsed into knowledge-market end-state by this DR)
+  (collapsed into knowledge-market end-state by this DR; the
+  three-layer cut formalises and extends that earlier framing)
 - **Default-learning-restorer (Phase C anchor):**
   `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`
 - **Code reality references in the draft:**
   - `client/src/restorer/engine/packaging.ts:387-460` — gating leak
-  - `client/src/x402/{handler,acquire,facilitator}.ts` — payment plumbing
+  - `client/src/x402/{handler,acquire,facilitator}.ts` — payment
+    plumbing
   - `client/src/mcp/server.ts:160-230` — agent-as-buyer skeleton
-  - `subgraph/schema.graphql` — discovery substrate
-- **Sitting bead:** jinn-mono-3lc (closed by this DR with verb steer).
+  - `subgraph/schema.graphql` — canonical indexer (infrastructure)
+- **Sitting bead:** jinn-mono-3lc (in-progress; closes when Captain
+  ratifies the discussion-post wording).
 
 ## Consequences
 
@@ -188,39 +248,53 @@ This framing is revisited if any of the following surface:
 - A discussion draft lives at
   `spec/2026-04-30-knowledge-market-vision-discussion.md` ready for
   Captain to post as a new GitHub Discussion in the lineage of #41.
-- The four framing choices above become the working position for any
+- The five framing choices above become the working position for any
   subsequent vision/strategy conversations until reversed.
 
 **Mid-term:**
 
-- Phase A workstreams (gate enforcement, retrieval API, cross-operator
-  acquire, subgraph "purchasable" surface, default-gated envelope policy)
-  become candidate near-term beads. Whether they're filed now depends on
-  Phase 1b interaction, which the Captain decides outside this DR.
-- The `2026-04-21-agentic-data-substrate.md` spec is now subsumed by
-  this framing rather than competing with it; future references should
-  cite this DR as the active framing and `2026-04-21` as the original
-  articulation.
+- Phase A workstreams (gate enforcement, network retrieval API
+  promotion, subgraph "purchasable" surface, default-gated envelope
+  policy) become candidate near-term beads. Whether they're filed
+  now depends on Phase 1b interaction, which the Captain decides
+  outside this DR.
+- The `2026-04-21-agentic-data-substrate.md` spec is now subsumed
+  by this framing rather than competing with it; future references
+  should cite this DR as the active framing and `2026-04-21` as the
+  original articulation.
 
 **Follow-up framing work that may be needed:**
 
-- A new canonical spec for the knowledge-query primitive (Phase B,
-  but the schema thinking can begin earlier).
-- A second-pass thesis revision to add the internal-loop language
-  to THESIS.md if the Captain decides the canonical thesis would
-  benefit from naming agent-to-agent compounding explicitly.
-  Not committed here.
+- A new canonical spec for royalty-split semantics (Phase B).
+- A new product spec for the canonical knowledge marketplace app
+  (Phase B), including the unify-vs-split decision.
+- A second-pass thesis revision to add the agent-to-agent
+  compounding language to THESIS.md if the Captain decides the
+  canonical thesis would benefit from naming it explicitly. Not
+  committed here.
 
 **Lessons / observations from the sitting:**
 
 - The "self-improving harness as a class of solutions" thread of the
   dispatch resolved cleanly under the knowledge-market frame: the
-  harness is *a class of operators* (agents that consume the corpus
-  during execution to compound), not a parallel product. The default-
-  learning-restorer slots in as Phase C's canonical demonstration.
+  harness is *a class of operators that consume the corpus during
+  execution*, not a parallel product. The default-learning-restorer
+  slots in as Phase C's canonical demonstration.
 - Voyager / ADAS / Sakana / o-series RL comparison from the dispatch
-  did not need a separate research artifact; the structural difference
-  is captured in §1 ("the internal loop") and §8 (decentralisation as
-  edge) of the discussion draft. Those frameworks compound *inside one
-  shop*; Jinn's bet is compounding across an open population. No
-  separate positioning map filed.
+  did not need a separate research artifact; the structural
+  difference is captured in §1 ("the compounding loop") and §7
+  (decentralisation as edge) of the discussion draft. Those
+  frameworks compound *inside one shop*; Jinn's bet is compounding
+  across an open population. No separate positioning map filed.
+- The sitting walked the framing through several iterations
+  (two-classes → uniform; two-primitives-at-protocol → two-mechanisms-
+  at-protocol-with-app-level-unification-as-product-choice;
+  subgraph-as-protocol → subgraph-as-infrastructure). The final
+  cut was visibly cleaner than any of the intermediate ones. The
+  three-layer cut is the load-bearing reframe — it is what makes
+  every other piece settle into its right place.
+- "Permission-granting" was scoped out deliberately; the sitting
+  established that outcome-execution-on-buyer-resources is *not*
+  Jinn's surface. This is a major scoping win for the vision and
+  removes a whole category of fiduciary/escrow complexity from the
+  protocol's claims.
