@@ -959,6 +959,59 @@ export class Store {
     ).run(ts, sha256);
   }
 
+  /**
+   * Local fast-path search across own (served) artifacts and cached (network)
+   * artifacts. Used by the MCP `search_artifacts` tool to prepend local
+   * matches to corpus query results.
+   */
+  searchOwnAndCached(filter: { artifactType?: string; limit: number }): Array<{
+    sha256: string;
+    artifactType: string;
+    source: 'served' | 'network';
+    envelopeCid: string | null;
+    createdAt: string;
+  }> {
+    const limit = Math.min(Math.max(1, filter.limit), 500);
+    const ownSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts WHERE artifact_type = @type ORDER BY created_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts ORDER BY created_at DESC LIMIT @limit`;
+    const cachedSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts WHERE artifact_type = @type ORDER BY fetched_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts ORDER BY fetched_at DESC LIMIT @limit`;
+    const params: Record<string, unknown> = { limit };
+    if (filter.artifactType) params['type'] = filter.artifactType;
+
+    const own = this.db.prepare(ownSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      created_at: string;
+    }>;
+    const cached = this.db.prepare(cachedSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      fetched_at: string;
+    }>;
+
+    return [
+      ...own.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'served' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.created_at,
+      })),
+      ...cached.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'network' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.fetched_at,
+      })),
+    ];
+  }
+
   cacheRemoteContent(id: string, content: string): void {
     this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
   }
