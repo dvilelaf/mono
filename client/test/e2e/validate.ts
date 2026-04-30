@@ -2186,7 +2186,11 @@ async function main(): Promise<void> {
               implStateDirRoot: join(tmpDir!, 'e2e-engine-impl-state'),
             },
             claimDeps,
-            packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
+            packagingDeps: {
+              operatorEndpoint: 'http://localhost:7331',
+              defaultPriceUsdc: '0',
+              perArtifactTypePrice: {},
+            },
             envelopeDeps: {
               ipfsRegistryUrl: 'https://registry.autonolas.tech',
               agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
@@ -3131,8 +3135,18 @@ async function main(): Promise<void> {
           if (!freeData.content.includes('x402 payment')) throw new Error('Free route returned wrong content');
           console.log('    Free route (/artifacts/:id/content) works alongside x402');
 
-          // --- Test 2: x402 route returns 402 without payment ---
-          const gatedRes = await fetch('http://localhost:7351/x402/artifacts/x402-test-artifact/content');
+          // --- Test 2: x402 route returns 404 for unknown sha256 (free 200 with row) ---
+          // Post jinn-mono-vy37.1.2 the route is sha256-keyed against the
+          // served_artifacts table. We seed a row to exercise the gating path.
+          const fakeSha256 = 'a'.repeat(64);
+          x402Store.saveServedArtifact({
+            sha256: fakeSha256,
+            artifactType: 'output.test',
+            content: Buffer.from('paid x402 content'),
+            priceUsdc: '0.001',
+            createdAt: new Date().toISOString(),
+          });
+          const gatedRes = await fetch(`http://localhost:7351/v1/artifacts/${fakeSha256}/content`);
           if (gatedRes.status === 402) {
             console.log('    x402 route correctly returns 402 (Payment Required) without payment');
           } else if (gatedRes.status === 200) {
@@ -3142,8 +3156,8 @@ async function main(): Promise<void> {
           }
 
           // --- Test 3: URL builder ---
-          const url = buildAcquisitionUrl('http://localhost:7351', 'x402-test-artifact');
-          if (url !== 'http://localhost:7351/x402/artifacts/x402-test-artifact/content') {
+          const url = buildAcquisitionUrl('http://localhost:7351', fakeSha256);
+          if (url !== `http://localhost:7351/v1/artifacts/${fakeSha256}/content`) {
             throw new Error(`Wrong acquisition URL: ${url}`);
           }
           console.log('    buildAcquisitionUrl produces correct URL');
@@ -3153,11 +3167,11 @@ async function main(): Promise<void> {
           try {
             const content = await acquireArtifactWithPayment(
               'http://localhost:7351',
-              'x402-test-artifact',
+              fakeSha256,
               agentEoaPrivateKey as string,
             );
             if (content) {
-              console.log(`    x402 acquisition succeeded: "${content.slice(0, 40)}..."`);
+              console.log(`    x402 acquisition succeeded: ${content.length} bytes`);
             } else {
               console.log('    x402 acquisition returned null (payment settlement may not work on Anvil fork)');
             }

@@ -308,6 +308,44 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * Operator-local artifact serving configuration (Phase A.1, jinn-mono-vy37.1).
+   *
+   * Per spec/2026-04-30-phase-a-umbrella.md §1, restoration artifact bytes
+   * stay on the operator's filesystem (served_artifacts) and are dispensed
+   * via the operator's HTTP API with x402 gating when `priceUsdc > 0`. The
+   * envelope's `artifact.access.endpoint` field tells consumers where to
+   * fetch each artifact; `priceUsdc` declares the asking price.
+   *
+   * `publicEndpoint` is the externally-reachable base URL that gets stamped
+   * into every artifact descriptor. `defaultPriceUsdc` is the fallback price
+   * when neither OUTPUTS.json nor `perArtifactTypePrice` provides a value.
+   * `perArtifactTypePrice` lets operators charge per artifactType.
+   *
+   * Resolution precedence in `uploadArtifacts`:
+   *   OUTPUTS.json `access.priceUsdc` > `perArtifactTypePrice[artifactType]`
+   *   > `defaultPriceUsdc`.
+   *
+   * Env overrides:
+   *   JINN_OPERATOR_PUBLIC_ENDPOINT
+   *   JINN_OPERATOR_DEFAULT_PRICE_USDC
+   */
+  operator: z
+    .object({
+      publicEndpoint: z.string().url(),
+      defaultPriceUsdc: z
+        .string()
+        .regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string')
+        .default('0'),
+      perArtifactTypePrice: z
+        .record(
+          z.string(),
+          z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string'),
+        )
+        .default({}),
+    })
+    .optional(),
+
+  /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
    * backfill `agent_id` on `complete` services that pre-date j07).
    *
@@ -508,6 +546,24 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
   }
 
+  if (
+    env['JINN_OPERATOR_PUBLIC_ENDPOINT'] ||
+    env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+  ) {
+    const prevOp = typeof merged['operator'] === 'object' && merged['operator'] !== null
+      ? (merged['operator'] as Record<string, unknown>)
+      : {};
+    merged['operator'] = {
+      ...prevOp,
+      ...(env['JINN_OPERATOR_PUBLIC_ENDPOINT']
+        ? { publicEndpoint: env['JINN_OPERATOR_PUBLIC_ENDPOINT'] }
+        : {}),
+      ...(env['JINN_OPERATOR_DEFAULT_PRICE_USDC']
+        ? { defaultPriceUsdc: env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] }
+        : {}),
+    };
+  }
+
   if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
     const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
       ? (merged['engine'] as Record<string, unknown>)
@@ -660,6 +716,8 @@ const TRACKED_ENV_VARS = [
   'JINN_DESIRED_STATES',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_OPERATOR_PUBLIC_ENDPOINT',
+  'JINN_OPERATOR_DEFAULT_PRICE_USDC',
   'JINN_BUILD_COMMIT',
 ] as const;
 
