@@ -39,6 +39,8 @@ import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClien
 import { privateKeyToAccount } from 'viem/accounts';
 import { RestorerImplRegistry } from './restorer/engine/registry.js';
 import { buildRestorerImpls } from './restorer/impls/index.js';
+import { loadExternalImpl } from './restorer/external-impls/index.js';
+import type { RestorerImpl } from './restorer/types.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
@@ -512,6 +514,41 @@ export async function main(): Promise<DaemonStartupInfo> {
     ...(config.restorers ?? {}),
   });
 
+  // Load operator-supplied external restorer impls (Path 2 plug-in surface).
+  // Each entry in `config.restorers.externalImpls` is verified against
+  // `config.trustedImplSigners` before its factory is invoked. Failed loads
+  // are logged + skipped — they don't bring down the daemon.
+  const externalImpls: RestorerImpl[] = [];
+  const trustedSigners = config.trustedImplSigners ?? [];
+  const externalEntries = config.restorers?.externalImpls ?? [];
+  if (externalEntries.length > 0) {
+    for (const entry of externalEntries) {
+      const result = await loadExternalImpl({
+        entry: { name: entry.name, entry: entry.entry, package: entry.package },
+        trustedSigners,
+        env: {
+          implName: entry.name,
+          implVersion: '0.0.0', // overridden by manifest validation below
+          network: config.network,
+          implStateDir: join(config.engine.implStateDirRoot, entry.name),
+          secrets: Object.freeze({}),
+          log: ({ level, msg, data }) =>
+            console.log(`[external-impl:${entry.name}] [${level}] ${msg}`, data ?? ''),
+          stub: false,
+        },
+      });
+      if (result.kind === 'ok') {
+        externalImpls.push(result.impl);
+        console.log(`[main] Loaded external impl: ${result.impl.name}@${result.impl.version}`);
+      } else {
+        console.warn(
+          `[main] Failed to load external impl ${entry.name}: ${result.reason}` +
+            (result.detail ? ` (${result.detail})` : ''),
+        );
+      }
+    }
+  }
+
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
   for (const impl of buildRestorerImpls({
     rpcUrl: config.rpcUrl,
@@ -524,6 +561,8 @@ export async function main(): Promise<DaemonStartupInfo> {
     storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
     implStateDirRoot: config.engine.implStateDirRoot,
+    externalImpls,
+    disabledNames: config.restorers?.disabled,
   })) {
     implRegistry.register(impl);
   }

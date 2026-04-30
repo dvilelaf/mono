@@ -53,6 +53,22 @@ export interface RestorerEnv {
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
    */
   implStateDirRoot?: string;
+  /**
+   * Pre-loaded external (operator-supplied) restorer impls — produced by
+   * `loadExternalImpl()` in `client/src/restorer/external-impls/`. Appended to
+   * the in-repo construction list before the claude-code-learner wrapper so
+   * the wrapper sees them as specialists. See plan
+   * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
+   * step 5.7.
+   */
+  externalImpls?: readonly RestorerImpl[];
+  /**
+   * Impl names to filter out of the returned list entirely (different from
+   * `RestorerImplRegistry.disabled`, which only suppresses dispatch). Useful
+   * when a fleet wants to construct without paying the cost of an in-repo
+   * impl that has external deps.
+   */
+  disabledNames?: readonly string[];
 }
 
 /**
@@ -155,6 +171,12 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         }),
   );
 
+  // Operator-supplied external impls are appended *before* the learner
+  // wrapper so the wrapper sees them as specialists too.
+  if (env.externalImpls && env.externalImpls.length > 0) {
+    out.push(...env.externalImpls);
+  }
+
   // Build the claude-code-learner wrapper LAST (so it sees all other impls
   // as its specialists pool). It is registered alongside specialists, NOT
   // prepended — universal-wrap is now a registry policy
@@ -170,5 +192,10 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
     specialists: [...out], // snapshot of specialists; wrapper does not delegate to itself
   });
   out.push(learnerWrapper);
+
+  if (env.disabledNames && env.disabledNames.length > 0) {
+    const disabled = new Set(env.disabledNames);
+    return out.filter((impl) => !disabled.has(impl.name));
+  }
   return out;
 }

@@ -292,7 +292,45 @@ export const JinnConfigSchema = z.object({
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
       wrapWith: z.string().nullable().optional(),
+      /**
+       * Operator-supplied external impls — Path 2 plug-in surface.
+       *
+       * Each entry points the daemon at a manifest-bearing package on disk
+       * (typically inside `node_modules/`); `client/src/main.ts` invokes
+       * `loadExternalImpl()` for each entry at boot, validates the manifest
+       * against `trustedImplSigners`, and registers the resulting impl in
+       * the restorer registry. See
+       * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
+       * step 5.7-5.8.
+       */
+      externalImpls: z
+        .array(
+          z.object({
+            name: z.string(),
+            entry: z.string(),
+            package: z.string().optional(),
+          }),
+        )
+        .optional(),
     })
+    .optional(),
+
+  /**
+   * Trusted ed25519 publishers for external restorer impls. The daemon
+   * refuses to load any external impl whose manifest signature is not
+   * verifiable against one of these public keys.
+   *
+   * `publicKey` is base64-encoded raw ed25519. `label` is operator-facing
+   * provenance only.
+   */
+  trustedImplSigners: z
+    .array(
+      z.object({
+        alg: z.literal('ed25519'),
+        publicKey: z.string(),
+        label: z.string().optional(),
+      }),
+    )
     .optional(),
 
   /**
