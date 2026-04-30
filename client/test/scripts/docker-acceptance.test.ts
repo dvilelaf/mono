@@ -65,7 +65,9 @@ describe('docker acceptance helpers', () => {
     expect(composeEnv.JINN_ACCEPTANCE_IMAGE).toBe('jinn-client:test');
     expect(composeEnv.JINN_PASSWORD).toBe('secret');
     expect(composeEnv.JINN_RPC_URL).toBe('https://public.example');
-    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('1');
+    expect(composeEnv.JINN_DISABLE_AUTO_INTENTS).toBe('0');
+    expect(composeEnv.JINN_PREDICTION_V0_WINDOW_MS).toBe('120000');
+    expect(composeEnv.JINN_PREDICTION_V0_RESOLVE_GAP_MS).toBe('60000');
     expect(composeEnv.JINN_ACCEPTANCE_CONFIG_FILE).toBe(dockerAcceptanceConfigPath(clientRoot));
     expect(dockerAcceptanceWorkspaceRoot(clientRoot)).toBe(join(clientRoot, '.acceptance'));
     expect(dockerAcceptanceComposeEnvPath(clientRoot)).toBe(join(clientRoot, '.acceptance', 'docker-compose.env'));
