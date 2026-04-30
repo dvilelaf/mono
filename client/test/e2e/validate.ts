@@ -3121,7 +3121,6 @@ async function main(): Promise<void> {
           x402: {
             privateKey: agentEoaPrivateKey as string,
             recipientAddress: safeAddress as string,
-            pricePerArtifact: '$0.001',
             network: 'eip155:8453',
             rpcUrl: ANVIL_RPC,
           },

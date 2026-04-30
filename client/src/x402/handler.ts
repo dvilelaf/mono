@@ -22,11 +22,6 @@ export interface X402Config {
   /** Default 'eip155:8453' (Base mainnet). */
   network?: string;
   rpcUrl?: string;
-  /**
-   * @deprecated price comes from served_artifacts.priceUsdc per row; this
-   * field is ignored. Kept on the type for one cycle of caller compat.
-   */
-  pricePerArtifact?: string;
 }
 
 function dollarStringFromUsdc(usdc: string): string {
