@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { runCreate } from '../../../src/cli/commands/create.js';
 
@@ -94,5 +96,36 @@ describe('runCreate (forecaster pattern)', () => {
     const unitTs = readFileSync(join(target, 'test/unit.test.ts'), 'utf8');
     expect(unitTs).toContain('/tmp/scope-my-impl');
     expect(unitTs).not.toContain('{{packageNameSlug}}');
+  });
+
+  /**
+   * Smoke-run plan step 6.7: invoke the built CLI from `dist/` to confirm
+   * `templates/` is bundled into `dist/templates/` and the scaffolder finds
+   * them in the published-tarball layout. Skipped when dist is not built.
+   */
+  it('built CLI scaffolds via dist/templates (post-yarn-build)', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // test/cli/commands/ -> client/dist/bin/jinn.js
+    const distBin = join(here, '../../../dist/bin/jinn.js');
+    if (!existsSync(distBin)) {
+      // Build hasn't been run in this checkout — skip rather than fail.
+      console.warn('[create.test] dist not built; skipping built-CLI smoke');
+      return;
+    }
+    const out = execFileSync(
+      'node',
+      [
+        distBin,
+        'create',
+        'restorer',
+        '@smoke/scaffold',
+        '--out-dir',
+        TMP,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(out).toContain('Created @smoke/scaffold');
+    expect(existsSync(join(TMP, '@smoke/scaffold/jinn.manifest.json'))).toBe(true);
+    expect(existsSync(join(TMP, '@smoke/scaffold/src/index.ts'))).toBe(true);
   });
 });
