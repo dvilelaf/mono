@@ -160,6 +160,13 @@ so one full restoration → delivery → evaluation round-trip lands inside the
 `ClaimRegistry` — so the gate does not race third-party operators on the
 legacy registry surface.
 
+The acceptance config sets `restorers.wrapWith: null` to disable the
+`claude-code-learner` universal wrapper for the gate. The gate's job is to
+verify the protocol loop end-to-end via the base prediction.v0 impls
+(`prediction-v0-baseline` + `prediction-v0-evaluator`); the wrapper layer is
+separately validated and out of gate scope. Default operator setup keeps the
+wrapper enabled.
+
 Then authenticate Claude for Docker (on your host machine, one-time):
 
 ```bash

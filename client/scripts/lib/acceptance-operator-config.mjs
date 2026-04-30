@@ -76,6 +76,14 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     // inside the 20-min timeout (default operator setup uses 600000 / 300000).
     predictionV0WindowMs: toInt(env['JINN_PREDICTION_V0_WINDOW_MS'], 120_000),
     predictionV0ResolveGapMs: toInt(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'], 60_000),
+    // Disable the claude-code-learner wrapper for the gate. The wrapper is a
+    // universal pre-orient step for restorations; the gate's job is to verify
+    // the protocol loop end-to-end via the base prediction.v0 impls
+    // (prediction-v0-baseline + prediction-v0-evaluator). The wrapper layer
+    // is separately validated and not gate-scope here.
+    restorers: {
+      wrapWith: null,
+    },
     desiredStates: buildAcceptanceDesiredStates(runIdSuffix),
   };
 
