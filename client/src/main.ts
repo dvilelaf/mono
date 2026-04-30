@@ -532,11 +532,17 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: IPFS upload (ERC-8004 per-artifact registration is rebuilt
-  // under jinn-mono-3zk; see DR
-  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
+  // SQLite) and served via the operator's HTTP server with x402 gating per
+  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
+  // The `store` field is filled by Daemon (which owns the SQLite handle); here
+  // we just configure the endpoint + price defaults. Phase 3 plumbs operator
+  // config into the daemon config schema; Phase 2 honours env stopgaps.
   const packagingDeps = {
-    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    operatorEndpoint:
+      process.env.JINN_OPERATOR_PUBLIC_ENDPOINT ?? `http://localhost:${config.apiPort}`,
+    defaultPriceUsdc: process.env.JINN_OPERATOR_DEFAULT_PRICE_USDC ?? '0',
+    perArtifactTypePrice: {} as Record<string, string>,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key

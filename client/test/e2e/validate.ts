@@ -2186,7 +2186,11 @@ async function main(): Promise<void> {
               implStateDirRoot: join(tmpDir!, 'e2e-engine-impl-state'),
             },
             claimDeps,
-            packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
+            packagingDeps: {
+              operatorEndpoint: 'http://localhost:7331',
+              defaultPriceUsdc: '0',
+              perArtifactTypePrice: {},
+            },
             envelopeDeps: {
               ipfsRegistryUrl: 'https://registry.autonolas.tech',
               agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
