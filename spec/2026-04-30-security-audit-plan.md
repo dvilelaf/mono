@@ -2,7 +2,7 @@
 
 > Version: 0.1.0-strawman
 > Date: 2026-04-30
-> Author: Oak, Claude (audit-lead seat)
+> Author: Ritsu, Claude (audit-lead seat)
 > Status: **Strawman — community review open**
 > Companion artifact: a GitHub Discussion linking to this spec (draft in
 > Appendix A) for community review by Alex, Andre, and others.
@@ -916,7 +916,7 @@ please disclose it in your first comment.
 Direct any sensitive points to **GitHub Security Advisories** (or a
 `security@` contact once stood up) instead of in-thread.
 
-— Oak (audit lead, drafter)
+— Ritsu (audit lead, drafter)
 
 ---
 
