@@ -68,6 +68,10 @@ verification on the candidates this spec selects.
   `spec/2026-05-schema-versioning.md`.
 - Multi-operator external-impl marketplaces, payments, or reputation.
   Phase 2+ concerns; see §5.
+- Path 1 plug-ins (`spec/2026-04-30-plug-in-surface.md` §4) have a
+  separate discovery mechanism (`learnerPlugIns[]` config field, npm
+  distribution, no manifest signing, host-inheritance trust). The two
+  registries are distinct; this spec covers Path 2 RestorerImpls only.
 
 ### 1.3 Non-goals
 
