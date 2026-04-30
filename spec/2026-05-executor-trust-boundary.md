@@ -67,6 +67,12 @@ re-cutting the API.
 - Master-wallet hygiene at the daemon level (keystore encryption,
   password handling, Safe deployment). This spec only covers what
   crosses the daemon → impl boundary.
+- Path 1 plug-ins (`spec/2026-04-30-plug-in-surface.md` §4.3) inherit
+  trust from the host harness (`claude-code-learner` impl) and do not
+  carry their own capability allow-list. The trust contract this spec
+  defines applies to Path 2 RestorerImpls only; Path 1 plug-ins run
+  inside the harness's existing capability surface and add no
+  incremental capabilities.
 
 ### 1.3 Non-goals
 
