@@ -170,7 +170,7 @@ System state at end of Phase A: the operational loop runs in **optimistic mode**
 | Sub-phase | Gate |
 |---|---|
 | **B.1 Verifiability tier activation** | At least one envelope produced at attested or consensus tier on testnet; trust-tier signal queryable through the corpus library. *Operationalises the existing envelope-tee-scope spec.* |
-| **B.2 Evaluator economics + signal-design** | Research note → canonical spec ratified → first stake-based evaluator run on testnet. *Multi-evaluator consensus is one candidate mechanism, not the answer; the research workstream surfaces the right mechanism per kind.* |
+| **B.2 Evaluator economics + signal-design** | Research note → canonical spec ratified → first run of whatever mechanism the research lands on operating on testnet. *The mechanism is genuinely open* — stake-based participation, multi-evaluator consensus, oracle-style, hybrid, or something else. Phase B.2's research workstream surfaces the right mechanism per kind; nothing is pre-committed. The current JINN-emissions model holds in the meantime. |
 
 Phase B does not gate Phase A's launch. The optimistic-mode loop runs in low-trust mode; trust upgrades enrich what's already running rather than block it.
 
@@ -178,7 +178,7 @@ Phase B does not gate Phase A's launch. The optimistic-mode loop runs in low-tru
 
 | Sub-phase | Gate |
 |---|---|
-| **Mainnet readiness** | Three conditions simultaneously: (a) 15–20 distinct people meeting at least one of the four bars in #57 §1.1 (community formation); (b) Phase B trust infrastructure has shipped at least the verifiability tier (B.1) and the first stake-based evaluator run (B.2); (c) **the security audit of the deployed contract stack is complete with findings addressed and signed off** (cross-cutting workstream below). |
+| **Mainnet readiness** | Three conditions simultaneously: (a) 15–20 distinct people meeting at least one of the four bars in #57 §1.1 (community formation); (b) Phase B trust infrastructure has shipped — at least B.1 (verifiability tier active on testnet) and B.2 (the evaluator-economics mechanism the research lands on is operating on testnet); (c) **the security audit of the deployed contract stack is complete with findings addressed and signed off** (cross-cutting workstream below). |
 | **C.1 Flagship marketplace API** | First non-agent buyer (a lab, a researcher, an end-user) transacts through the API. *The flagship is the API, not the UI — UIs are downstream.* |
 
 ### Phase D — Ecosystem (no hard gate; emergent)
