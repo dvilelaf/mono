@@ -59,6 +59,12 @@ ADR picks specialists-first and routes learning as a per-impl service.
 - The disposition of PR #38's wrapper code given the choice.
 - The composition story for operator-supplied restorers
   (`jinn-mono-7zz`) under the chosen model.
+- The opt-in compositional layer above the specialists-first
+  architecture (Phase A.2 plug-in surface) is defined in
+  `spec/2026-04-30-plug-in-surface.md` and does not change this ADR's
+  decision; the `claude-code-learner` impl simply gains a publicly
+  pluggable internal pipeline while remaining one impl among many at
+  the registry level.
 
 ### 1.2 Out of scope
 
