@@ -34,6 +34,7 @@ import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
+import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -577,6 +578,16 @@ export async function main(): Promise<DaemonStartupInfo> {
   }
 
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
+  const corpusEnv: RunnerContext['corpusEnv'] | undefined =
+    config.subgraphUrl?.trim()
+      ? {
+          subgraphUrl: config.subgraphUrl,
+          ipfsGatewayUrl: config.ipfsGatewayUrl,
+          agentPrivateKey,
+          selfSafeAddress: safeAddress,
+        }
+      : undefined;
+
   for (const impl of buildRestorerImpls({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
@@ -591,6 +602,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     externalImpls,
     disabledNames: config.restorers?.disabled,
     slotRegistryJson,
+    corpusEnv,
   })) {
     implRegistry.register(impl);
   }
@@ -599,11 +611,34 @@ export async function main(): Promise<DaemonStartupInfo> {
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: IPFS upload (ERC-8004 per-artifact registration is rebuilt
-  // under jinn-mono-3zk; see DR
-  // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md).
+  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
+  // SQLite) and served via the operator's HTTP server with x402 gating per
+  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
+  // The `store` field is filled by Daemon (which owns the SQLite handle); here
+  // we just configure the endpoint + price defaults from `config.operator`
+  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
+  // block fall back to the daemon's local API port so dev/test runs still work
+  // — but the resulting envelopes won't be reachable from outside the host.
+  const operatorPublicEndpoint =
+    config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
+  const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
+  const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
+  if (!config.operator?.publicEndpoint) {
+    console.warn(
+      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
+        'External evaluators will not be able to fetch artifacts from this operator. ' +
+        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
+    );
+  }
   const packagingDeps = {
-    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    operatorEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
+  };
+  const operatorConfig = {
+    publicEndpoint: operatorPublicEndpoint,
+    defaultPriceUsdc: operatorDefaultPrice,
+    perArtifactTypePrice: operatorPerTypePrice,
   };
 
   // Envelope assembly deps: sign envelopes with agent EOA private key
@@ -828,6 +863,7 @@ export async function main(): Promise<DaemonStartupInfo> {
       implRegistry,
       identityPublisher,
       reputationFeedback,
+      operatorConfig,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

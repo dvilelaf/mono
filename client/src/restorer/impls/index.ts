@@ -3,7 +3,7 @@
  * Used by the daemon entrypoint and `jinn intents` CLI (stub mode).
  */
 
-import type { Runner } from '../../runner/runner.js';
+import type { Runner, RunnerContext } from '../../runner/runner.js';
 import type { RestorerImpl } from '../types.js';
 import { LegacyClaudeImpl } from './legacy-claude/index.js';
 import { ClaudeMcpHyperliquidImpl } from './claude-mcp-hyperliquid/index.js';
@@ -48,6 +48,11 @@ export interface RestorerEnv {
    * Legacy-claude runner working directory (defaults to /tmp if unset).
    */
   legacyClaudeWorkingDirectory?: string;
+  /**
+   * Corpus env for {@link LegacyClaudeImpl} / MCP `jinn-client` tools
+   * (`search_artifacts`, `acquire_artifact`).
+   */
+  corpusEnv?: RunnerContext['corpusEnv'];
   /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
@@ -113,6 +118,7 @@ export function buildRestorerImpls(env: RestorerEnv): RestorerImpl[] {
         timeoutMs: 300_000,
         storePath: env.storePath,
         daemonApiUrl: env.daemonApiUrl,
+        corpusEnv: env.corpusEnv,
         stub: isStub,
       }),
     );
