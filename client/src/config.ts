@@ -256,6 +256,20 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
+   * prediction.v0 auto-generator submission window (ms). Default 600000 (10 min).
+   * Docker acceptance gate sets 120000 to keep cycles tight.
+   * Env: JINN_PREDICTION_V0_WINDOW_MS
+   */
+  predictionV0WindowMs: z.number().int().positive().optional(),
+
+  /**
+   * prediction.v0 auto-generator gap from window end → resolveTs (ms).
+   * Default 300000 (5 min). Docker acceptance gate sets 60000.
+   * Env: JINN_PREDICTION_V0_RESOLVE_GAP_MS
+   */
+  predictionV0ResolveGapMs: z.number().int().positive().optional(),
+
+  /**
    * Operator-controlled impl dispatch for the restorer engine.
    *
    * Wired by daemon (jinn-mono-bv5); engine consumes via RestorerImplRegistry config.
@@ -478,6 +492,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
   }
+  if (env['JINN_PREDICTION_V0_WINDOW_MS']) {
+    const parsed = Number(env['JINN_PREDICTION_V0_WINDOW_MS'].trim());
+    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV0WindowMs = parsed;
+  }
+  if (env['JINN_PREDICTION_V0_RESOLVE_GAP_MS']) {
+    const parsed = Number(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'].trim());
+    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV0ResolveGapMs = parsed;
+  }
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
   if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
@@ -626,6 +648,8 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
+  'JINN_PREDICTION_V0_WINDOW_MS',
+  'JINN_PREDICTION_V0_RESOLVE_GAP_MS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',

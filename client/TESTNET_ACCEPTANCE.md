@@ -143,13 +143,22 @@ budget. Override them with `JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI` and
 `JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI` only when intentionally testing a
 larger runway.
 
-The generated acceptance config also sets `restorers.wrapWith: null` and posts
-four run-scoped health-check jobs while the gate requires two completed cycles.
-That keeps the release gate focused on the legacy health-check flow and gives
-the public testnet room for an occasional claim race with another operator.
-For Docker acceptance, a completed cycle is a successful delivered restoration
-artifact for one of those run-scoped health checks; the legacy health-check flow
-does not require a separate `evaluation-verdict` artifact.
+Docker acceptance gates on `prediction.v0` cycles produced by the testnet
+auto-intent generator (Chainlink Base Sepolia ETH/USD threshold predictions).
+Each cycle requires both a successful `restoration-result` artifact and a
+successful `evaluation-verdict` artifact for the same on-chain `request_id`.
+The default cycle target is one (smoke test, not soak); bump via
+`JINN_TESTNET_ACCEPTANCE_TARGET_CYCLES` if you want a larger sample.
+
+Cycle-shaping params are tuned for the gate via
+`JINN_PREDICTION_V0_WINDOW_MS=120000` and `JINN_PREDICTION_V0_RESOLVE_GAP_MS=60000`,
+so one full restoration → delivery → evaluation round-trip lands inside the
+20-min timeout. Default operator setup uses `600000` / `300000` (10-min window
++ 5-min resolve gap), unchanged.
+
+`prediction.v0` intents post through `JinnRouterV2`, not the shared
+`ClaimRegistry` — so the gate does not race third-party operators on the
+legacy registry surface.
 
 Then authenticate Claude for Docker (on your host machine, one-time):
 

@@ -43,17 +43,15 @@ export function resolveAcceptanceRpcUrl(env = process.env) {
     ?? '';
 }
 
-export function buildAcceptanceDesiredStates(runIdSuffix) {
-  const descriptions = [
-    'The Jinn client service is healthy and operational. Confirm the service is running by checking its status via the available tools, then report that the service is healthy.',
-    'A basic connectivity check has been performed. Verify the protocol tools are reachable and responsive, then report that connectivity is confirmed.',
-    'The release acceptance daemon has durable state available. Inspect the daemon status and report that the fleet state is available.',
-    'The release acceptance operator can read recent history. Inspect recent history and report that the history surface is responsive.',
-  ];
-  return descriptions.map((description, index) => ({
-    id: `release-acceptance-${runIdSuffix}-${index + 1}`,
-    description,
-  }));
+/**
+ * Acceptance gate posts no static desired states. The protocol loop is
+ * exercised via the testnet auto-intent generator (kind=prediction.v0,
+ * id prefix `pred-v0-auto-…`) which the daemon registers automatically when
+ * `network=testnet` and `JINN_DISABLE_AUTO_INTENTS` is not set. The gate
+ * tracks any prediction.v0 cycles created after `runStartAt`.
+ */
+export function buildAcceptanceDesiredStates(_runIdSuffix) {
+  return [];
 }
 
 /**
@@ -74,9 +72,10 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     targetServices: toInt(env['JINN_TESTNET_ACCEPTANCE_TARGET_SERVICES'], 1),
     minEoaGasWei: env['JINN_TESTNET_ACCEPTANCE_MIN_EOA_GAS_WEI'] ?? '1000000000000000',
     minSafeEthWei: env['JINN_TESTNET_ACCEPTANCE_MIN_SAFE_ETH_WEI'] ?? '200000000000000',
-    restorers: {
-      wrapWith: null,
-    },
+    // Tighten prediction.v0 auto-cycles for the gate so one round-trip lands
+    // inside the 20-min timeout (default operator setup uses 600000 / 300000).
+    predictionV0WindowMs: toInt(env['JINN_PREDICTION_V0_WINDOW_MS'], 120_000),
+    predictionV0ResolveGapMs: toInt(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'], 60_000),
     desiredStates: buildAcceptanceDesiredStates(runIdSuffix),
   };
 

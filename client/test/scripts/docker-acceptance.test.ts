@@ -13,7 +13,7 @@ import {
   hasDockerAcceptanceClaudeToken,
   resolveDockerAcceptanceBaseEnv,
 } from '../../scripts/lib/docker-acceptance.mjs';
-import { summarizeArtifactRows } from '../../scripts/lib/acceptance-artifacts.mjs';
+import { summarizeArtifactRows, summarizeRunWindowArtifacts } from '../../scripts/lib/acceptance-artifacts.mjs';
 
 const tempDirs: string[] = [];
 
@@ -139,8 +139,78 @@ describe('artifact cycle summaries', () => {
     expect(summary.byRestorationJob.one.successfulEvaluations).toBe(1);
     expect(summary.byRestorationJob.two.successfulRestorations).toBe(1);
     expect(summary.byRestorationJob.two.successfulEvaluations).toBe(0);
+  });
+});
 
-    const restorationOnly = summarizeArtifactRows(summary.rows, ['one', 'two'], { cycleMode: 'restoration' });
-    expect(restorationOnly.completedCycles).toBe(2);
+describe('summarizeRunWindowArtifacts', () => {
+  const runStartAt = '2026-04-30T10:00:00.000Z';
+
+  it('counts a cycle complete only when both restoration and evaluation succeed for the same request_id', () => {
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-1714464000000',
+          request_id: '0xreq1',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30T10:03:00.000Z',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1714464000000',
+          request_id: '0xreq1',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30T10:06:00.000Z',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-1714464120000',
+          request_id: '0xreq2',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30T10:09:00.000Z',
+        },
+      ],
+      runStartAt,
+    );
+
+    expect(summary.completedCycles).toBe(1);
+    expect(summary.byRequestId).toHaveLength(2);
+    const req1 = summary.byRequestId.find((e) => e.requestId === '0xreq1');
+    expect(req1?.restorationOk).toBe(true);
+    expect(req1?.evaluationOk).toBe(true);
+    const req2 = summary.byRequestId.find((e) => e.requestId === '0xreq2');
+    expect(req2?.restorationOk).toBe(true);
+    expect(req2?.evaluationOk).toBe(false);
+  });
+
+  it('excludes rows created before runStartAt', () => {
+    const summary = summarizeRunWindowArtifacts(
+      [
+        {
+          desired_state_id: 'pred-v0-auto-old',
+          request_id: '0xstale',
+          tags: '["restoration-result"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30T09:30:00.000Z',
+        },
+        {
+          desired_state_id: 'pred-v0-auto-old',
+          request_id: '0xstale',
+          tags: '["evaluation-verdict"]',
+          outcome: 'SUCCESS',
+          created_at: '2026-04-30T09:45:00.000Z',
+        },
+      ],
+      runStartAt,
+    );
+
+    expect(summary.completedCycles).toBe(0);
+    expect(summary.byRequestId).toHaveLength(0);
+  });
+
+  it('returns zero cycles for an empty row set', () => {
+    const summary = summarizeRunWindowArtifacts([], runStartAt);
+    expect(summary.completedCycles).toBe(0);
+    expect(summary.byRequestId).toEqual([]);
   });
 });

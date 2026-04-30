@@ -675,6 +675,8 @@ export async function main(): Promise<DaemonStartupInfo> {
     agentEoa: agentEoaAddress,
     safeAddress,
     agentPrivateKey,
+    predictionV0WindowMs: config.predictionV0WindowMs,
+    predictionV0ResolveGapMs: config.predictionV0ResolveGapMs,
   });
   for (const line of autoIntentLogLines) {
     console.log(line);
