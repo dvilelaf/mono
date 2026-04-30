@@ -129,3 +129,76 @@ describe('runCreate (forecaster pattern)', () => {
     expect(existsSync(join(TMP, '@smoke/scaffold/src/index.ts'))).toBe(true);
   });
 });
+
+describe('runCreate (evaluator pattern)', () => {
+  it('emits an evaluator package matching the template', async () => {
+    const target = await runCreate({
+      kind: 'restorer',
+      pattern: 'evaluator',
+      packageName: '@example/test-eval',
+      kindString: 'prediction.v0',
+      network: 'base-sepolia',
+      outDir: TMP,
+    });
+    expect(existsSync(join(target, 'src/index.ts'))).toBe(true);
+    const indexTs = readFileSync(join(target, 'src/index.ts'), 'utf8');
+    expect(indexTs).toContain("type === 'evaluation'");
+    expect(indexTs).not.toContain('{{');
+
+    const manifest = JSON.parse(
+      readFileSync(join(target, 'jinn.manifest.json'), 'utf8'),
+    );
+    expect(manifest.name).toBe('@example/test-eval');
+    expect(manifest.supportedKinds).toEqual(['prediction.v0>=1.0.0']);
+    expect(manifest.capabilities.rpc[0].methods).toContain('eth_getLogs');
+    expect(manifest.capabilities.rpc[0].chainId).toBe(84532);
+
+    const unitTs = readFileSync(join(target, 'test/unit.test.ts'), 'utf8');
+    expect(unitTs).not.toContain('{{');
+  });
+});
+
+describe('runCreate (alternative-harness pattern)', () => {
+  it('emits an alternative-harness package with all seven phase files', async () => {
+    const target = await runCreate({
+      kind: 'restorer',
+      pattern: 'alternative-harness',
+      packageName: '@example/test-althern',
+      kindString: 'prediction.v0',
+      network: 'base-sepolia',
+      outDir: TMP,
+    });
+    for (const phase of [
+      'orient',
+      'strategize',
+      'plan',
+      'execute',
+      'debrief',
+      'improve',
+      'memory',
+    ]) {
+      expect(existsSync(join(target, 'src/phases', `${phase}.ts`))).toBe(true);
+    }
+    expect(existsSync(join(target, 'src/mock-harness.ts'))).toBe(true);
+    expect(existsSync(join(target, 'src/coordinator.ts'))).toBe(true);
+    expect(existsSync(join(target, 'src/harness.ts'))).toBe(true);
+    expect(existsSync(join(target, 'test/coordinator.test.ts'))).toBe(true);
+
+    const indexTs = readFileSync(join(target, 'src/index.ts'), 'utf8');
+    expect(indexTs).not.toContain('{{');
+    expect(indexTs).toContain("kind === 'prediction.v0'");
+  });
+
+  it('rejects unknown patterns', async () => {
+    await expect(
+      runCreate({
+        kind: 'restorer',
+        pattern: 'nonsense' as unknown as 'forecaster',
+        packageName: '@example/x',
+        kindString: 'prediction.v0',
+        network: 'base-sepolia',
+        outDir: TMP,
+      }),
+    ).rejects.toThrow(/unsupported pattern/);
+  });
+});

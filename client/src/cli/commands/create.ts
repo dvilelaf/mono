@@ -46,7 +46,13 @@ const NETWORK_CHAIN_IDS: Record<string, number> = {
   'ethereum-mainnet': 1,
 };
 
-export type RestorerPattern = 'forecaster';
+export type RestorerPattern = 'forecaster' | 'evaluator' | 'alternative-harness';
+
+export const SUPPORTED_PATTERNS: readonly RestorerPattern[] = [
+  'forecaster',
+  'evaluator',
+  'alternative-harness',
+];
 
 export interface RunCreateArgs {
   kind: 'restorer';
@@ -72,10 +78,45 @@ const FORECASTER_FILES: TemplateFile[] = [
   { src: 'gitignore.tmpl', dst: '.gitignore' },
 ];
 
+const EVALUATOR_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'jinn.manifest.json.tmpl', dst: 'jinn.manifest.json' },
+  { src: 'src/index.ts.tmpl', dst: 'src/index.ts' },
+  { src: 'test/unit.test.ts.tmpl', dst: 'test/unit.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
+const ALTERNATIVE_HARNESS_FILES: TemplateFile[] = [
+  { src: 'package.json.tmpl', dst: 'package.json' },
+  { src: 'tsconfig.json.tmpl', dst: 'tsconfig.json' },
+  { src: 'jinn.manifest.json.tmpl', dst: 'jinn.manifest.json' },
+  { src: 'src/index.ts.tmpl', dst: 'src/index.ts' },
+  { src: 'src/harness.ts.tmpl', dst: 'src/harness.ts' },
+  { src: 'src/mock-harness.ts.tmpl', dst: 'src/mock-harness.ts' },
+  { src: 'src/coordinator.ts.tmpl', dst: 'src/coordinator.ts' },
+  { src: 'src/phases/orient.ts.tmpl', dst: 'src/phases/orient.ts' },
+  { src: 'src/phases/strategize.ts.tmpl', dst: 'src/phases/strategize.ts' },
+  { src: 'src/phases/plan.ts.tmpl', dst: 'src/phases/plan.ts' },
+  { src: 'src/phases/execute.ts.tmpl', dst: 'src/phases/execute.ts' },
+  { src: 'src/phases/debrief.ts.tmpl', dst: 'src/phases/debrief.ts' },
+  { src: 'src/phases/improve.ts.tmpl', dst: 'src/phases/improve.ts' },
+  { src: 'src/phases/memory.ts.tmpl', dst: 'src/phases/memory.ts' },
+  { src: 'test/unit.test.ts.tmpl', dst: 'test/unit.test.ts' },
+  { src: 'test/coordinator.test.ts.tmpl', dst: 'test/coordinator.test.ts' },
+  { src: 'README.md.tmpl', dst: 'README.md' },
+  { src: 'gitignore.tmpl', dst: '.gitignore' },
+];
+
 function templateFiles(pattern: RestorerPattern): TemplateFile[] {
   switch (pattern) {
     case 'forecaster':
       return FORECASTER_FILES;
+    case 'evaluator':
+      return EVALUATOR_FILES;
+    case 'alternative-harness':
+      return ALTERNATIVE_HARNESS_FILES;
     default:
       throw new Error(`unsupported pattern: ${pattern as string}`);
   }
@@ -127,7 +168,7 @@ Scaffold a new external Jinn restorer impl package.
 
 Options:
   --pattern=<pattern>     Template pattern (default: forecaster)
-                          Supported: forecaster
+                          Supported: forecaster, evaluator, alternative-harness
   --kind=<kindString>     Intent kind the impl handles (default: prediction.v0)
   --network=<network>     Default network (default: base-sepolia)
                           One of: base-mainnet, base-sepolia, sepolia, ethereum-mainnet
@@ -181,8 +222,10 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   const flags = parsed.values;
   const pattern = String(flags.pattern ?? 'forecaster') as RestorerPattern;
-  if (pattern !== 'forecaster') {
-    ctx.writer.write(`error: unsupported --pattern '${pattern}' (only 'forecaster' is supported)\n`);
+  if (!SUPPORTED_PATTERNS.includes(pattern)) {
+    ctx.writer.write(
+      `error: unsupported --pattern '${pattern}' (supported: ${SUPPORTED_PATTERNS.join(', ')})\n`,
+    );
     ctx.exit(1);
     return;
   }
