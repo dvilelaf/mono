@@ -44,6 +44,9 @@ This spec closes that gap.
 - The external-impl distribution mechanism
   (`spec/2026-05-external-restorer-impls.md`; audit §8 decision #1).
 - Trust boundary for third-party impls (audit §8 decision #3).
+- Path 1 plug-ins (`spec/2026-04-30-plug-in-surface.md` §4) use the
+  same `kind` grammar; their `compatibility.supportedKinds` field
+  follows the §2 grammar identically.
 
 ### 1.3 Non-goals
 
