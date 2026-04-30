@@ -18,8 +18,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { DesiredStateSchema, parseDesiredState } from './types/desired-state.js';
-import type { DesiredState } from './types/desired-state.js';
+import { RestorationJobSchema, parseRestorationJob } from './types/desired-state.js';
+import type { RestorationJob } from './types/desired-state.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ export const JinnConfigSchema = z.object({
   nodeEndpoint: z.string().optional(),
 
   /** Desired states to create and restore. Empty by default; testnet auto-intents fill the loop. */
-  desiredStates: z.array(DesiredStateSchema).default([]),
+  desiredStates: z.array(RestorationJobSchema).default([]),
 
   /** IPFS upload endpoint */
   ipfsRegistryUrl: z.string().default('https://registry.autonolas.tech'),
@@ -244,12 +244,21 @@ export const JinnConfigSchema = z.object({
    * byKind:   explicit spec.kind → impl name mapping (highest priority)
    * default:  fallback impl name when no kind-specific match is found
    * disabled: impl names to exclude from dispatch entirely
+   * wrapWith: universal-wrap impl name (jinn-mono-0k2). When set AND
+   *           registered + active + supports the ctx, that impl wins for
+   *           every non-evaluation dispatch — bypassing byKind/default/
+   *           first-match. Default ships as `'claude-code-learner'` so the
+   *           learning envelope wraps every restoration kind. Operators set
+   *           this to `null` (or any other registered wrapper-style impl
+   *           name) to flip it off / swap it out. Evaluations always
+   *           dispatch to specialists.
    */
   restorers: z
     .object({
       byKind: z.record(z.string()).optional(),
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
+      wrapWith: z.string().nullable().optional(),
     })
     .optional(),
 
@@ -264,6 +273,48 @@ export const JinnConfigSchema = z.object({
       implStateDirRoot: z.string().optional(),
     })
     .optional(),
+
+  /**
+   * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
+   * backfill `agent_id` on `complete` services that pre-date j07).
+   *
+   * Defaults to true — the migrations are no-ops on already-migrated
+   * fleets and cheap on Base. Operators on a flaky RPC or with locked
+   * funds can set this to false and run `jinn migrate-agent-id`
+   * explicitly.
+   *
+   * Env: JINN_RUN_LEGACY_MIGRATIONS=0|1.
+   */
+  runLegacyMigrations: z.boolean().default(true),
+
+  /**
+   * ERC-8004 Identity Registry contract address on the configured chain.
+   * Pre-rebuild config key (PR #37 cleanup left it in place). The post-rebuild
+   * client (jinn-mono-j07/3zk) reads the address from
+   * `client/src/erc8004/identity.ts` constants and from
+   * `EarningState.identity_registry_address`; this config key is currently
+   * unused but kept for backwards-compat with operator config files.
+   * Env: JINN_IDENTITY_REGISTRY_ADDRESS
+   */
+  identityRegistryAddress: z.string().optional(),
+
+  /**
+   * ERC-8004 Validation Registry contract address on the configured chain.
+   * Pre-rebuild config key. The post-rebuild client (jinn-mono-9jg) reads the
+   * address from `client/src/erc8004/addresses.ts:VALIDATION_REGISTRY_ADDRESSES`;
+   * this config key is currently unused but kept for backwards-compat.
+   * Env: JINN_VALIDATION_REGISTRY_ADDRESS
+   */
+  validationRegistryAddress: z.string().optional(),
+
+  /**
+   * Whether to enable the read-only reputation surface (query-time flag).
+   * Pre-rebuild config key. The post-rebuild client (jinn-mono-2ff/yg4) is
+   * always constructed when `agent_id` is set; this flag is currently unused
+   * but kept for backwards-compat.
+   * Env: JINN_REPUTATION_ENABLED
+   */
+  reputationEnabled: z.boolean().default(false),
 }).refine(
   (cfg) => !cfg.jinnDistributorAddress || !!cfg.ethereumRpcUrl,
   {
@@ -283,7 +334,7 @@ const DEFAULT_ENGINE = {
 /** JinnConfig with rpcUrl guaranteed to be resolved (never undefined) and desiredStates with id always assigned. */
 export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'desiredStates' | 'engine'> & {
   rpcUrl: string;
-  desiredStates: DesiredState[];
+  desiredStates: RestorationJob[];
   engine: { workingDirRoot: string; implStateDirRoot: string };
 };
 
@@ -393,8 +444,21 @@ export function loadConfig(configPath?: string): JinnConfig {
     merged.debug = v === '1' || v === 'true' || v === 'yes';
   }
 
+  if (env['JINN_RUN_LEGACY_MIGRATIONS'] !== undefined) {
+    const v = env['JINN_RUN_LEGACY_MIGRATIONS'].trim().toLowerCase();
+    merged.runLegacyMigrations =
+      !(v === '0' || v === 'false' || v === 'no' || v === '');
+  }
+
   if (env['JINN_MASTER_ETH_DAILY_WEI']) {
     merged.masterEthDailyEstimateWei = env['JINN_MASTER_ETH_DAILY_WEI'].trim();
+  }
+
+  if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
+  if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
+  if (env['JINN_REPUTATION_ENABLED'] !== undefined) {
+    const rv = env['JINN_REPUTATION_ENABLED'].trim().toLowerCase();
+    merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
   }
 
   if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
@@ -473,8 +537,8 @@ export function loadConfig(configPath?: string): JinnConfig {
   return {
     ...parsed,
     rpcUrl: parsed.rpcUrl ?? defaultRpcUrl,
-    // parseDesiredState assigns a UUID to any entry missing an id
-    desiredStates: parsed.desiredStates.map(parseDesiredState),
+    // parseRestorationJob assigns a UUID to any entry missing an id
+    desiredStates: parsed.desiredStates.map(parseRestorationJob),
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
@@ -488,4 +552,110 @@ export function loadConfig(configPath?: string): JinnConfig {
 export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
   const idx = argv.indexOf('--config');
   return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
+}
+
+// ── Config provenance ────────────────────────────────────────────────────────
+
+/**
+ * Env var names that map to JinnConfig fields (excluding password and
+ * security-sensitive vars that must never be surfaced even redacted).
+ *
+ * The list mirrors the `merged.*` assignments in `loadConfig` above.
+ * JINN_PASSWORD is intentionally absent — never list it.
+ */
+const TRACKED_ENV_VARS = [
+  'JINN_NETWORK',
+  'JINN_EARNING_DIR',
+  'JINN_DB_PATH',
+  'JINN_POLL_INTERVAL_MS',
+  'JINN_REWARD_CLAIM_INTERVAL_MS',
+  'JINN_BALANCE_TOPUP_INTERVAL_MS',
+  'JINN_API_PORT',
+  'JINN_CLAUDE_PATH',
+  'JINN_CLAUDE_MODEL',
+  'JINN_RUNTIME_MODE',
+  'JINN_PEERS',
+  'JINN_SUBGRAPH_URL',
+  'JINN_NODE_ENDPOINT',
+  'JINN_IPFS_REGISTRY_URL',
+  'JINN_IPFS_GATEWAY_URL',
+  'JINN_TESTNET_L2_DEPLOYMENT',
+  'JINN_TESTNET_TOKEN_DEPLOYMENT',
+  'JINN_TESTNET_MECH_DEPLOYMENT',
+  'JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT',
+  'JINN_STAKING_MODE',
+  'JINN_TARGET_SERVICES',
+  'JINN_DEBUG',
+  'JINN_RUN_LEGACY_MIGRATIONS',
+  'JINN_MASTER_ETH_DAILY_WEI',
+  'JINN_IDENTITY_REGISTRY_ADDRESS',
+  'JINN_VALIDATION_REGISTRY_ADDRESS',
+  'JINN_REPUTATION_ENABLED',
+  'JINN_RPC_URL',
+  'BASE_RPC_URL',
+  'BASE_SEPOLIA_RPC_URL',
+  'JINN_ARCHIVE_RPC_URL',
+  'JINN_DESIRED_STATES',
+  'JINN_ENGINE_WORKING_DIR_ROOT',
+  'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_BUILD_COMMIT',
+] as const;
+
+export interface ConfigProvenance {
+  /** Resolved config file path, or null if only defaults were used. */
+  configPath: string | null;
+  /** Whether a config file was found and loaded. */
+  configLoaded: boolean;
+  /** Resolved network. */
+  network: 'mainnet' | 'testnet';
+  /** Resolved earning state directory. */
+  earningDir: string;
+  /** Resolved SQLite database path. */
+  dbPath: string;
+  /** Resolved runtime mode, or null if auto-detected. */
+  runtimeMode: string | null;
+  /**
+   * Env vars that were set and contributed to the resolved config.
+   * Values are always `"set"` — never the actual value.
+   * JINN_PASSWORD is never listed here.
+   */
+  envOverrides: Record<string, 'set'>;
+}
+
+/**
+ * Build a structured provenance block describing how the config was resolved.
+ *
+ * Pass the same `configPath` you passed to `loadConfig`, and the resulting
+ * `JinnConfig`. The helper inspects `process.env` to discover which tracked
+ * env vars were set; it never reads their values.
+ *
+ * @param configPath — the explicit config file path passed to `loadConfig`,
+ *   or undefined if the default path was used.
+ * @param config — the resolved `JinnConfig` returned by `loadConfig`.
+ * @param env — defaults to `process.env`; inject in tests.
+ */
+export function buildConfigProvenance(
+  configPath: string | undefined,
+  config: JinnConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): ConfigProvenance {
+  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  const configLoaded = existsSync(filePath);
+
+  const envOverrides: Record<string, 'set'> = {};
+  for (const name of TRACKED_ENV_VARS) {
+    if (env[name] !== undefined) {
+      envOverrides[name] = 'set';
+    }
+  }
+
+  return {
+    configPath: configLoaded ? filePath : null,
+    configLoaded,
+    network: config.network,
+    earningDir: config.earningDir,
+    dbPath: config.dbPath,
+    runtimeMode: config.runtimeMode ?? null,
+    envOverrides,
+  };
 }

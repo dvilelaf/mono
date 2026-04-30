@@ -25,12 +25,10 @@ async function buildEngineWith(store: Store, run: RestorerImpl['run'], implName 
     run,
   };
   const registry = {
-    resolveImplName: () => implName,
     findFor: () => impl,
   };
   const engine = new ExposedEngine({
     store,
-    registry,
     implRegistry: registry,
     paths: { workingDirRoot: join(root, 'work'), implStateDirRoot: join(root, 'impl') },
   });
@@ -42,7 +40,7 @@ async function buildEngineWith(store: Store, run: RestorerImpl['run'], implName 
     onchainCreationBlock: 1,
     windowStartTs: now - 10_000,
     windowEndTs: now + 600_000,
-    desiredState: { id: 'health-check', description: 'legacy intent' },
+    restorationJob: { id: 'health-check', description: 'legacy intent' },
   });
   const persistence = (engine as any).persistence;
   persistence.transition('req-1', IntentState.CLAIMED);
@@ -68,12 +66,10 @@ describe('legacy-claude skip handling', () => {
         },
       };
       const registry = {
-        resolveImplName: () => 'legacy-claude',
         findFor: () => legacyClaude,
       };
       const opts: RestorationEngineOptions = {
         store,
-        registry,
         implRegistry: registry,
         paths: {
           workingDirRoot: join(root, 'work'),
@@ -90,7 +86,7 @@ describe('legacy-claude skip handling', () => {
         onchainCreationBlock: 1,
         windowStartTs: now - 10_000,
         windowEndTs: now + 600_000,
-        desiredState: {
+        restorationJob: {
           id: 'health-check',
           description: 'legacy intent',
         },
