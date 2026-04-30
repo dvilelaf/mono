@@ -6,7 +6,7 @@ verb: steer
 artifact: spec/2026-04-30-knowledge-market-vision-discussion.md (discussion draft)
 captain: ritsukai
 operator: jinn-mono/crew/opus (jinn-mono-3lc)
-status: in-flight 2026-04-30 — vision sitting; framing iterated through brainstorm + sibling discussion #57 review
+status: ratified 2026-04-30 — posted as Discussion #59 (https://github.com/Jinn-Network/mono/discussions/59)
 flare_id: null
 ---
 
@@ -277,8 +277,9 @@ This framing is revisited if any of the following surface:
   - `client/src/x402/{handler,acquire,facilitator}.ts` — payment plumbing
   - `client/src/mcp/server.ts:160-230` — agent-as-buyer skeleton
   - `subgraph/schema.graphql` — canonical indexer (infrastructure)
-- **Sitting bead:** jinn-mono-3lc (in-progress; closes when Captain
-  ratifies the discussion-post wording).
+- **Sitting bead:** jinn-mono-3lc (closed with verb `ship` on
+  posting Discussion #59).
+- **Posted Discussion:** [#59 — Jinn as the knowledge market — implementation roadmap proposal](https://github.com/Jinn-Network/mono/discussions/59)
 
 ## Consequences
 
