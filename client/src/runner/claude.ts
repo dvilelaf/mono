@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -18,10 +18,10 @@ function resolveJinnMcpLauncher(explicitPath?: string): { command: string; args:
   const mcpDir = join(__dirname, '..', 'mcp');
   const js = join(mcpDir, 'server.js');
   const ts = join(mcpDir, 'server.ts');
-  if (existsSync(js)) {
+  if (fs.existsSync(js)) {
     return { command: process.execPath, args: [js] };
   }
-  if (existsSync(ts)) {
+  if (fs.existsSync(ts)) {
     return { command: process.execPath, args: ['--import', 'tsx', ts] };
   }
   return { command: process.execPath, args: [js] };
@@ -48,10 +48,10 @@ export class ClaudeRunner implements Runner {
     const prompt = buildPrompt(restorationJob);
 
     // Write MCP config to temp dir
-    const tmpDir = mkdtempSync(join(tmpdir(), 'jinn-runner-'));
+    const tmpDir = fs.mkdtempSync(join(tmpdir(), 'jinn-runner-'));
     const mcpConfigPath = join(tmpDir, 'mcp-config.json');
 
-    writeFileSync(mcpConfigPath, JSON.stringify({
+    fs.writeFileSync(mcpConfigPath, JSON.stringify({
       mcpServers: {
         'jinn-client': {
           command: this.mcpLauncher.command,
@@ -117,7 +117,7 @@ export class ClaudeRunner implements Runner {
 
       return { data: '' };
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 }

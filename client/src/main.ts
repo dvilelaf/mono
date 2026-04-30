@@ -34,6 +34,7 @@ import type { FleetState, ServiceState, ServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from './earning/wallet.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
+import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -513,6 +514,16 @@ export async function main(): Promise<DaemonStartupInfo> {
   });
 
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
+  const corpusEnv: RunnerContext['corpusEnv'] | undefined =
+    config.subgraphUrl?.trim()
+      ? {
+          subgraphUrl: config.subgraphUrl,
+          ipfsGatewayUrl: config.ipfsGatewayUrl,
+          agentPrivateKey,
+          selfSafeAddress: safeAddress,
+        }
+      : undefined;
+
   for (const impl of buildRestorerImpls({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
@@ -524,6 +535,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
     implStateDirRoot: config.engine.implStateDirRoot,
+    corpusEnv,
   })) {
     implRegistry.register(impl);
   }
