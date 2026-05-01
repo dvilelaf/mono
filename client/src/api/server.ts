@@ -40,7 +40,15 @@ export interface ApiServerConfig {
    * Daemon-side Corpus instance. When set, exposes
    * `POST /v1/artifacts/acquire` so the MCP subprocess (and other in-host
    * consumers) can fetch artifacts without ever seeing the agent EOA private
-   * key. The route is localhost-only by virtue of the bind host below.
+   * key.
+   *
+   * SECURITY: this route signs x402 payments with the agent EOA. It has no
+   * authentication. An attacker who can reach this port can post fabricated
+   * `access.endpoint` URLs and drain the operator's USDC balance via the
+   * payment dance. The API server's bind host is `0.0.0.0` (see the
+   * `serve(...)` call at the bottom of this file) — operators must firewall
+   * the daemon API port externally. Scoped auth on this route is tracked
+   * as a follow-up.
    *
    * Asymmetry with `search_artifacts`: search is keyless (subgraph + IPFS
    * gateway only) and stays client-side in the MCP server. Acquire is the

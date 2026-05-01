@@ -43,32 +43,33 @@ const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
-// Build a corpus instance when the daemon supplied the keyless URLs. This
-// instance is ONLY used by `search_artifacts` (corpus.query → subgraph +
-// IPFS gateway, both keyless). `acquire_artifact` proxies to the daemon
-// over DAEMON_API_URL, so it does NOT need a corpus here and the agent
-// EOA private key never crosses into this subprocess. See spec §4.
+// Build a query-only corpus capability when the daemon supplied the keyless
+// URLs. The MCP subprocess gets `Pick<Corpus, 'query'>` — `acquire` and
+// `acquireBySha256` are NOT exposed here, so any future call site in this
+// process structurally cannot reach into the signer. `acquire_artifact`
+// proxies to the daemon over DAEMON_API_URL (which holds the agent EOA
+// private key in-process). See spec §4.
 //
 // `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
-// but unused by corpus.query; we pass placeholder values so the type
-// contract is satisfied while making the no-secret posture explicit.
-function buildCorpus(): Corpus | null {
+// but unused by corpus.query. Placeholder values are confined to this
+// closure and never escape via the returned object.
+function buildCorpusQuery(): Pick<Corpus, 'query'> | null {
   if (!store) return null;
   const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
   if (!subgraphUrl || !ipfsGatewayUrl) {
     return null;
   }
-  return createCorpus({
+  const full = createCorpus({
     subgraphUrl,
     ipfsGatewayUrl,
     store,
-    // Unused on the search path; acquire is proxied to the daemon.
     signer: { privateKey: '0x0' },
     selfSafeAddress: '0x0000000000000000000000000000000000000000',
   });
+  return { query: full.query.bind(full) };
 }
-const corpus = buildCorpus();
+const corpus = buildCorpusQuery();
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
