@@ -15,6 +15,34 @@ function makePkg(manifest: unknown, pkgName = '@x/p'): string {
 }
 
 describe('loadPlugInManifest', () => {
+  it('accepts a slot entry whose filename contains a literal ".." (segment-aware traversal guard)', async () => {
+    // Regression for the over-broad `(?!.*\.\.)` regex that rejected
+    // legitimate filenames like `notes..v2.md`. The segment-aware lookahead
+    // `(?!(?:.*/)?\.\.(?:/|$))` blocks `..` only when it is a complete path
+    // segment, so a filename that merely contains `..` mid-string is fine.
+    const pkg = makePkg({
+      schemaVersion: '1.0.0',
+      name: '@x/p',
+      version: '0.1.0',
+      compatibility: { claudeCodeLearner: '>=0.1.0' },
+      slots: [
+        {
+          type: 'phase-agent-override',
+          phase: 'execute',
+          agent: 'step-worker',
+          entry: 'agents/notes..v2.md',
+        },
+      ],
+    });
+    mkdirSync(join(pkg, 'agents'), { recursive: true });
+    writeFileSync(
+      join(pkg, 'agents', 'notes..v2.md'),
+      '---\nname: notes\n---\n# stub',
+    );
+    const m = await loadPlugInManifest(pkg);
+    expect(m.slots).toHaveLength(1);
+  });
+
   it('parses + validates a phase-agent-override manifest', async () => {
     const pkg = makePkg({
       schemaVersion: '1.0.0',

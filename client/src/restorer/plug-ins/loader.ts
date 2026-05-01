@@ -50,7 +50,7 @@ export async function loadPlugIns({
   const memoryBackends: RegistrySlot<MemoryBackendSlot>[] = [];
   const hooks: RegistrySlot<HookSlot>[] = [];
 
-  // Track collisions for last-installed-wins on phase-agent overrides.
+  // Track first-installed-wins collisions for phase-agent overrides.
   const phaseAgentKeyed = new Map<
     string,
     RegistrySlot<PhaseAgentOverrideSlot>

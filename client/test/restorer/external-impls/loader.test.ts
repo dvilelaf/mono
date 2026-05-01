@@ -229,6 +229,47 @@ describe('loadExternalImpl — manifest.entry path traversal', () => {
       expect(['impl-entry-escape', 'impl-load-failed']).toContain(result.reason);
     }
   });
+
+  it('accepts a manifest entry whose filename contains a literal ".." (segment-aware guard)', async () => {
+    // Regression for the over-broad `(?!.*\.\.)` lookahead that rejected
+    // legitimate filenames like `./dist/foo..bar.js`. The segment-aware
+    // lookahead `(?!(?:.*/)?\.\.(?:/|$))` blocks `..` only as a complete
+    // path segment, so a filename that contains `..` mid-string is allowed.
+    const root = join(TMP, 'mid-dot-impl');
+    mkdirSync(join(root, 'dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'dist', 'foo..bar.js'),
+      `export default (env) => ({ name: env.implName, version: env.implVersion, supports: ({ kind }) => kind === 'prediction.v0', run: async () => ({ venueRef: { name: 'fake' }, gating: {} }) });`,
+    );
+    const sk = ed.utils.randomSecretKey();
+    const pk = await ed.getPublicKeyAsync(sk);
+    const pkB64 = Buffer.from(pk).toString('base64');
+    const packageHash = computePackageHash(root);
+    const manifest = {
+      schemaVersion: '1.0.0' as const,
+      name: '@dots/restorer',
+      version: '0.1.0',
+      supportedKinds: ['prediction.v0>=1.0.0'],
+      entry: './dist/foo..bar.js',
+      package: { cid: 'bafyfake', hash: packageHash },
+      capabilities: {},
+      signature: { alg: 'ed25519' as const, publicKey: pkB64, sig: '' },
+    };
+    const body = canonicaliseManifest(manifest);
+    const sig = await ed.signAsync(new TextEncoder().encode(body), sk);
+    manifest.signature.sig = Buffer.from(sig).toString('base64');
+    writeFileSync(
+      join(root, 'jinn.manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    );
+
+    const result = await loadExternalImpl({
+      entry: { name: '@dots/restorer', entry: root },
+      trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
+      env: envFor('@dots/restorer'),
+    });
+    expect(result.kind).toBe('ok');
+  });
 });
 
 // ---------------------------------------------------------------------------

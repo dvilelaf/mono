@@ -36,7 +36,7 @@
     "entry": {
       "type": "string",
       "description": "Package-relative module path. MUST start with `./` and MUST NOT contain `..` segments (defence against directory traversal at install time). The loader additionally enforces containment at runtime — see `client/src/restorer/external-impls/loader.ts`.",
-      "pattern": "^\\./(?!.*\\.\\.)[A-Za-z0-9_./-]+$"
+      "pattern": "^\\./(?!(?:.*/)?\\.\\.(?:/|$))[A-Za-z0-9_./-]+$"
     },
     "package": {
       "type": "object",
