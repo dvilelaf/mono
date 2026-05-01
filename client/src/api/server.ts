@@ -25,6 +25,7 @@ import {
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import { addEventsRoutes } from './events-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -73,6 +74,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       );
     }
   });
+
+  addEventsRoutes(app);
 
   // x402 payment-gated routes (if configured)
   if (config.x402) {
