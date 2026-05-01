@@ -2942,7 +2942,7 @@ async function main(): Promise<void> {
           console.log(`    Node B local search: ${searchB.length} result(s)`);
 
           // Verify content is NOT cached yet (remote artifact, metadata only)
-          const cachedContent = storeB.getArtifactContent(artifactId);
+          const cachedContent = storeB.resolveCatalogArtifactContent(artifactId);
           if (cachedContent !== null) throw new Error('Content should not be cached before acquire');
           console.log('    Content not cached yet (metadata only)');
 
@@ -2955,7 +2955,7 @@ async function main(): Promise<void> {
           console.log(`    Node B acquired content: "${content.slice(0, 50)}..."`);
 
           // Verify content is now cached
-          const cachedAfter = storeB.getArtifactContent(artifactId);
+          const cachedAfter = storeB.resolveCatalogArtifactContent(artifactId);
           if (!cachedAfter) throw new Error('Content should be cached after acquire');
           console.log('    Content cached locally on Node B');
 
@@ -3080,13 +3080,13 @@ async function main(): Promise<void> {
           console.log(`    Backfilled artifact searchable: ${results.length} result(s)`);
 
           // Verify it's marked as remote
-          const remoteInfo = backfillStore.getRemoteArtifactInfo(artifactId!);
+          const remoteInfo = backfillStore.getRemoteDiscoveryMetadata(artifactId!);
           if (!remoteInfo) throw new Error('Remote info not found');
           if (remoteInfo.endpoint !== 'http://remote-node:7331') throw new Error(`Wrong endpoint: ${remoteInfo.endpoint}`);
           console.log(`    Remote info: endpoint=${remoteInfo.endpoint}, owner=${remoteInfo.ownerAddress}`);
 
           // Content should be null (metadata only, not acquired yet)
-          const content = backfillStore.getArtifactContent(artifactId!);
+          const content = backfillStore.resolveCatalogArtifactContent(artifactId!);
           if (content !== null) throw new Error('Content should be null before acquisition');
           console.log('    Content is null (not yet acquired) — correct');
 
@@ -3124,7 +3124,6 @@ async function main(): Promise<void> {
           x402: {
             privateKey: agentEoaPrivateKey as string,
             recipientAddress: safeAddress as string,
-            pricePerArtifact: '$0.001',
             network: 'eip155:8453',
             rpcUrl: ANVIL_RPC,
           },

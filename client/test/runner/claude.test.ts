@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
 import { buildPrompt } from '../../src/runner/claude.js';
 import { TrajectoryCollector } from '../../src/trajectory/collector.js';
 
@@ -60,6 +61,51 @@ describe('ClaudeRunner — tracedSpawn integration', () => {
     expect(call.stateTo).toBe('RAN_CLAUDE');
     expect(call.args).toContain('-p');
     expect(call.args).toContain('--mcp-config');
+  });
+
+  it('writes JINN_CORPUS_* MCP env from context.corpusEnv (keyless URLs only — agent EOA stays daemon-side)', async () => {
+    const { tracedSpawn } = await import('../../src/trajectory/index.js');
+    let captured: { mcpServers: { 'jinn-client': { env: Record<string, string> } } } | undefined;
+    vi.mocked(tracedSpawn).mockImplementation(async (opts) => {
+      const idx = opts.args.indexOf('--mcp-config');
+      const mcpPath = idx >= 0 ? opts.args[idx + 1] : undefined;
+      if (mcpPath) {
+        const raw = fs.readFileSync(mcpPath, 'utf8');
+        captured = JSON.parse(raw) as typeof captured;
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+
+    const { ClaudeRunner } = await import('../../src/runner/claude.js');
+    const collector = new TrajectoryCollector({ intentCid: 'bafy', runId: 'corpus-propagate' });
+    const runner = new ClaudeRunner({ claudePath: 'claude', model: 'test-model' });
+    const corpusEnv = {
+      subgraphUrl: 'https://sg.example/gql',
+      ipfsGatewayUrl: 'https://gw.example',
+    };
+    await runner.run(
+      {
+        id: 'job-corpus',
+        description: 'Test',
+      } as unknown as import('../../src/types/desired-state.js').RestorationJob,
+      {
+        requestId: 'req-corpus' as unknown as import('../../src/types/index.js').RequestId,
+        workingDirectory: '/tmp/test',
+        timeoutMs: 5000,
+        trajectory: collector,
+        corpusEnv,
+      },
+    );
+
+    expect(captured).toBeDefined();
+    const env = captured!.mcpServers['jinn-client'].env;
+    expect(env.JINN_CORPUS_SUBGRAPH_URL).toBe('https://sg.example/gql');
+    expect(env.JINN_CORPUS_IPFS_GATEWAY_URL).toBe('https://gw.example');
+    // Security posture: the agent EOA private key NEVER crosses into the MCP
+    // subprocess. acquire_artifact proxies to the daemon at DAEMON_API_URL.
+    // See spec/2026-04-30-phase-a-umbrella.md §4.
+    expect(env.JINN_CORPUS_AGENT_PRIVATE_KEY).toBeUndefined();
+    expect(env.JINN_CORPUS_SELF_SAFE_ADDRESS).toBeUndefined();
   });
 
   it('does NOT call tracedSpawn when no trajectory is in RunnerContext', async () => {

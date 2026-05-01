@@ -303,7 +303,74 @@ export const JinnConfigSchema = z.object({
       default: z.string().optional(),
       disabled: z.array(z.string()).optional(),
       wrapWith: z.string().nullable().optional(),
+      /**
+       * Operator-supplied external impls — Path 2 plug-in surface.
+       *
+       * Each entry points the daemon at a manifest-bearing package on disk
+       * (typically inside `node_modules/`); `client/src/main.ts` invokes
+       * `loadExternalImpl()` for each entry at boot, validates the manifest
+       * against `trustedImplSigners`, and registers the resulting impl in
+       * the restorer registry. See
+       * `docs/superpowers/plans/2026-04-30-plug-in-surface-path-2-foundation.md`
+       * step 5.7-5.8.
+       */
+      externalImpls: z
+        .array(
+          z.object({
+            name: z.string(),
+            entry: z.string(),
+            package: z.string().optional(),
+            /**
+             * Optional pinned version. When set, the loader rejects the
+             * impl if its manifest's `version` does not match this string
+             * exactly — guards against silent upgrades of an on-disk
+             * package without an explicit operator config change
+             * (Finding 10).
+             */
+            version: z.string().optional(),
+          }),
+        )
+        .optional(),
     })
+    .optional(),
+
+  /**
+   * Trusted ed25519 publishers for external restorer impls. The daemon
+   * refuses to load any external impl whose manifest signature is not
+   * verifiable against one of these public keys.
+   *
+   * `publicKey` is base64-encoded raw ed25519. `label` is operator-facing
+   * provenance only.
+   */
+  trustedImplSigners: z
+    .array(
+      z.object({
+        alg: z.literal('ed25519'),
+        publicKey: z.string(),
+        label: z.string().optional(),
+      }),
+    )
+    .optional(),
+
+  /**
+   * Path 1 plug-ins for the bundled `claude-code-learner` impl — npm
+   * packages on disk that contribute phase-agent overrides, topic
+   * explorers, MCP tools, skill bundles, memory backends, or hooks via
+   * `jinn-plugin.json`.
+   *
+   * Each entry's `entry` is the absolute (or cwd-relative) path to the
+   * plug-in package root containing `package.json` + `jinn-plugin.json`.
+   * The CLI command `jinn plug-ins {list|add|remove|show}` edits this
+   * field. See spec/2026-04-30-plug-in-surface.md §4 and
+   * docs/superpowers/plans/2026-04-30-plug-in-surface-path-1-mechanism.md.
+   */
+  learnerPlugIns: z
+    .array(
+      z.object({
+        name: z.string(),
+        entry: z.string(),
+      }),
+    )
     .optional(),
 
   /**

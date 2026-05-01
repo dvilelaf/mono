@@ -40,6 +40,13 @@ export interface LegacyClaudeConfig {
    */
   daemonApiToken?: string;
   /**
+   * Corpus credentials forwarded to {@link RunnerContext.corpusEnv} so the MCP
+   * subprocess `search_artifacts` tool can hit the keyless subgraph + IPFS
+   * gateway. The agent EOA private key never crosses into the subprocess —
+   * `acquire_artifact` proxies through `daemonApiUrl` (with `daemonApiToken`).
+   */
+  corpusEnv?: RunnerContext['corpusEnv'];
+  /**
    * When true (e.g. synthetic registry), `isReady` reports the daemon is required.
    * Production daemon should omit.
    */
@@ -95,6 +102,7 @@ export class LegacyClaudeImpl implements RestorerImpl {
       storePath: this.config.storePath,
       daemonApiUrl: this.config.daemonApiUrl,
       daemonApiToken: this.config.daemonApiToken,
+      corpusEnv: this.config.corpusEnv,
     };
 
     let result: RestorationResult;
