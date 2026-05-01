@@ -3165,15 +3165,15 @@ async function main(): Promise<void> {
           // --- Test 4: Best-effort paid acquisition ---
           console.log('    Testing x402 acquisition (best-effort, may fail on Anvil)...');
           try {
-            const content = await acquireArtifactWithPayment(
+            const result = await acquireArtifactWithPayment(
               'http://localhost:7351',
               fakeSha256,
               agentEoaPrivateKey as string,
             );
-            if (content) {
-              console.log(`    x402 acquisition succeeded: ${content.length} bytes`);
+            if (result.ok) {
+              console.log(`    x402 acquisition succeeded: ${result.content.length} bytes`);
             } else {
-              console.log('    x402 acquisition returned null (payment settlement may not work on Anvil fork)');
+              console.log(`    x402 acquisition returned ${result.reason} (payment settlement may not work on Anvil fork)`);
             }
           } catch (err) {
             console.log(`    x402 acquisition error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
