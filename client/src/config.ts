@@ -545,79 +545,11 @@ function normalizeSolverNetPlugin(plugin: unknown, solverType: string): unknown 
   return defaultCanonicalPluginFor(solverType);
 }
 
-/**
- * One-shot operator config migration for the Harness/SolverPlugin vocabulary.
- * The migration is deliberately lossy for removed Path 1 knobs: `wrapWith` and
- * `learnerPlugIns` are not carried forward.
- */
 export function migrateHarnessConfigFileValues(
   values: Record<string, unknown>,
 ): { values: Record<string, unknown>; changed: boolean } {
   const next: Record<string, unknown> = { ...values };
   let changed = false;
-
-  if ('desiredStates' in next && !('tasks' in next)) {
-    next['tasks'] = next['desiredStates'];
-    changed = true;
-  }
-  if ('desiredStates' in next) {
-    delete next['desiredStates'];
-    changed = true;
-  }
-
-  const legacyRestorers = isRecord(next['restorers']) ? next['restorers'] : undefined;
-  const existingHarnesses = isRecord(next['harnesses']) ? next['harnesses'] : {};
-  let migratedBySolverType: Record<string, unknown> = {};
-  if (legacyRestorers) {
-    const migratedHarnesses: Record<string, unknown> = { ...legacyRestorers, ...existingHarnesses };
-    if (isRecord(legacyRestorers['byKind']) && !isRecord(migratedHarnesses['bySolverType'])) {
-      migratedHarnesses['bySolverType'] = legacyRestorers['byKind'];
-    }
-    if (isRecord(migratedHarnesses['bySolverType'])) {
-      migratedBySolverType = { ...migratedHarnesses['bySolverType'] };
-    }
-    delete migratedHarnesses['byKind'];
-    delete migratedHarnesses['bySolverType'];
-    delete migratedHarnesses['wrapWith'];
-    next['harnesses'] = migratedHarnesses;
-    delete next['restorers'];
-    changed = true;
-  } else if (isRecord(next['harnesses'])) {
-    const harnesses: Record<string, unknown> = { ...next['harnesses'] };
-    if (isRecord(harnesses['byKind']) && !isRecord(harnesses['bySolverType'])) {
-      harnesses['bySolverType'] = harnesses['byKind'];
-      changed = true;
-    }
-    if (isRecord(harnesses['bySolverType'])) {
-      migratedBySolverType = { ...harnesses['bySolverType'] };
-    }
-    if ('byKind' in harnesses) {
-      delete harnesses['byKind'];
-      changed = true;
-    }
-    if ('bySolverType' in harnesses) {
-      delete harnesses['bySolverType'];
-      changed = true;
-    }
-    if ('wrapWith' in harnesses) {
-      delete harnesses['wrapWith'];
-      changed = true;
-    }
-    next['harnesses'] = harnesses;
-  }
-
-  if ('learnerPlugIns' in next) {
-    delete next['learnerPlugIns'];
-    changed = true;
-  }
-
-  const legacySolverPlugins = Array.isArray(next['solverPlugins'])
-    ? [...(next['solverPlugins'] as unknown[])]
-    : [];
-  if ('solverPlugins' in next) {
-    delete next['solverPlugins'];
-    changed = true;
-  }
 
   const solverNetsInput = next['solverNets'];
   const solverNets: Record<string, unknown> = {};
@@ -632,9 +564,7 @@ export function migrateHarnessConfigFileValues(
         canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
         harness: typeof item['harness'] === 'string'
           ? item['harness']
-          : typeof migratedBySolverType[solverType] === 'string'
-            ? migratedBySolverType[solverType]
-            : 'claude-code-learner',
+          : 'claude-code-learner',
         plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
@@ -653,9 +583,7 @@ export function migrateHarnessConfigFileValues(
         canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
         harness: typeof item['harness'] === 'string'
           ? item['harness']
-          : typeof migratedBySolverType[solverType] === 'string'
-            ? migratedBySolverType[solverType]
-            : 'claude-code-learner',
+          : 'claude-code-learner',
         plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
@@ -663,18 +591,11 @@ export function migrateHarnessConfigFileValues(
   }
 
   if (!solverNets['prediction']) {
-    const plugin = legacySolverPlugins.find((entry) =>
-      typeof entry === 'string'
-        ? entry.includes('jinn-prediction-plugin')
-        : isRecord(entry) && typeof entry['source'] === 'string' && entry['source'].includes('jinn-prediction-plugin'),
-    );
     solverNets['prediction'] = {
       enabled: true,
       solverType: 'prediction.v0',
-      canonicalPlugin: normalizeSolverNetPlugin(plugin, 'prediction.v0'),
-      harness: typeof migratedBySolverType['prediction.v0'] === 'string'
-        ? migratedBySolverType['prediction.v0']
-        : 'claude-code-learner',
+      canonicalPlugin: normalizeSolverNetPlugin(undefined, 'prediction.v0'),
+      harness: 'claude-code-learner',
       plugins: [],
       taskGenerator: { enabled: true },
     };
