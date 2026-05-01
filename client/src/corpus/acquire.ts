@@ -75,6 +75,15 @@ export async function acquireArtifactContent(args: AcquireArtifactArgs): Promise
   if (ownerSafe && ownerSafe.toLowerCase() === selfSafeAddress.toLowerCase()) {
     const own = store.getServedArtifact(sha256);
     if (own) {
+      // Re-verify before mirroring. If served_artifacts has been corrupted
+      // (disk error, manual edit, future migration bug, etc.) we must NOT
+      // propagate the bad bytes into network_artifacts where peers can
+      // fetch them via x402. Throwing closes the cache-poisoning gap; the
+      // self-store path is now hash-equivalent to origin / route-resolver.
+      const actualSha = sha256Hex(own.content);
+      if (actualSha !== sha256) {
+        throw new HashMismatchError(sha256, actualSha, 'self-store', selfSafeAddress);
+      }
       // Mirror into cache so peer asks for the same content can hit cache (provenance: self-store-mirror).
       const ts = now();
       store.saveNetworkArtifact({
