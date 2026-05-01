@@ -38,6 +38,14 @@ export interface ApiServerConfig {
    */
   bindHost?: string;
   store: Store;
+  /**
+   * Bearer token required on cost-mutating routes (`POST /artifacts`,
+   * `POST /v1/artifacts/acquire`). Generated at daemon startup (or read
+   * from `DAEMON_API_TOKEN`) and threaded into the MCP subprocess via
+   * the same env var. Read-only routes (`GET /v1/status`, search,
+   * x402 cross-operator content) stay public.
+   */
+  apiToken: string;
   requireAuth?: boolean;
   onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void;
   x402?: X402Config;

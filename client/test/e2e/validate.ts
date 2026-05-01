@@ -877,7 +877,7 @@ async function main(): Promise<void> {
     // Start API server so submit_restoration_result can POST artifacts via DAEMON_API_URL
     // Use port 0 to let the OS assign a free port, avoiding EADDRINUSE from stale e2e runs.
     const { startApiServer } = await import('../../src/api/server.js');
-    restorerApiServer = await startApiServer({ port: 0, store });
+    restorerApiServer = await startApiServer({ port: 0, store, apiToken: 'e2e-test-token' });
     const daemonApiUrl = `http://127.0.0.1:${restorerApiServer.port}`;
 
     const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
@@ -2899,8 +2899,8 @@ async function main(): Promise<void> {
         const storeB = new Store(join(tmpDir, 'node-b.db'));
 
         // Start two API servers on different ports
-        const serverA = await startApiServer({ port: 7341, store: storeA, requireAuth: false });
-        const serverB = await startApiServer({ port: 7342, store: storeB, requireAuth: false });
+        const serverA = await startApiServer({ port: 7341, store: storeA, requireAuth: false, apiToken: 'e2e-test-token' });
+        const serverB = await startApiServer({ port: 7342, store: storeB, requireAuth: false, apiToken: 'e2e-test-token' });
         console.log(`    Node A API on port ${serverA.port}`);
         console.log(`    Node B API on port ${serverB.port}`);
 
@@ -3118,6 +3118,7 @@ async function main(): Promise<void> {
         const x402Server = await startApiServer({
           port: 7351,
           store: x402Store,
+          apiToken: 'e2e-test-token',
           x402: {
             privateKey: agentEoaPrivateKey as string,
             recipientAddress: safeAddress as string,
@@ -3199,6 +3200,7 @@ async function main(): Promise<void> {
           port: 7352,
           store: authStore,
           requireAuth: true,
+          apiToken: 'e2e-test-token',
         });
 
         try {

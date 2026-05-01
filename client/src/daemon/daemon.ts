@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
@@ -34,6 +35,15 @@ export interface DaemonConfig {
    * Cost-mutating routes additionally require a bearer token.
    */
   apiBindHost?: string;
+  /**
+   * Bearer token required on cost-mutating API routes (`POST /artifacts`,
+   * `POST /v1/artifacts/acquire`). main.ts generates one at startup
+   * (or reads from `DAEMON_API_TOKEN`) and passes it here. When omitted
+   * (e.g. unit tests that don't exercise the cost-mutating routes), the
+   * Daemon synthesizes a random per-process token so the server still
+   * has something to compare against.
+   */
+  apiToken?: string;
   peers?: string[];
   signer?: EthHttpSigner;
   subgraphUrl?: string;
@@ -112,6 +122,7 @@ export class Daemon {
   private apiServer?: ApiServer;
   private peerSync?: PeerSync;
   private readonly apiPort: number;
+  private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
@@ -120,6 +131,11 @@ export class Daemon {
     this.store = new Store(config.dbPath);
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
+    // When the embedder didn't supply a token (e.g. a unit test that doesn't
+    // exercise the cost-mutating routes), fall back to a fresh random token
+    // so the API server still has something to compare bearer headers
+    // against. Production callers (main.ts) always pass an explicit token.
+    this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
     const intentSources = config.intentSources
       ?? (config.desiredStates ? [new StaticConfiguredIntentSource(config.desiredStates)] : []);
     this.creatorLoop = new CreatorLoop(
@@ -172,6 +188,7 @@ export class Daemon {
     this.apiServer = await startApiServer({
       port: this.apiPort,
       bindHost: this.config.apiBindHost,
+      apiToken: this.apiToken,
       store: this.store,
       x402: this.config.x402,
       status: this.config.status,

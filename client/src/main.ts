@@ -17,6 +17,7 @@
  */
 
 import { config as dotenvConfig } from 'dotenv';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -319,6 +320,23 @@ export interface DaemonStartupInfo {
 
 export async function main(): Promise<DaemonStartupInfo> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
+
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  //
+  // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
+  // require an `Authorization: Bearer <token>` header. Read from env when
+  // operators want a stable token (e.g. multi-process tools); otherwise
+  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
+  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
+  // so `acquire_artifact` and `submit_restoration_result` can authenticate
+  // their calls back to the daemon.
+  const envToken = process.env['DAEMON_API_TOKEN']?.trim();
+  const apiToken = envToken && envToken.length > 0
+    ? envToken
+    : randomBytes(32).toString('hex');
+  if (!envToken) {
+    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  }
 
   const rpcPreflight = await checkRpcNetwork(config);
   if (!rpcPreflight.ok) {
@@ -747,6 +765,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
     apiBindHost: config.apiBindHost ?? '127.0.0.1',
+    apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
