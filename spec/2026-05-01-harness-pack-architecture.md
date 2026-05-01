@@ -3,7 +3,7 @@
 - **Date:** 2026-05-01
 - **Author:** opus (drafted on jinn-mono-dwqm; Captain ritsukai)
 - **Status:** Proposal
-- **Version:** 0.6
+- **Version:** 0.7
 - **Tracks:** Phase A.2 reframe — supersedes the wrapper-with-specialist construct introduced in PR #63; replaces `spec/2026-04-30-plug-in-surface.md` Path 1 with a harness-agnostic SolverPlugin mechanism that extends existing AI-tool plugin formats.
 
 **Sibling specs (load-bearing pre-reads):**
@@ -427,16 +427,16 @@ The registry resolves a Harness for a Task by:
 
 **The wrapper is gone.** `wrapWith` config and `DEFAULT_WRAP_WITH` are removed. The first-match-wrapper-with-specialist construct in `wrapper.ts` is deleted.
 
-### 7.4 Plugins land via the host runtime, not via Jinn-specific loading
+### 7.4 Plugins land via daemon placement + host-runtime loading
 
 Earlier drafts of this spec introduced an explicit `pluginAware: true` flag and `pluginLoader` interface on Harnesses. Both are removed in v0.6 because they were over-engineered:
 
-- **Substrate (tools + skills) lands via the host plugin system.** `claude-code-learner` spawns a Claude Code subprocess; Claude Code's native plugin loader picks up installed plugins (skills, MCP servers, hooks) automatically. Gemini-CLI Harnesses inherit Gemini's plugin loader. The Jinn daemon doesn't intermediate.
+- **Substrate (tools + skills) lands through the host plugin system, but the daemon still does placement and launch wiring.** `claude-code-learner` spawns a Claude Code subprocess. The daemon resolves SolverPlugins, places them on disk, and points the subprocess at the relevant plugin roots / MCP config (today via `--plugin-dir`, `--mcp-config`, and `JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT`). Claude Code's native loader then loads skills, MCP servers, and hooks from those locations. Gemini-CLI Harnesses inherit the same pattern for Gemini's plugin loader: Jinn resolves and points; the host runtime loads.
 - **Schema validation is the daemon's job.** When a Task arrives, the daemon reads the SolverNet's canonical plugin's `jinn.schemas`, validates the spec, dispatches. When a Solution comes back, the daemon validates it before envelope assembly. Harnesses don't need to do schema work themselves.
 - **Path 2 specialists** (e.g., a hardcoded `prediction-v0-baseline` that doesn't run a Claude Code subprocess) simply don't read the plugin directory. There's no flag to declare; they just don't engage with the substrate.
 
 So plugin handling distributes naturally:
-- Daemon: resolves plugins, validates manifests, validates Task/Solution shapes against `jinn.schemas`, ensures plugin content lives where the host runtime expects.
+- Daemon: resolves plugins, validates manifests, validates Task/Solution shapes against `jinn.schemas`, ensures plugin content lives where the host runtime expects, and passes the host-specific launch pointers.
 - Host runtime (Claude Code / Gemini): loads plugin tools/skills natively at subprocess start.
 - Harness: just runs.
 
@@ -465,7 +465,8 @@ The daemon's plugin handling is small and entirely outside the Harness:
 1. **Resolve.** For each SolverNet in `config.solverNets[]`, resolve `solverPlugin` (npm / marketplace / git / local / IPFS) and ensure the plugin contents are unpacked where the host runtime expects (e.g., the operator's Claude Code plugin directory).
 2. **Validate manifests.** Parse the plugin manifest, confirm `jinn.solverType` is well-formed, confirm `jinn.schemas` paths exist and parse as JSON Schema, confirm standard plugin fields (`mcpServers`, `skills`) reference real paths.
 3. **Register schemas in-memory** keyed by SolverType identifier. Used by the daemon to validate Task specs at dispatch and Solution payloads at envelope assembly.
-4. **Health-check plugins on install** (manifest parses, schemas valid, MCP entry files exist). Runtime health (do the MCP servers actually start? do skills load?) is the host runtime's domain — the daemon doesn't intermediate.
+4. **Wire subprocess launch inputs.** For host-backed Harnesses, pass the host-specific plugin roots / MCP config to the subprocess. Today `claude-code-learner` uses `--plugin-dir`, `--mcp-config`, and `JINN_CLAUDE_CODE_LEARNER_PLUGIN_ROOT`; future Gemini/Codex Harnesses use their host's equivalent.
+5. **Health-check plugins on install** (manifest parses, schemas valid, MCP entry files exist). Runtime health (do the MCP servers actually start? do skills load?) is the host runtime's domain after launch.
 
 That's it. No Harness-side `PluginLoader` interface, no `HarnessRuntimeArtifacts` translation, no `pluginAware` flag. When the learner spawns its Claude Code subprocess, Claude Code does the work of loading plugin tools/skills natively. Path 2 specialists that don't run a Claude Code subprocess simply don't engage with plugins — no negotiation needed.
 
@@ -501,12 +502,13 @@ The 26-week reversion threshold from #57 §5 reads (1)+(2)+(3) together: if Brie
 
 ### 9.1 Plugin lineage on envelopes
 
-For (3) to actually compound, downstream consumers (indexer, corpus library, future agents, plugin authors observing their own work) need to know which plugins ran for which envelope. This spec commits two related changes to the executor block of the envelope schema (extending `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md`):
+For (3) to actually compound, downstream consumers (indexer, corpus library, future agents, plugin authors observing their own work) need to know which plugins ran for which envelope. This spec commits three related executor-block semantics in the envelope schema (extending `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md`):
 
-1. **`executor.codeDigest` extends to cover the full runtime bundle including operator-installed plugins.** Today's `client/src/build-info.ts` hashes only `dist/main.js`; the spec'd intent (per envelope-tee-scope §225) was already broader ("compiled bundle + resolved `node_modules`"). Implementation grows to walk installed plugins at envelope-creation time and fold them into the digest. No new top-level field; `codeDigest` semantically means "everything that ran" and the implementation makes that true.
-2. **`executor.plugins[]` is added as a queryable breakdown** — explicit per-plugin entries: `{ name, version, cid, sha256 }` for each installed plugin loaded during the run. This lets indexers and the corpus library answer queries like "show me all envelopes that used `@some-author/polymarket-extras`" without re-deriving `codeDigest`. The list is what's *inside* the digest, surfaced for query convenience.
+1. **`executor.codeDigest` keeps its current build-time meaning.** Today `client/src/build-info.ts` hashes `dist/main.js` at build time. Keep that semantics for the attested tier: it identifies the reproducible harness/client build. A TEE rebuilding from a source bundle can reproduce this digest without needing an operator's runtime-installed plugins.
+2. **`executor.runtimeBundleDigest` is added for what actually ran.** The daemon derives this at envelope-creation time from the resolved Harness build plus the plugin set handed to the host runtime. This is the plugin-inclusive digest: "everything the run was launched with." Because it is runtime-derived, it is not used as the attested-tier build reproducibility anchor.
+3. **`executor.plugins[]` is added as a queryable breakdown** — explicit per-plugin entries: `{ name, version, cid, sha256 }` for each installed plugin loaded during the run. This lets indexers and the corpus library answer queries like "show me all envelopes that used `@some-author/polymarket-extras`" without re-deriving `runtimeBundleDigest`. The list is what's *inside* the runtime digest, surfaced for query convenience.
 
-Together: `codeDigest` is the integrity hash; `plugins[]` is the readable manifest. Both ship in `executor`; both are populated at envelope-creation time by the daemon.
+Together: `codeDigest` is the reproducible build anchor; `runtimeBundleDigest` is the runtime integrity hash; `plugins[]` is the readable manifest. All three ship in `executor`; `runtimeBundleDigest` and `plugins[]` are populated at envelope-creation time by the daemon.
 
 **On the granularity choice (plugin-level rather than per-skill / per-MCP-server / per-tool):** the plugin is the unit of versioned, network-wide identity — sub-elements (skills, MCP servers, tools, hooks) have identity *as part of* a plugin and don't carry independent semvers, so sub-plugin queries fall out via plugin lookup; per-call activity (which tool was actually invoked) lives in the trajectory layer; and operator-private state in `implStateDir` is intentionally not in the envelope (a separate opt-in concern).
 
@@ -577,7 +579,15 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 - `RestorationOutput → Solution`.
 - `restorationPayload → solutionPayload`.
 - `RestorationContext → HarnessContext`.
-- All field-level usages updated. Field renames in tests + e2e accordingly.
+- All field-level usages updated.
+- Tests and e2e are in scope, not a cleanup afterthought. At minimum, update every current `client/test/` reference to the renamed surfaces:
+  - `RestorationJob` call sites and fixtures become `Task`.
+  - `intentCid` call sites and persisted expectations become `specCid`.
+  - `RestorationContext` fixtures become `HarnessContext`.
+  - `RestorationOutput` assertions become `Solution`.
+  - `byKind` config helpers become `bySolverType`.
+  - `wrapWith` tests are deleted with the wrapper path, except for config-migration tests that prove legacy `wrapWith` is removed or ignored.
+- E2e fixtures and manifest assertions must use `Task` / `specCid` / `solutionPayload` vocabulary while preserving compatibility with deployed contract names.
 
 ### 11.4 Task / spec field renames
 
@@ -612,7 +622,7 @@ The auto-poster wiring in `client/src/intents/kinds/index.ts` (`SPEC_KINDS`, `ge
 - `@jinn-network/prediction-plugin` ships at `client/plugins/jinn-prediction-plugin/` as the first concrete plugin — a Claude Code plugin with the `jinn` extension populated per §5.2.
 - **No Jinn-specific plugin-loader inside the Harness.** Removed in v0.6 — the host runtime's native plugin loading does the work. See §7.4.
 
-The runtime-bundle digest (`executor.codeDigest`) extends to cover the resolved plugin set; `executor.plugins[]` ships per §9.1. Implementation extends `client/src/build-info.ts` plus envelope-assembly to populate both fields. See §9.1 for the schema commitment; mechanical implementation is a follow-up plan extending the envelope-tee-scope spec.
+`executor.codeDigest` keeps its build-time semantics; `executor.runtimeBundleDigest` covers the resolved plugin set; `executor.plugins[]` ships per §9.1. Implementation extends envelope assembly to populate the runtime-derived fields while preserving `client/src/build-info.ts` as the build digest source. See §9.1 for the schema commitment; mechanical implementation is a follow-up plan extending the envelope-tee-scope spec.
 
 ### 11.7 Path 1 retirement
 
@@ -623,6 +633,13 @@ The slot taxonomy from `spec/2026-04-30-plug-in-surface.md` §4.2 (phase-agent-o
 - **Ship a Harness** (Path 2 — unchanged) — for builders with a working monolith.
 
 The cost of retirement is real: phase-agent-overrides and skill-bundles were the lowest-friction recruit shape in the prior spec. The benefit is that the substrate is now portable across Harnesses (and reusable as Claude Code plugins outside Jinn entirely), which is what the Phase A.2 ambition required all along.
+
+PR #63 already shipped part of the retired Path 1 mechanism. The migration must delete it, not just supersede it in prose:
+
+- Delete `client/src/restorer/plug-ins/` entirely, including loader, manifest parsing, registry, serialisation, types, and barrel exports.
+- Delete `examples/learner-plug-ins/@jinn-examples/` and its six worked-example plug-in packages.
+- Delete the `jinn plug-ins` CLI surface and scaffolder tests that target the retired slot taxonomy, or replace them with the new `jinn plugins` SolverPlugin commands in §11.6.
+- Remove `JINN_SLOT_REGISTRY_JSON` and the Path 1 slot-registry launch wiring from `claude-code-learner`; keep only host-plugin launch wiring for SolverPlugins and ordinary host plugins.
 
 `spec/2026-04-30-plug-in-surface.md` §4 (Path 1) is marked superseded by this spec. The §3 Path 2 commitments (SDK, scaffolding, worked examples) hold under the renames.
 
@@ -688,11 +705,10 @@ Existing operators on testnet receive a one-time config-migration prompt at daem
 1. **Should the default config silently install `@jinn-network/prediction-plugin`, or surface a one-line consent prompt at first boot?** Lean: silent install for new operators; one-line prompt on `jinn migrate-config` for existing operators.
 2. **Where do Harness-declared tunables live?** Each Harness declares its own tunables (calibration aggressiveness, ensemble size, corpus-lookup top-k for the learner). Format: in the Harness's `package.json` `jinn` field? In a separate `harness.tunables.json`? Lean: in the Harness's `package.json` `jinn.tunables[]` array. Keeps the declaration close to the code that reads them.
 3. **Path 2 builders losing the slot ergonomics — is "fork the learner" actually a viable recruit path?** This is the most genuine concern of the Path 1 retirement. Mitigation: the learner repo includes a `learner-template/` directory with a stripped-down skeleton; the recruit story becomes "fork the template, swap your specialist code in, optionally re-use the same `@jinn-network/harness-sdk` SDK." If recruits report this is too high-friction, Phase A.4 retro re-opens the slot taxonomy as a follow-up.
-4. **What's left in `client/src/solver-types/` after schemas move into plugins?** The directory currently holds Zod schemas + TS types + auto-poster wiring. Schemas move to plugins; auto-poster wiring stays. Open: do TypeScript adapters that derive types from plugin JSON Schemas at build time live there, or directly import from the plugin? Lean: thin adapter modules in `client/src/solver-types/` that re-export plugin schemas as Zod for ergonomic in-repo usage. Drop the directory entirely if/when no first-party in-repo callers need TypeScript types separately from the plugin.
-5. **Curator role formalization.** The SolverNet curator (the entity who declares the canonical SolverPlugin, the objective, the Task generator) is named in this spec but not formalized as a distinct role. Whether it surfaces in code (e.g., a curator address recorded with each SolverNet config), in canonical docs (Creator / Solver / Evaluator / Curator), or stays implicit — open. Worth its own pass.
-6. **Should `solverNets[]` config be operator-side declarative as shown in §11.9, or should SolverNet definitions ship as their own npm packages (e.g., `@jinn-network/prediction-solvernet`) that bundle objective + Task-generator config + plugin reference together?** Lean: operator-side config in v1 (simpler); promote to dedicated SolverNet packages if multiple SolverNets ship and the bundling reduces operator burden.
-7. **Solver as a noun in code.** The role rename to Solver is committed; should it surface in code (e.g., a `Solver` class composing `Harness` + identity), or stay a role-label only? Lean: role-label only in v1; the operator entity is already represented by the Safe + Harness pair.
-8. **Cross-host plugin-format mapping.** Claude Code uses `.claude-plugin/plugin.json`; Gemini uses `gemini-extension.json`; Codex has its own. The shapes are similar but field names differ. v1 commits to: a plugin ships *one* canonical host-shape (Claude Code plugin in v1, since that's what Jinn's daemon spawns); other hosts can read the same package via field-mapping shims. A formal multi-host manifest spec is a follow-up bead if we ship a Gemini-CLI Harness and discover the shim is too lossy.
+4. **Curator role formalization.** The SolverNet curator (the entity who declares the canonical SolverPlugin, the objective, the Task generator) is named in this spec but not formalized as a distinct role. Whether it surfaces in code (e.g., a curator address recorded with each SolverNet config), in canonical docs (Creator / Solver / Evaluator / Curator), or stays implicit — open. Worth its own pass.
+5. **Should `solverNets[]` config be operator-side declarative as shown in §11.9, or should SolverNet definitions ship as their own npm packages (e.g., `@jinn-network/prediction-solvernet`) that bundle objective + Task-generator config + plugin reference together?** Lean: operator-side config in v1 (simpler); promote to dedicated SolverNet packages if multiple SolverNets ship and the bundling reduces operator burden.
+6. **Solver as a noun in code.** The role rename to Solver is committed; should it surface in code (e.g., a `Solver` class composing `Harness` + identity), or stay a role-label only? Lean: role-label only in v1; the operator entity is already represented by the Safe + Harness pair.
+7. **Cross-host plugin-format mapping.** Claude Code uses `.claude-plugin/plugin.json`; Gemini uses `gemini-extension.json`; Codex has its own. The shapes are similar but field names differ. v1 commits to: a plugin ships *one* canonical host-shape (Claude Code plugin in v1, since that's what Jinn's daemon spawns); other hosts can read the same package via field-mapping shims. A formal multi-host manifest spec is a follow-up bead if we ship a Gemini-CLI Harness and discover the shim is too lossy.
 
 ---
 
@@ -706,15 +722,16 @@ This spec is accepted when:
 4. **Wrapper code deleted** per §11.1.
 5. **Rename PR merged** per §11.2 + §11.3 + §11.4; `jinn-mono-juw` / GH#43 closed.
 6. **`client/src/plugins/` module shipped** with resolvers, loader, validator, CLI, and unit tests.
-7. **`executor.codeDigest` extended to cover the runtime bundle (harness + plugins) and `executor.plugins[]` field added** per §9.1. Implementation extends `client/src/build-info.ts` and envelope-assembly.
+7. **Envelope executor fields updated** per §9.1: `executor.codeDigest` retains build-time semantics, `executor.runtimeBundleDigest` is populated at envelope-creation time from the Harness build + resolved plugin set, and `executor.plugins[]` lists the loaded plugin breakdown. Implementation preserves `client/src/build-info.ts` as the build digest source and extends envelope assembly for runtime-derived fields.
 8. **`@jinn-network/prediction-plugin` v0.1.0 shipped** at `client/plugins/jinn-prediction-plugin/` with the §10 contents — schemas + tools + skills + `jinn` extension — and passing CI.
-9. **e2e validation** — the existing `yarn e2e` script extended to assert: prediction plugin resolves, daemon validates Task spec against `jinn.schemas.task`, Claude Code subprocess loads the plugin natively, the learner produces a `solutionPayload` validated against `jinn.schemas.solution`, envelope's `executor.plugins[]` correctly lists the loaded plugin.
+9. **e2e validation** — the existing `yarn e2e` script extended to assert: prediction plugin resolves, daemon validates Task spec against `jinn.schemas.task`, Claude Code subprocess loads the plugin natively, the learner produces a `solutionPayload` validated against `jinn.schemas.solution`, `executor.codeDigest` remains the build digest, `executor.runtimeBundleDigest` is populated, and `executor.plugins[]` correctly lists the loaded plugin.
 10. **Specialists re-disposed** per §11.8; `examples/external-harnesses/` directory created.
-11. **Default config updated** per §11.9; `jinn migrate-config` verb shipped.
-12. **In-repo SolverType modules migrated** per §11.5 (schemas live in the plugin; in-repo holds adapter / auto-poster wiring only).
+11. **Retired Path 1 implementation deleted** per §11.7: `client/src/restorer/plug-ins/`, `examples/learner-plug-ins/@jinn-examples/`, the `jinn plug-ins` slot-taxonomy CLI surface, and `JINN_SLOT_REGISTRY_JSON` launch wiring are gone or replaced by SolverPlugin equivalents.
+12. **Default config updated** per §11.9; `jinn migrate-config` verb shipped.
+13. **In-repo SolverType modules migrated** per §11.5 (schemas live in the plugin; in-repo holds adapter / auto-poster wiring only).
 
 The campaign-launch gate (#57 §1) is *not* acceptance for this spec — it is acceptance for Phase A.4. This spec ships the architecture that makes the campaign run.
 
 ---
 
-*End of v0.5.*
+*End of v0.7.*
