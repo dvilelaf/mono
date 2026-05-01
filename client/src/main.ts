@@ -561,7 +561,16 @@ export async function main(): Promise<DaemonStartupInfo> {
     const { loadPlugIns, serialiseRegistry } = await import(
       './restorer/plug-ins/index.js'
     );
-    const learnerVersion = '0.1.0'; // bundled plugin version (synced with claude-code-learner/.claude-plugin/plugin.json)
+    // Read the bundled claude-code-learner version from its plugin.json.
+    // main.ts is at client/src/main.ts (src) or client/dist/main.js (compiled);
+    // probe both relative locations so the same code works in both contexts.
+    const __mainDir = dirname(fileURLToPath(import.meta.url));
+    const pluginJsonSrc = join(__mainDir, '../plugins/claude-code-learner/.claude-plugin/plugin.json');
+    const pluginJsonDist = join(__mainDir, '../../plugins/claude-code-learner/.claude-plugin/plugin.json');
+    const pluginJsonPath = existsSync(pluginJsonSrc) ? pluginJsonSrc : pluginJsonDist;
+    const learnerVersion = (
+      JSON.parse(readFileSync(pluginJsonPath, 'utf8')) as { version: string }
+    ).version;
     const result = await loadPlugIns({
       entries: learnerPlugIns,
       learnerVersion,
