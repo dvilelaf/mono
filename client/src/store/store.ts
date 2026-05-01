@@ -252,41 +252,11 @@ export class Store {
     }
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
-    this.migrateLegacyTaskPostTables();
     this.db.exec(SCHEMA);
     this.db.exec(TASK_RUNS_SCHEMA);
-    this.migrateLegacyTaskPostTables();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
-    this.ensureActivityEventsSolverType();
     this.backfillActivityEvents();
-  }
-
-  /** One-shot DB migration from pre-Task posting table names. */
-  private migrateLegacyTaskPostTables(): void {
-    const tables = new Set(
-      (this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
-        .map((row) => row.name),
-    );
-    if (tables.has('intent_posts') && !tables.has('task_posts')) {
-      this.db.exec('ALTER TABLE intent_posts RENAME TO task_posts');
-    }
-    if (tables.has('intent_post_locks') && !tables.has('task_post_locks')) {
-      this.db.exec('ALTER TABLE intent_post_locks RENAME TO task_post_locks');
-    }
-
-    const taskPostTables = new Set(
-      (this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
-        .map((row) => row.name),
-    );
-    if (taskPostTables.has('task_posts')) {
-      const cols = new Set(
-        (this.db.pragma('table_info(task_posts)') as Array<{ name: string }>).map((row) => row.name),
-      );
-      if (cols.has('desired_state_id') && !cols.has('task_id')) {
-        this.db.exec('ALTER TABLE task_posts RENAME COLUMN desired_state_id TO task_id');
-      }
-    }
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
@@ -305,20 +275,6 @@ export class Store {
     this.db.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_reward_claims_tx ON reward_claims (tx_hash)`,
     );
-  }
-
-  /** Older on-disk DBs used `activity_events.spec_kind` before SolverType naming. */
-  private ensureActivityEventsSolverType(): void {
-    const cols = this.db.prepare(`PRAGMA table_info(activity_events)`).all() as Array<{ name: string }>;
-    const hasSpecKind = cols.some((c) => c.name === 'spec_kind');
-    const hasSolverType = cols.some((c) => c.name === 'solver_type');
-    if (hasSpecKind && !hasSolverType) {
-      this.db.exec(`ALTER TABLE activity_events RENAME COLUMN spec_kind TO solver_type`);
-      return;
-    }
-    if (!hasSolverType) {
-      this.db.exec(`ALTER TABLE activity_events ADD COLUMN solver_type TEXT`);
-    }
   }
 
   recordOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {

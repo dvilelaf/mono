@@ -16,12 +16,11 @@ export interface TaskPostResult {
   attemptNumber: number;
   attemptId: string;
   idempotent: boolean;
-  source: 'store' | 'legacy_config' | 'posted';
+  source: 'store' | 'posted';
 }
 
 export interface PostTaskCandidateOptions {
   creatorSafeAddress?: string;
-  legacyConfigKeys?: string[];
 }
 
 function normalizeCreatorSafeAddress(safeAddress?: string): string {
@@ -76,17 +75,6 @@ export class TaskPostingService {
       return this.buildIdempotentResult(candidate, existing, 'store');
     }
 
-    const migrated = this.tryImportLegacyRecord(candidate, {
-      creatorSafeAddress,
-      policyType,
-      scopeKey,
-      nowIso,
-      legacyConfigKeys: opts.legacyConfigKeys ?? [],
-    });
-    if (migrated) {
-      return this.buildIdempotentResult(candidate, migrated, 'legacy_config');
-    }
-
     const ownerToken = randomUUID();
     const lockAcquired = this.store.acquireTaskPostLock({
       creatorSafeAddress,
@@ -112,17 +100,6 @@ export class TaskPostingService {
       });
       if (lockedExisting && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
         return this.buildIdempotentResult(candidate, lockedExisting, 'store');
-      }
-
-      const lockedMigrated = this.tryImportLegacyRecord(candidate, {
-        creatorSafeAddress,
-        policyType,
-        scopeKey,
-        nowIso,
-        legacyConfigKeys: opts.legacyConfigKeys ?? [],
-      });
-      if (lockedMigrated) {
-        return this.buildIdempotentResult(candidate, lockedMigrated, 'legacy_config');
       }
 
       const previousPostCount = lockedExisting?.postCount ?? 0;
@@ -177,40 +154,10 @@ export class TaskPostingService {
     }
   }
 
-  private tryImportLegacyRecord(
-    candidate: TaskCandidate,
-    args: {
-      creatorSafeAddress: string;
-      policyType: TaskPostingPolicyType;
-      scopeKey: string;
-      nowIso: string;
-      legacyConfigKeys: string[];
-    },
-  ): TaskPostRecord | null {
-    for (const key of args.legacyConfigKeys) {
-      const requestId = this.store.getConfigValue(key);
-      if (!requestId) continue;
-      const record: TaskPostRecord = {
-        creatorSafeAddress: args.creatorSafeAddress,
-        sourceKey: candidate.sourceKey,
-        policyType: args.policyType,
-        scopeKey: args.scopeKey,
-        taskId: candidate.task.id,
-        requestId,
-        firstPostedAt: args.nowIso,
-        lastPostedAt: args.nowIso,
-        postCount: 1,
-      };
-      this.store.upsertTaskPostRecord(record);
-      return record;
-    }
-    return null;
-  }
-
   private buildIdempotentResult(
     candidate: TaskCandidate,
     record: TaskPostRecord,
-    source: 'store' | 'legacy_config',
+    source: 'store',
   ): TaskPostResult {
     const attemptNumber = Math.max(1, record.postCount);
     const attemptId = `${candidate.task.id}/${attemptNumber}`;

@@ -257,35 +257,6 @@ interface RawRow {
  * For new DBs the column already exists via CREATE TABLE; the ALTER is a no-op.
  */
 function runAdditiveMigrations(db: Database.Database): void {
-  const tables = new Set(
-    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
-      .map((row) => row.name),
-  );
-  if (tables.has('restoration_intents') && !tables.has('task_runs')) {
-    db.exec('ALTER TABLE restoration_intents RENAME TO task_runs');
-  }
-
-  const renamePairs: Array<{ oldName: string; newName: string }> = [
-    { oldName: 'intent_cid', newName: 'task_cid' },
-    { oldName: 'spec_kind', newName: 'solver_type' },
-    { oldName: 'intent_type', newName: 'task_role' },
-    { oldName: 'desired_state_payload', newName: 'task_payload' },
-    { oldName: 'impl_outputs_json', newName: 'solution_outputs_json' },
-  ];
-
-  let existingColumns = new Set(
-    (db.pragma('table_info(task_runs)') as Array<{ name: string }>)
-      .map(r => r.name),
-  );
-
-  for (const { oldName, newName } of renamePairs) {
-    if (existingColumns.has(oldName) && !existingColumns.has(newName)) {
-      db.exec(`ALTER TABLE task_runs RENAME COLUMN ${oldName} TO ${newName}`);
-      existingColumns.delete(oldName);
-      existingColumns.add(newName);
-    }
-  }
-
   const additions: Array<{ column: string; ddl: string }> = [
     { column: 'task_payload', ddl: 'ALTER TABLE task_runs ADD COLUMN task_payload TEXT' },
     { column: 'manifest_generated_at', ddl: 'ALTER TABLE task_runs ADD COLUMN manifest_generated_at TEXT NULL' },
@@ -299,7 +270,7 @@ function runAdditiveMigrations(db: Database.Database): void {
 
   // Fetch existing column names once so each ALTER is a no-op if the column
   // already exists (avoids duplicate-column-name errors on newer DBs).
-  existingColumns = new Set(
+  const existingColumns = new Set(
     (db.pragma('table_info(task_runs)') as Array<{ name: string }>)
       .map(r => r.name),
   );

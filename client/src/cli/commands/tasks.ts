@@ -273,7 +273,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
       {
         creatorSafeAddress: safe,
-        legacyConfigKeys: [`cli_task:${getAddress(safe)}:${id}`],
       },
     );
     emitResult(

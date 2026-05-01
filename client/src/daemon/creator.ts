@@ -66,9 +66,6 @@ export class CreatorLoop {
       try {
         const postResult = await this.postingService.postCandidate(candidate, {
           creatorSafeAddress: this.safeAddress,
-          legacyConfigKeys: [
-            this.safeAddress ? `created_intent:${this.safeAddress}:${state.id}` : `created_intent:${state.id}`,
-          ],
         });
         if (postResult.idempotent) continue;
 

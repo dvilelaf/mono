@@ -322,7 +322,7 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
 | earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
 | peers | JINN_PEERS | [] |
-| desiredStates | JINN_DESIRED_STATES | [] (testnet auto-task generator posts `prediction.v0`) |
+| tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
 
 `JINN_PASSWORD` is env-only (keystore encryption, never in config files). Alternatively, use `--password-fd <N>` to read from a file descriptor.
 

@@ -34,41 +34,6 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
-  it('migrates legacy config keys into intent_posts on first lookup', async () => {
-    const adapter = new LocalAdapter();
-    await adapter.initialize();
-    const store = new Store(':memory:');
-    const service = new TaskPostingService(adapter, store);
-
-    store.setConfigValue(`cli_intent:${SAFE_A}:manual-legacy`, 'legacy-request-id');
-
-    const postSpy = vi.spyOn(adapter, 'postTask');
-    const result = await service.postCandidate(
-      {
-        task: { id: 'manual-legacy', description: 'legacy' },
-        sourceKey: 'manual:manual-legacy',
-        postingPolicy: { kind: 'once_per_safe' },
-      },
-      {
-        creatorSafeAddress: SAFE_A,
-        legacyConfigKeys: [`cli_intent:${SAFE_A}:manual-legacy`],
-      },
-    );
-
-    expect(result.idempotent).toBe(true);
-    expect(result.requestId).toBe('legacy-request-id');
-    expect(postSpy).not.toHaveBeenCalled();
-    expect(store.getTaskPostRecord({
-      creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
-      sourceKey: 'manual:manual-legacy',
-      policyType: 'once_per_safe',
-      scopeKey: '',
-    })?.requestId).toBe('legacy-request-id');
-
-    store.close();
-    await adapter.stop();
-  });
-
   it('scopes idempotency by creator Safe', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();

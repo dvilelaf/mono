@@ -21,16 +21,15 @@ function makeInput(overrides: Partial<PersistedTaskRunInput> = {}): PersistedTas
 // ── Migration tests ───────────────────────────────────────────────────────────
 
 /**
- * DDL for a pre-migration database that only has the legacy columns (no
- * manifest_generated_at, evidence_hash, or desired_state_payload).
+ * DDL for an older Task-era database that is missing additive columns.
  */
-const LEGACY_DDL = `
+const MINIMAL_TASK_RUNS_DDL = `
 CREATE TABLE IF NOT EXISTS task_runs (
   request_id              TEXT PRIMARY KEY,
-  intent_cid              TEXT NOT NULL,
+  task_cid                TEXT NOT NULL,
   onchain_creation_tx     TEXT NOT NULL,
   onchain_creation_block  INTEGER NOT NULL,
-  spec_kind               TEXT,
+  solver_type             TEXT,
   impl_name               TEXT,
   state                   TEXT NOT NULL,
   state_updated_at        INTEGER NOT NULL,
@@ -55,9 +54,9 @@ CREATE TABLE IF NOT EXISTS task_runs (
 
 describe('runAdditiveMigrations', () => {
   it('adds manifest_generated_at and evidence_hash when absent', () => {
-    // Create a legacy DB without the additive columns
+    // Create a minimal current-vocabulary DB without the additive columns.
     const db = new Database(':memory:');
-    db.exec(LEGACY_DDL);
+    db.exec(MINIMAL_TASK_RUNS_DDL);
 
     // Instantiating TaskRunPersistence runs the migrations
     new TaskRunPersistence(db);
@@ -540,9 +539,9 @@ describe('concurrent transition', () => {
   });
 });
 
-// ── intent_type roundtrip tests ───────────────────────────────────────────────
+// ── taskRole roundtrip tests ──────────────────────────────────────────────────
 
-describe('TaskRunPersistence — intent_type', () => {
+describe('TaskRunPersistence — taskRole', () => {
   it('persists taskRole roundtrip', () => {
     const store = new Store(':memory:');
     const p = new TaskRunPersistence(store.db);

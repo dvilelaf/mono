@@ -493,8 +493,8 @@ const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
   | 'config_json_invalid'
-  | 'desired_states_file_not_found'
-  | 'desired_states_json_invalid'
+  | 'tasks_file_not_found'
+  | 'tasks_json_invalid'
   | 'config_invalid';
 
 export class ConfigLoadError extends Error {
@@ -778,23 +778,23 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   // tasks from env points to a JSON file
-  if (env['JINN_DESIRED_STATES']) {
-    const statesPath = env['JINN_DESIRED_STATES'];
-    if (!existsSync(statesPath)) {
+  if (env['JINN_TASKS']) {
+    const tasksPath = env['JINN_TASKS'];
+    if (!existsSync(tasksPath)) {
       throw new ConfigLoadError(
-        'desired_states_file_not_found',
-        `JINN_DESIRED_STATES file not found: ${statesPath}`,
-        { path: statesPath },
+        'tasks_file_not_found',
+        `JINN_TASKS file not found: ${tasksPath}`,
+        { path: tasksPath },
       );
     }
     try {
-      merged.tasks = JSON.parse(readFileSync(statesPath, 'utf-8'));
+      merged.tasks = JSON.parse(readFileSync(tasksPath, 'utf-8'));
     } catch (error) {
       throw new ConfigLoadError(
-        'desired_states_json_invalid',
-        `Invalid JSON in JINN_DESIRED_STATES file: ${statesPath}`,
+        'tasks_json_invalid',
+        `Invalid JSON in JINN_TASKS file: ${tasksPath}`,
         {
-          path: statesPath,
+          path: tasksPath,
           cause: error instanceof Error ? error.message : String(error),
         },
       );
@@ -899,7 +899,7 @@ const TRACKED_ENV_VARS = [
   'BASE_RPC_URL',
   'BASE_SEPOLIA_RPC_URL',
   'JINN_ARCHIVE_RPC_URL',
-  'JINN_DESIRED_STATES',
+  'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
