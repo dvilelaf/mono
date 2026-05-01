@@ -92,6 +92,12 @@ export async function assembleAndSignEnvelope(
     payload: inputs.payload,
   };
 
+  // Pre-publish manifest validation: reject malformed envelopes before wasting
+  // signature CPU; closes the seam against direct callers that bypass the
+  // OUTPUTS.json / config-driven access resolution. Throws ManifestValidationError
+  // on a missing/malformed access descriptor (Phase A.1, jinn-mono-vy37.1.3).
+  validateManifestForPublish({ ...unsigned, signature: { algo: 'secp256k1', signer: inputs.participant.agentEoa as `0x${string}`, hash: '0x', sig: '0x' } });
+
   const signed = await signCanonical(
     unsigned,
     deps.agentEoaPrivateKey,
@@ -108,12 +114,6 @@ export async function assembleAndSignEnvelope(
       sig: signed.sig,
     },
   };
-
-  // Pre-publish manifest validation hook (Phase A.1, jinn-mono-vy37.1.3).
-  // Belt-and-suspenders that the artifact descriptors are fit for the corpus
-  // before the envelope hits IPFS. Throws ManifestValidationError on a
-  // missing/malformed access descriptor.
-  validateManifestForPublish(signedEnvelope);
 
   const envelopeCid = await uploadToIpfs(deps.ipfsRegistryUrl, signedEnvelope);
 
