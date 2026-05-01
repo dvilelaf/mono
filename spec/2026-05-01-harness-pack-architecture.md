@@ -32,7 +32,7 @@
 Five coordinated architectural moves that re-align the implementation with what the Phase A.2 spec already said and what the original learner design intended:
 
 1. **Delete the universal wrapper.** `claude-code-learner` becomes a peer Harness in the registry, not a substrate that wraps every SolverType. Its `supports()` returns `true` for any non-evaluation restoration; it is the registry's *default* when no other Harness claims a SolverType. It owns its `run()` end-to-end.
-2. **Rename `RestorerImpl → Harness`.** The thing-an-operator-runs is a Harness. The Restorer remains a protocol role; the rename disambiguates role from implementation.
+2. **Rename `RestorerImpl → Harness`** and the protocol role **`Restorer → Solver`**. The thing-an-operator-runs is a Harness; the protocol role they fulfil is Solver. The rename disambiguates role from implementation and unifies the vocabulary cluster (SolverNet / SolverType / SolverPlugin / Solver / Solution).
 3. **Introduce SolverPlugins.** A SolverPlugin is a harness-agnostic package supplying SolverType-specific *substrate* — schemas (optional), MCP-tool servers, and skills an operator plugs into their Harness to handle a SolverType. **A SolverPlugin is a superset of existing AI-tool plugin formats** (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) — a single artifact that's a Claude Code plugin, a Gemini extension, *and* a Jinn SolverPlugin at the same time, depending on which consumer reads it. SolverPlugins do not dictate flow, tunables, or starting Harness — those live elsewhere (Harness owns flow + tunables; SolverNet config carries the starting Harness).
 4. **Introduce SolverNets and Tasks as distinct levels.** A SolverNet is the campaign / group / objective. A Task is one posted item — the on-chain unit a Solver claims and produces a Solution for. The SolverNet declares one SolverType; many Tasks of that SolverType flow through it.
 5. **Ship the Prediction SolverNet as the first instance.** `@jinn-network/prediction-plugin` ships in-repo, on by default for new operators. The starting Harness (the learner) plus the prediction plugin is what the GTM in #57 calls the "client as meta-harness" running against the Polymarket-derived Task stream.
@@ -78,10 +78,9 @@ Five coordinated architectural moves that re-align the implementation with what 
 | **Task** | The on-chain posted item. Today: `JinnRouter.createRestorationJob`'s product. Carries a `specCid` referencing the IPFS-stored spec. The Solver claims a Task, runs it via their Harness, and submits a Solution. |
 | **Solution** | The Solver's output for a Task. The thing today called `RestorationOutput`. |
 | **Verdict** | The Evaluator's output scoring a Solution. Carries a `verdictPayload` (kept; protocol-level field). |
-| **Harness** | The runtime an operator runs to claim and solve Tasks. The thing today called `RestorerImpl`. Implements the Restorer protocol role. May or may not be plugin-aware; may or may not learn. Owns its flow, improve-phase, and tunables. |
-| **HarnessContext** | The runtime context the Harness's `run()` receives. Today: `RestorationContext`. |
-| **Solver** | An operator running a Harness in a SolverNet. Informal — used as a noun in protocol-adjacent prose (#57 / #59 vocabulary). The on-chain Restorer role is what the Solver fulfils. |
-| **Restorer** | A protocol role (Creator / Restorer / Evaluator). Unchanged. A Restorer runs *a Harness*. |
+| **Harness** | The runtime an operator runs to claim and solve Tasks. The thing today called `RestorerImpl`. Implements the Solver protocol role. May or may not be plugin-aware; may or may not learn. Owns its flow, improve-phase, and tunables. |
+| **HarnessContext** | The runtime context the daemon hands to a Harness's `run()` method — the bundle of inputs and capabilities a Harness has to do its work. Carries: the `Task`, the `specCid`, an `implStateDir` (the Harness's persistent state directory), a `workingDir` (ephemeral, cleared between attempts), a `log` callback, an `abort` `AbortSignal`, an `msUntilEndTs` deadline accessor, a `trajectory` collector for span emission, and (when the daemon is providing them per the Harness's manifest allow-list) scoped `signer` / `rpc` / `secrets` capability handles per `spec/2026-05-executor-trust-boundary.md` §3. Today: `RestorationContext`, defined in `client/src/restorer/types.ts`. See §7.2.1. |
+| **Solver** | A protocol role (Creator / Solver / Evaluator) — and the operator who fulfils it. The Solver claims a Task, runs it via their Harness, and submits a Solution. Renamed from `Restorer` (the on-chain function name `createRestorationJob` and other deployed-contract identifiers stay; the conceptual role label changes — see §11.2). |
 
 ---
 
@@ -351,15 +350,19 @@ The `type` field in the spec is the **join key** between protocol and operator-s
 
 ### 6.3 What changes vs. today
 
-Field renames only. The shape of the on-chain object and the IPFS-stored spec are otherwise unchanged. The protocol-level loop (Creator → Restorer → Evaluator) operates identically; we are renaming, not redesigning.
+Field renames only. The shape of the on-chain object and the IPFS-stored spec are otherwise unchanged. The protocol-level loop (Creator → Solver → Evaluator) operates identically; we are renaming, not redesigning. Deployed contract identifiers (`createRestorationJob`, `deliverToMarketplace`, etc.) stay because they're tied to live contracts; only the conceptual role label and TypeScript-level identifiers change.
 
 ---
 
 ## 7. The Harness
 
-### 7.1 Rename
+### 7.1 Renames
 
-`RestorerImpl → Harness`. The interface in `client/src/restorer/types.ts` is renamed; the directory `client/src/restorer/` is renamed to `client/src/harnesses/`; `RestorationContext → HarnessContext`; `RestorationOutput → Solution`; `restorationPayload → solutionPayload`. The Path 2 `@jinn-network/restorer-sdk` package is renamed to `@jinn-network/harness-sdk` with a 12-week dual-publish window.
+- **Type:** `RestorerImpl → Harness`. Interface in `client/src/restorer/types.ts` renamed; directory `client/src/restorer/` → `client/src/harnesses/`; `RestorationContext → HarnessContext`; `RestorationOutput → Solution`; `restorationPayload → solutionPayload`.
+- **Path 2 SDK:** `@jinn-network/restorer-sdk` → `@jinn-network/harness-sdk`, dual-publish for 12 weeks.
+- **Protocol role:** `Restorer → Solver`. The conceptual role-label in docs and TypeScript-level identifiers change. Deployed contract identifiers (e.g., `JinnRouter.createRestorationJob`, `RestorationActivityChecker`, `restorationPayload` field on submitted manifests) stay — they're pinned to live contracts; renaming them would force a redeployment for cosmetic reasons. Future contract revisions may rename; this spec doesn't.
+
+The role-vs-implementation split is preserved: a Solver (role) runs a Harness (implementation). The Solver vocabulary is now consistent everywhere — SolverNet / SolverType / SolverPlugin / Solver / Solution.
 
 ### 7.2 Interface (post-rename)
 
@@ -376,7 +379,54 @@ export interface Harness {
 }
 ```
 
-**Field-name note:** the old shape was `{ kind: string; type?: 'restoration' | 'evaluation' }`. The rename `kind → type` (carrying the SolverType identifier) collides with the existing role field. Resolved by renaming `type → role` in the same pass — `'restoration' | 'evaluation'` is semantically a *role*, not a *type*, so the rename improves clarity. Migration mechanics: §11.4.
+**Field-name note:** the old shape was `{ kind: string; type?: 'restoration' | 'evaluation' }`. The rename `kind → type` (carrying the SolverType identifier) collides with the existing role field. Resolved by renaming `type → role` in the same pass — `'restoration' | 'evaluation'` is semantically a *role*, not a *type*, so the rename improves clarity. The role values themselves (`'restoration'` / `'evaluation'`) stay as protocol-level strings until contract redeployment lets them shift to `'solution'` / `'evaluation'`. Migration mechanics: §11.4.
+
+### 7.2.1 What HarnessContext carries
+
+The `HarnessContext` object the daemon hands to `run()` is the Harness's full input + capability bundle:
+
+```ts
+export interface HarnessContext {
+  /** The Task this Harness is being asked to handle. */
+  task: Task;
+
+  /** IPFS CID of the Task's spec content (renamed from `intentCid`). */
+  specCid?: string;
+
+  /** Persistent directory for Harness-specific state. The improve phase mutates here. */
+  implStateDir: string;
+
+  /** Ephemeral working directory; cleared between attempts. */
+  workingDir: string;
+
+  /** Logger callback. */
+  log: (event: { level: 'info' | 'warn' | 'error'; msg: string; data?: unknown }) => void;
+
+  /** Fires at window.endTs. */
+  abort: AbortSignal;
+  msUntilEndTs: () => number;
+
+  /**
+   * In-run trajectory collector. Harnesses call ctx.trajectory.addSpan(...) to
+   * emit spans; the daemon emits the collected trajectory to IPFS before
+   * envelope assembly and populates envelope.trajectory with { cid, sha256 }.
+   */
+  trajectory: TrajectoryCollector;
+
+  /**
+   * Scoped capability handles, present only when the daemon is providing the
+   * surface per the Harness's manifest allow-list. Absent for stub-mode CLI.
+   * Trust contract: `spec/2026-05-executor-trust-boundary.md` §3.
+   */
+  signer?: ScopedSigner;
+  rpc?: ScopedRpc;
+  secrets?: ScopedSecrets;
+}
+```
+
+The Harness reads from the context, does its work, returns a `Solution`. Mutations the Harness wants to persist between runs go to `implStateDir/`. Ephemeral artifacts (intermediate tool calls, partial outputs) go to `workingDir/` which the daemon clears between attempts. Capability handles are scoped per the Harness's manifest — the daemon enforces the allow-list, the Harness sees only the surface area its manifest declared.
+
+This shape is unchanged from today's `RestorationContext` modulo the field renames in §11.4 — the rename is mechanical, not architectural.
 
 ### 7.3 Selection (registry resolution)
 
@@ -540,12 +590,15 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 - Remove `resolveEffectiveWrapWith` and call sites.
 - Remove the `wrapWith` registry construction option in `RestorerImplRegistry`.
 
-### 11.2 RestorerImpl → Harness rename
+### 11.2 RestorerImpl → Harness rename + Restorer → Solver role rename
 
 - Move `client/src/restorer/types.ts` → `client/src/harnesses/types.ts`. Type rename.
 - Rename `client/src/restorer/` → `client/src/harnesses/`. Update all imports (~ a few dozen call sites; mechanical).
 - Rename `JinnConfig.restorers` → `JinnConfig.harnesses` (config-file migration helper writes a one-time conversion).
 - Rename `@jinn-network/restorer-sdk` → `@jinn-network/harness-sdk`. Dual-publish for 12 weeks; the old package re-exports from the new with a deprecation `console.warn`.
+- Update prose / comment / docstring usages of "Restorer" (the protocol role) to "Solver." Examples: `client/src/daemon/daemon.ts` orchestration comments, JSDoc on the Harness interface, README content.
+- Update `BRAND.md` / `SPEC.md` / `GLOSSARY.md` cross-references in a follow-up canonical-doc PR (separate from this spec's merge — canonical docs change via approved PRs per `spec/2026-04-28-canonical-docs.md`).
+- **Deployed contract identifiers stay:** `JinnRouter.createRestorationJob`, `RestorationActivityChecker`, the `restorationPayload` envelope field, ABI artifacts, etc. Renaming these forces a redeployment + migration. Future contract revisions may rename; this spec doesn't.
 - Closes `jinn-mono-juw` / GH#43.
 
 ### 11.3 Output / context renames
