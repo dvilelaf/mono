@@ -43,24 +43,29 @@ const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
-// Build a corpus instance when the daemon supplied the necessary env vars.
-// Without it, `search_artifacts` / `acquire_artifact` fall back to local-only
-// fast paths and surface an error for the network branch. See spec §4.
+// Build a corpus instance when the daemon supplied the keyless URLs. This
+// instance is ONLY used by `search_artifacts` (corpus.query → subgraph +
+// IPFS gateway, both keyless). `acquire_artifact` proxies to the daemon
+// over DAEMON_API_URL, so it does NOT need a corpus here and the agent
+// EOA private key never crosses into this subprocess. See spec §4.
+//
+// `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
+// but unused by corpus.query; we pass placeholder values so the type
+// contract is satisfied while making the no-secret posture explicit.
 function buildCorpus(): Corpus | null {
   if (!store) return null;
   const subgraphUrl = process.env['JINN_CORPUS_SUBGRAPH_URL'] ?? '';
   const ipfsGatewayUrl = process.env['JINN_CORPUS_IPFS_GATEWAY_URL'] ?? '';
-  const agentPrivateKey = process.env['JINN_CORPUS_AGENT_PRIVATE_KEY'] ?? '';
-  const selfSafeAddress = process.env['JINN_CORPUS_SELF_SAFE_ADDRESS'] ?? '';
-  if (!subgraphUrl || !ipfsGatewayUrl || !agentPrivateKey || !selfSafeAddress) {
+  if (!subgraphUrl || !ipfsGatewayUrl) {
     return null;
   }
   return createCorpus({
     subgraphUrl,
     ipfsGatewayUrl,
     store,
-    signer: { privateKey: agentPrivateKey },
-    selfSafeAddress,
+    // Unused on the search path; acquire is proxied to the daemon.
+    signer: { privateKey: '0x0' },
+    selfSafeAddress: '0x0000000000000000000000000000000000000000',
   });
 }
 const corpus = buildCorpus();

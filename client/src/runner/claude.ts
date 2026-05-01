@@ -68,10 +68,11 @@ export class ClaudeRunner implements Runner {
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
+            // Subgraph + IPFS gateway only — both keyless. The agent EOA
+            // private key NEVER leaves the daemon process; acquire_artifact
+            // proxies through DAEMON_API_URL instead.
             JINN_CORPUS_SUBGRAPH_URL: context.corpusEnv?.subgraphUrl ?? '',
             JINN_CORPUS_IPFS_GATEWAY_URL: context.corpusEnv?.ipfsGatewayUrl ?? '',
-            JINN_CORPUS_AGENT_PRIVATE_KEY: context.corpusEnv?.agentPrivateKey ?? '',
-            JINN_CORPUS_SELF_SAFE_ADDRESS: context.corpusEnv?.selfSafeAddress ?? '',
           },
         },
       },
