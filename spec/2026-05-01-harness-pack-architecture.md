@@ -71,7 +71,7 @@ Five coordinated architectural moves that re-align the implementation with what 
 
 | Term | Definition |
 |---|---|
-| **SolverNet** | A composition: (canonical SolverPlugin + objective + starting Harness + optional Task generator). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and a reference in-repo; not a protocol object. The SolverNet's SolverType is *derived from* its canonical SolverPlugin (the plugin declares which type it implements). |
+| **SolverNet** | A composition: (SolverType + canonical SolverPlugin + objective + starting Harness + optional Task generator). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and a reference in-repo; not a protocol object. The SolverNet's `solverType` and `solverPlugin.jinn.solverType` MUST agree — the daemon validates this at load time. |
 | **Objective** | The public scalar a SolverNet rallies around. For the Prediction SolverNet: spread vs. Polymarket consensus. Trend matters more than level (#57 §5). |
 | **SolverType** | The schema-versioned identifier a Task's spec conforms to. Examples: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. The SolverType identifier and its schemas are declared by the canonical SolverPlugin's `jinn.solverType` and `jinn.schemas` fields. The on-chain `spec.type` carries this identifier as the protocol-level join key. |
 | **SolverPlugin** | The canonical harness-agnostic package for a SolverNet — supplies the SolverType identifier + schemas, MCP servers, and skills. Each SolverNet has exactly one. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. *Operators may also install other plugins (regular Claude Code / Gemini plugins) for additional tools/skills — those are not SolverPlugins, they're operator-side additions outside any SolverNet's canonical substrate.* |
@@ -92,14 +92,16 @@ Two levels with distinct concerns; primitives at each level keep clean boundarie
 ─── Level 1 (group / persistent definition) ────────────────────────────────
      SolverNet (operator config + reference in-repo)
        ├── name
+       ├── solverType         → schema-versioned identifier (e.g., "prediction.v0")
        ├── solverPlugin       → THE canonical SolverPlugin for this SolverNet (curated; not casually swapped)
        ├── objective          → public scalar + aggregation rule
        ├── taskGenerator      → posts Tasks on a cadence (optional)
        └── startingHarness    → recommended Harness for new operators (operators DO swap this)
 
-     The SolverType identifier (e.g., prediction.v0) is derived from the canonical
-     plugin's manifest — single source of truth, not redundantly declared in the
-     SolverNet config.
+     `solverType` and `solverPlugin.jinn.solverType` MUST agree. The daemon
+     validates this at config load — mismatch = config error. The redundancy
+     is a feature: self-documenting SolverNet config + drift protection if
+     the wrong plugin gets pointed at.
 
 ─── Level 2 (per-item / ephemeral) ──────────────────────────────────────────
      Task (one per posted item; many per SolverNet)
@@ -145,6 +147,7 @@ A SolverNet is a composition pattern declared in operator config and (for first-
 ```jsonc
 {
   "name": "Prediction",
+  "solverType": "prediction.v0",
   "solverPlugin": "@jinn-network/prediction-plugin",
   "objective": {
     "scalar": "brier-spread-vs-polymarket",
@@ -157,20 +160,21 @@ A SolverNet is a composition pattern declared in operator config and (for first-
 }
 ```
 
-A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with type identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `spec.type` matches my canonical plugin's `jinn.solverType`, here is the Harness to start with and the Objective to roll up the verdict score into."
+A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with type identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `spec.type` matches my SolverNet's `solverType`, here is the canonical plugin's substrate, the Harness to start with, and the Objective to roll up the verdict score into."
 
 ### 4.2 What a SolverNet declares
 
 | Field | Purpose |
 |---|---|
 | `name` | Human-readable label. Used for dashboards, prose, and the `<name> SolverNet` proper-noun in docs. |
-| `solverPlugin` | THE canonical SolverPlugin for this SolverNet. Source of truth for the SolverType identifier and its schemas. Curated; not casually swapped. |
+| `solverType` | The schema-versioned SolverType identifier (e.g., `prediction.v0`). Per `spec/2026-05-schema-versioning.md` grammar. Daemon validates that this matches `solverPlugin.jinn.solverType` at config load — mismatch is a config error. |
+| `solverPlugin` | THE canonical SolverPlugin for this SolverNet. Provides the substrate (schemas + tools + skills) for the declared SolverType. Curated; not casually swapped. |
 | `objective` | The public scalar definition: how to compute it, polarity, rolling window. Used by the dashboard and (eventually) by Solvers' improve phases as the meta-feedback signal. |
 | `taskGenerator` | The auto-poster (today: `creator.ts` + `getTestnetAutoConfig`). Optional — operators can disable to consume Tasks posted by others without contributing to creation. |
 | `startingHarness` | The Harness a new operator's daemon uses by default. Operators are *expected* to override via `harnesses.bySolverType` if they want to compete with a different runtime — Harness competition is the whole point of the SolverNet. |
 | `publicDashboard` | Informational. Where the rolling Objective trend is rendered. |
 
-**Note: `solverType` is not a SolverNet field.** It's derived from `solverPlugin`'s `jinn.solverType` manifest field. Single source of truth; no possibility of drift between SolverNet config and plugin declaration.
+**Why `solverType` and `solverPlugin` both declare the type:** the redundancy is a feature, not duplication. `solverType` is self-documenting (anyone reading the SolverNet config knows what type it serves without fetching the plugin); `solverPlugin.jinn.solverType` is the plugin author's declaration of which type they implement. The daemon enforces agreement at load time — if a curator points the SolverNet at the wrong plugin, the config refuses to load with a clear error.
 
 ### 4.3 Multiple SolverNets per daemon
 
@@ -515,8 +519,8 @@ The schema change to `executor` is small and lands as a follow-up plan extending
 | Component | Concrete |
 |---|---|
 | Name | `Prediction` |
+| SolverType | `prediction.v0` (declared in SolverNet config; must match plugin's `jinn.solverType`) |
 | Canonical SolverPlugin | `@jinn-network/prediction-plugin`, lives at `client/plugins/jinn-prediction-plugin/`. Declares `jinn.solverType: "prediction.v0"` and `jinn.schemas.{task,solution,verdict}`. |
-| SolverType (derived) | `prediction.v0` — sourced from the canonical plugin's manifest |
 | Objective | Brier-spread vs. Polymarket consensus, rolling 84-day window, lower-is-better (#57 §5) |
 | Task generator | Polymarket-derived auto-poster (Phase A.3 — separate plan) |
 | Starting Harness | `claude-code-learner` (the bundled default; operators are expected to override via `bySolverType` to compete with their own runtime) |
@@ -648,6 +652,7 @@ The cost of retirement is real: phase-agent-overrides and skill-bundles were the
   "solverNets": [
     {
       "name": "Prediction",
+      "solverType": "prediction.v0",
       "solverPlugin": "@jinn-network/prediction-plugin",
       "objective": {
         "scalar": "brier-spread-vs-polymarket",
