@@ -6,6 +6,7 @@ import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { canonicaliseManifest } from '../../../src/restorer/manifest/index.js';
 import { loadExternalImpl } from '../../../src/restorer/external-impls/loader.js';
+import { computePackageHash } from '../../../src/restorer/external-impls/package-hash.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
@@ -13,8 +14,6 @@ let TMP: string;
 let PKG_ROOT: string;
 let PUBKEY_B64: string;
 let SECRET_KEY: Uint8Array;
-
-const VALID_HASH = ('sha256:' + '0'.repeat(64)) as `sha256:${string}`;
 
 beforeAll(async () => {
   TMP = mkdtempSync(join(tmpdir(), 'jinn-loader-'));
@@ -36,13 +35,17 @@ beforeAll(async () => {
   const pk = await ed.getPublicKeyAsync(SECRET_KEY);
   PUBKEY_B64 = Buffer.from(pk).toString('base64');
 
+  // Compute the real package-content hash now that the entry module is
+  // on disk; the loader recomputes and compares (Finding 2).
+  const packageHash = computePackageHash(PKG_ROOT);
+
   const manifest = {
     schemaVersion: '1.0.0' as const,
     name: '@fake/restorer',
     version: '0.1.0',
     supportedKinds: ['prediction.v0>=1.0.0'],
     entry: './dist/index.js',
-    package: { cid: 'bafyfake', hash: VALID_HASH },
+    package: { cid: 'bafyfake', hash: packageHash },
     capabilities: {},
     signature: { alg: 'ed25519' as const, publicKey: PUBKEY_B64, sig: '' },
   };
@@ -124,6 +127,55 @@ describe('loadExternalImpl', () => {
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
       expect(result.reason).toBe('impl-load-failed');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finding 2 — package-content hash verification
+// ---------------------------------------------------------------------------
+
+describe('loadExternalImpl — package-hash verification', () => {
+  it('rejects a package whose contents do not match manifest.package.hash', async () => {
+    const root = join(TMP, 'tampered-impl');
+    mkdirSync(join(root, 'dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'dist', 'index.js'),
+      `export default (env) => ({ name: env.implName, version: env.implVersion, supports: () => false, run: async () => ({}) });`,
+    );
+    // Sign a manifest with a hash that does NOT match the package.
+    const sk = ed.utils.randomSecretKey();
+    const pk = await ed.getPublicKeyAsync(sk);
+    const pkB64 = Buffer.from(pk).toString('base64');
+    const manifest = {
+      schemaVersion: '1.0.0' as const,
+      name: '@tampered/restorer',
+      version: '0.1.0',
+      supportedKinds: ['prediction.v0>=1.0.0'],
+      entry: './dist/index.js',
+      package: {
+        cid: 'bafyfake',
+        hash: ('sha256:' + 'f'.repeat(64)) as `sha256:${string}`,
+      },
+      capabilities: {},
+      signature: { alg: 'ed25519' as const, publicKey: pkB64, sig: '' },
+    };
+    const body = canonicaliseManifest(manifest);
+    const sig = await ed.signAsync(new TextEncoder().encode(body), sk);
+    manifest.signature.sig = Buffer.from(sig).toString('base64');
+    writeFileSync(
+      join(root, 'jinn.manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    );
+
+    const result = await loadExternalImpl({
+      entry: { name: '@tampered/restorer', entry: root },
+      trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
+      env: envFor('@tampered/restorer'),
+    });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.reason).toBe('impl-package-hash-mismatch');
     }
   });
 });

@@ -18,6 +18,7 @@ import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import impls from '../../../src/cli/commands/impls.js';
 import { canonicaliseManifest } from '../../../src/restorer/manifest/index.js';
+import { computePackageHash } from '../../../src/restorer/external-impls/package-hash.js';
 import { makeCommandCtx } from '@test/cli.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
@@ -26,8 +27,7 @@ let TMP: string;
 let CONFIG_PATH: string;
 let PKG_ROOT: string;
 let PUBKEY_B64: string;
-
-const VALID_HASH = ('sha256:' + '0'.repeat(64)) as `sha256:${string}`;
+let SECRET_KEY: Uint8Array;
 
 beforeEach(async () => {
   TMP = mkdtempSync(join(tmpdir(), 'jinn-impls-cli-'));
@@ -40,22 +40,24 @@ beforeEach(async () => {
     join(PKG_ROOT, 'dist', 'index.js'),
     'export default function (env) { return { name: env.implName, version: env.implVersion, supports: () => false, run: async () => ({}) }; }',
   );
-  const sk = ed.utils.randomSecretKey();
-  const pk = await ed.getPublicKeyAsync(sk);
+  SECRET_KEY = ed.utils.randomSecretKey();
+  const pk = await ed.getPublicKeyAsync(SECRET_KEY);
   PUBKEY_B64 = Buffer.from(pk).toString('base64');
+  // Compute the real package-content hash so `add` accepts it (Finding 2).
+  const packageHash = computePackageHash(PKG_ROOT);
   const manifest = {
     schemaVersion: '1.0.0' as const,
     name: '@fake/restorer',
     version: '0.1.0',
     supportedKinds: ['prediction.v0>=1.0.0'],
     entry: './dist/index.js',
-    package: { cid: 'bafyfake', hash: VALID_HASH },
+    package: { cid: 'bafyfake', hash: packageHash },
     capabilities: {},
     signature: { alg: 'ed25519' as const, publicKey: PUBKEY_B64, sig: '' },
   };
   const sig = await ed.signAsync(
     new TextEncoder().encode(canonicaliseManifest(manifest)),
-    sk,
+    SECRET_KEY,
   );
   manifest.signature.sig = Buffer.from(sig).toString('base64');
   writeFileSync(
@@ -108,6 +110,50 @@ describe('jinn impls', () => {
     });
     await impls.run(made.ctx);
     expect(made.exits).toContain(1);
+    const cfg = readConfig();
+    expect(cfg.restorers).toBeUndefined();
+  });
+
+  it('add: refuses when the on-disk package does not match manifest.package.hash (Finding 2)', async () => {
+    // Re-publish the manifest with a hash that will never match the
+    // actual package contents — the CLI must catch this before mutating
+    // config.
+    const manifest = {
+      schemaVersion: '1.0.0' as const,
+      name: '@fake/restorer',
+      version: '0.1.0',
+      supportedKinds: ['prediction.v0>=1.0.0'],
+      entry: './dist/index.js',
+      package: {
+        cid: 'bafyfake',
+        hash: ('sha256:' + 'a'.repeat(64)) as `sha256:${string}`,
+      },
+      capabilities: {},
+      signature: { alg: 'ed25519' as const, publicKey: PUBKEY_B64, sig: '' },
+    };
+    const sig = await ed.signAsync(
+      new TextEncoder().encode(canonicaliseManifest(manifest)),
+      SECRET_KEY,
+    );
+    manifest.signature.sig = Buffer.from(sig).toString('base64');
+    writeFileSync(
+      join(PKG_ROOT, 'jinn.manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    );
+    writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify({
+        trustedImplSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
+      }),
+    );
+    const made = makeCommandCtx({
+      argv: ['add', PKG_ROOT, '--config', CONFIG_PATH, '--json'],
+    });
+    await impls.run(made.ctx);
+    expect(made.exits).toContain(1);
+    const out = made.writes.join('');
+    const errLine = out.split('\n').find((l) => l.includes('package_hash_mismatch'));
+    expect(errLine).toBeTruthy();
     const cfg = readConfig();
     expect(cfg.restorers).toBeUndefined();
   });

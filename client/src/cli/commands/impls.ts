@@ -28,6 +28,7 @@ import {
   loadManifest,
   verifyManifestSignature,
 } from '../../restorer/manifest/index.js';
+import { verifyPackageHash } from '../../restorer/external-impls/package-hash.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -126,6 +127,21 @@ async function runAdd(
         `Add the publisher's public key (${manifest.signature.publicKey.slice(0, 20)}…) ` +
         `to trustedImplSigners[] first.`,
       { manifestPublicKey: manifest.signature.publicKey },
+    );
+    return;
+  }
+
+  // Recompute the package-content hash and compare to manifest.package.hash
+  // before mutating the operator's config. Catches install-time mismatches
+  // (Finding 2) so the daemon never starts with a stale entry.
+  const hashOk = await verifyPackageHash(absPkg, manifest);
+  if (!hashOk) {
+    emitError(
+      ctx,
+      'package_hash_mismatch',
+      `Recomputed package hash does not match manifest.package.hash (${manifest.package.hash}). ` +
+        `Re-publish the package or pull the matching tarball.`,
+      { manifestHash: manifest.package.hash, packagePath: absPkg },
     );
     return;
   }

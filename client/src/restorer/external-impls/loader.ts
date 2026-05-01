@@ -18,6 +18,7 @@ import {
 import type { ScopedSecrets } from '../capability/index.js';
 import type { RestorerImpl } from '../types.js';
 import type { ExternalImplEntry, SignerTrust } from './types.js';
+import { verifyPackageHash } from './package-hash.js';
 
 /**
  * Daemon-side mirror of the SDK's `ExternalRestorerEnv`. Kept local
@@ -48,7 +49,8 @@ export type LoadFailureReason =
   | 'impl-load-failed'
   | 'impl-construction-failed'
   | 'impl-identity-mismatch'
-  | 'impl-supports-mismatch';
+  | 'impl-supports-mismatch'
+  | 'impl-package-hash-mismatch';
 
 export type LoadResult =
   | { kind: 'ok'; impl: RestorerImpl; manifest: JinnManifest }
@@ -83,6 +85,20 @@ export async function loadExternalImpl({
   const trusted = await verifyManifestSignature(manifest, trustedSigners);
   if (!trusted) {
     return { kind: 'error', reason: 'impl-trust' };
+  }
+
+  // Recompute the package-content hash and compare to the manifest's
+  // claim. This binds the signed manifest to the bytes on disk —
+  // without it a signed manifest could be paired with arbitrary code
+  // so long as the manifest itself is unmodified. See Finding 2 in the
+  // PR review.
+  const hashOk = await verifyPackageHash(entry.entry, manifest);
+  if (!hashOk) {
+    return {
+      kind: 'error',
+      reason: 'impl-package-hash-mismatch',
+      detail: `recomputed package hash does not match manifest.package.hash (${manifest.package.hash})`,
+    };
   }
 
   if (manifest.name !== entry.name) {
