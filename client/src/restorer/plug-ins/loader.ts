@@ -3,10 +3,11 @@
  * normalised slot registry. Per-plug-in failures are recorded but never
  * abort the load — daemon boot continues with the surviving registry.
  *
- * Collision policy (phase-agent-override): last-installed-wins on the
- * `(phase, agent, scope.matchKinds)` key. A warning is emitted; the
- * loader does not refuse the second plug-in. See plan §"Cross-task
- * conventions / Slot routing rule".
+ * Collision policy (phase-agent-override): first-installed-wins on the
+ * `(phase, agent, scope.matchKinds)` key. A collision is recorded as an
+ * error and the second plug-in is DROPPED. The operator must explicitly
+ * remove the existing plug-in before installing the new one.
+ * See plan §"Cross-task conventions / Slot routing rule".
  */
 
 import { resolve } from 'node:path';
@@ -87,9 +88,13 @@ export async function loadPlugIns({
         case 'phase-agent-override': {
           const key = `${slot.phase}|${slot.agent}|${(slot.scope?.matchKinds ?? ['*']).join(',')}`;
           if (phaseAgentKeyed.has(key)) {
-            warnings.push(
-              `phase-agent-override collision on ${key}: ${manifest.name} overrides previous`,
-            );
+            const first = phaseAgentKeyed.get(key)!.plugInName;
+            errors.push({
+              plugInName: manifest.name,
+              reason: `phase-agent-override collision on "${key}": slot already registered by "${first}". Remove "${first}" before installing "${manifest.name}".`,
+            });
+            // Do not register the second plug-in — first-installed-wins.
+            break;
           }
           phaseAgentKeyed.set(key, { ...provenance, slot });
           break;
