@@ -26,6 +26,7 @@ import {
 } from '../auth/erc8128.js';
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
 import { addEventsRoutes } from './events-endpoint.js';
+import { addBootstrapRoutes } from './bootstrap-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -35,6 +36,8 @@ export interface ApiServerConfig {
   x402?: X402Config;
   /** When set, GET /v1/status includes fleet file + RPC reads. */
   status?: StatusGatherConfig;
+  /** When set, GET /v1/bootstrap reads <earningDir>/earning_state.json. */
+  bootstrap?: { earningDir: string };
 }
 
 export interface ApiServer {
@@ -76,6 +79,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   });
 
   addEventsRoutes(app);
+
+  if (config.bootstrap) {
+    addBootstrapRoutes(app, config.bootstrap);
+  }
 
   // x402 payment-gated routes (if configured)
   if (config.x402) {
