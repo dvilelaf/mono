@@ -1,7 +1,12 @@
 /**
- * Scoped signer constructor — Phase 1 implementation. Allow-list is
- * enforced before any signing happens; actual transaction signing is
- * wired in a follow-up plan (the daemon plan that owns the wallet).
+ * Scoped signer constructor — Phase 1 implementation. The (chainId,
+ * to, selector) allow-list is enforced before `sendAllowedCall`
+ * delegates, and the EIP-712 domain allow-list is enforced before
+ * `signTypedData` delegates. Actual transaction signing is wired in a
+ * follow-up plan (the daemon plan that owns the wallet); the typed-data
+ * delegation hits the master account immediately.
+ *
+ * Spec: `spec/2026-05-executor-trust-boundary.md` §3.
  */
 
 import type { Account, Address, Hex } from 'viem';
@@ -14,15 +19,64 @@ export interface CapabilityAllowEntry {
   selector: Hex;
 }
 
+/**
+ * EIP-712 typed-data domain allow-list entry. See
+ * `client/src/restorer/manifest/types.ts:TypedDataAllowEntry` and
+ * the manifest-schema field `capabilities.signer.typedDataDomains`.
+ *
+ * - `chainId` MUST match exactly.
+ * - `verifyingContract` / `name` / `version` match only when set on
+ *   the entry; an unset field on the entry means "any value".
+ */
+export interface TypedDataAllowEntry {
+  chainId: number;
+  name?: string;
+  version?: string;
+  verifyingContract?: Address;
+}
+
 export interface CreateScopedSignerArgs {
   account: Account;
   allowList: readonly CapabilityAllowEntry[];
+  /**
+   * Domain allow-list for `signTypedData`. The daemon refuses any
+   * `signTypedData` call whose domain does not match an entry here.
+   * Default-deny: an empty array means EVERY `signTypedData` call
+   * throws (matches the "no typedDataDomains in the manifest" case).
+   */
+  typedDataAllowList: readonly TypedDataAllowEntry[];
   chainId: number;
+}
+
+function eqLowerOrUndef(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function matchesEntry(
+  entry: TypedDataAllowEntry,
+  domain: SignTypedDataArgs['domain'],
+): boolean {
+  if (domain.chainId !== entry.chainId) return false;
+  if (entry.verifyingContract !== undefined) {
+    if (!domain.verifyingContract) return false;
+    if (!eqLowerOrUndef(entry.verifyingContract, domain.verifyingContract)) {
+      return false;
+    }
+  }
+  if (entry.name !== undefined) {
+    if (domain.name !== entry.name) return false;
+  }
+  if (entry.version !== undefined) {
+    if (domain.version !== entry.version) return false;
+  }
+  return true;
 }
 
 export function createScopedSigner({
   account,
   allowList,
+  typedDataAllowList,
   chainId,
 }: CreateScopedSignerArgs): ScopedSigner {
   return {
@@ -31,9 +85,19 @@ export function createScopedSigner({
     },
 
     async signTypedData(args: SignTypedDataArgs): Promise<Hex> {
-      // Phase 1: delegate to the master account. Future revisions will
-      // additionally check the EIP-712 domain against a manifest
-      // signTypedData allow-list.
+      // Default-deny: empty allow-list refuses everything. Operators
+      // who need typed-data signing MUST declare a
+      // `capabilities.signer.typedDataDomains` entry on the manifest.
+      // Finding 3.
+      const allowed = typedDataAllowList.some((entry) =>
+        matchesEntry(entry, args.domain),
+      );
+      if (!allowed) {
+        throw new Error(
+          `signTypedData domain not in allow-list (chainId=${args.domain.chainId ?? 'unspecified'}, ` +
+            `verifyingContract=${args.domain.verifyingContract ?? 'unspecified'})`,
+        );
+      }
       if (typeof account.signTypedData !== 'function') {
         throw new Error('master account does not support signTypedData');
       }

@@ -32,6 +32,7 @@ export type {
   CapabilityAllowEntry,
   ManifestRpcAllow,
   ManifestSecretSpec,
+  TypedDataAllowEntry,
   JinnManifest,
 } from './manifest.js';
 

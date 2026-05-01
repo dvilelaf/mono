@@ -78,6 +78,24 @@
                   "description": { "type": "string", "maxLength": 200 }
                 }
               }
+            },
+            "typedDataDomains": {
+              "type": "array",
+              "description": "Allow-list for `signTypedData` EIP-712 domains. The daemon's scoped signer refuses any `signTypedData` call whose domain does not match an entry here. `chainId` must match exactly; `verifyingContract` / `name` / `version` are matched only if specified in the entry. Empty or omitted array = default-deny (every `signTypedData` call throws).",
+              "items": {
+                "type": "object",
+                "required": ["chainId"],
+                "additionalProperties": false,
+                "properties": {
+                  "chainId": { "type": "integer", "minimum": 1 },
+                  "name": { "type": "string", "maxLength": 100 },
+                  "version": { "type": "string", "maxLength": 50 },
+                  "verifyingContract": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{40}$"
+                  }
+                }
+              }
             }
           }
         },

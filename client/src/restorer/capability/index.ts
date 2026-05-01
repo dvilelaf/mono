@@ -76,7 +76,11 @@ export interface ScopedRpc {
 export type ScopedSecrets = Readonly<Record<string, string>>;
 
 export { createScopedSigner } from './scoped-signer.js';
-export type { CapabilityAllowEntry, CreateScopedSignerArgs } from './scoped-signer.js';
+export type {
+  CapabilityAllowEntry,
+  CreateScopedSignerArgs,
+  TypedDataAllowEntry,
+} from './scoped-signer.js';
 export { createScopedRpc } from './scoped-rpc.js';
 export type { CreateScopedRpcArgs } from './scoped-rpc.js';
 export { freezeSecrets } from './scoped-secrets.js';
