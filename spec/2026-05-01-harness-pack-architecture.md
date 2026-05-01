@@ -3,7 +3,7 @@
 - **Date:** 2026-05-01
 - **Author:** opus (drafted on jinn-mono-dwqm; Captain ritsukai)
 - **Status:** Proposal
-- **Version:** 0.5
+- **Version:** 0.6
 - **Tracks:** Phase A.2 reframe — supersedes the wrapper-with-specialist construct introduced in PR #63; replaces `spec/2026-04-30-plug-in-surface.md` Path 1 with a harness-agnostic SolverPlugin mechanism that extends existing AI-tool plugin formats.
 
 **Sibling specs (load-bearing pre-reads):**
@@ -33,7 +33,7 @@ Five coordinated architectural moves that re-align the implementation with what 
 
 1. **Delete the universal wrapper.** `claude-code-learner` becomes a peer Harness in the registry, not a substrate that wraps every SolverType. Its `supports()` returns `true` for any non-evaluation restoration; it is the registry's *default* when no other Harness claims a SolverType. It owns its `run()` end-to-end.
 2. **Rename `RestorerImpl → Harness`** and the protocol role **`Restorer → Solver`**. The thing-an-operator-runs is a Harness; the protocol role they fulfil is Solver. The rename disambiguates role from implementation and unifies the vocabulary cluster (SolverNet / SolverType / SolverPlugin / Solver / Solution).
-3. **Introduce SolverPlugins.** A SolverPlugin is a harness-agnostic package supplying SolverType-specific *substrate* — schemas (optional), MCP-tool servers, and skills an operator plugs into their Harness to handle a SolverType. **A SolverPlugin is a superset of existing AI-tool plugin formats** (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) — a single artifact that's a Claude Code plugin, a Gemini extension, *and* a Jinn SolverPlugin at the same time, depending on which consumer reads it. SolverPlugins do not dictate flow, tunables, or starting Harness — those live elsewhere (Harness owns flow + tunables; SolverNet config carries the starting Harness).
+3. **Introduce SolverPlugins.** A SolverPlugin is a harness-agnostic package supplying SolverType-specific *substrate* — schemas, MCP-tool servers, and skills an operator plugs into their Harness to handle a SolverType. Each SolverNet declares **one** canonical SolverPlugin; the plugin's manifest declares **one** SolverType. SolverNet ↔ SolverPlugin ↔ SolverType is a 1:1:1 binding curated by the SolverNet curator. **A SolverPlugin is a superset of existing AI-tool plugin formats** (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) — a single artifact that's a Claude Code plugin, a Gemini extension, *and* a Jinn SolverPlugin at the same time, depending on which consumer reads it. SolverPlugins do not dictate flow, tunables, or Harness — those live elsewhere (Harness owns flow + tunables; SolverNet config carries the starting Harness).
 4. **Introduce SolverNets and Tasks as distinct levels.** A SolverNet is the campaign / group / objective. A Task is one posted item — the on-chain unit a Solver claims and produces a Solution for. The SolverNet declares one SolverType; many Tasks of that SolverType flow through it.
 5. **Ship the Prediction SolverNet as the first instance.** `@jinn-network/prediction-plugin` ships in-repo, on by default for new operators. The starting Harness (the learner) plus the prediction plugin is what the GTM in #57 calls the "client as meta-harness" running against the Polymarket-derived Task stream.
 
@@ -71,10 +71,10 @@ Five coordinated architectural moves that re-align the implementation with what 
 
 | Term | Definition |
 |---|---|
-| **SolverNet** | A composition: (SolverType + objective + starting plugin + starting Harness + optional Task generator). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and a reference in-repo; not a protocol object. |
+| **SolverNet** | A composition: (canonical SolverPlugin + objective + starting Harness + optional Task generator). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and a reference in-repo; not a protocol object. The SolverNet's SolverType is *derived from* its canonical SolverPlugin (the plugin declares which type it implements). |
 | **Objective** | The public scalar a SolverNet rallies around. For the Prediction SolverNet: spread vs. Polymarket consensus. Trend matters more than level (#57 §5). |
-| **SolverType** | The schema-versioned identifier a Task's spec conforms to. Examples: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. SolverType *schemas* live in the Type-defining SolverPlugin; the Type identifier is just a string tag the daemon and Harnesses use as a join key. |
-| **SolverPlugin** | A harness-agnostic package supplying SolverType-specific substrate — schemas (optional), MCP servers, skills — that an operator plugs into their Harness to handle a SolverType. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. |
+| **SolverType** | The schema-versioned identifier a Task's spec conforms to. Examples: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. The SolverType identifier and its schemas are declared by the canonical SolverPlugin's `jinn.solverType` and `jinn.schemas` fields. The on-chain `spec.type` carries this identifier as the protocol-level join key. |
+| **SolverPlugin** | The canonical harness-agnostic package for a SolverNet — supplies the SolverType identifier + schemas, MCP servers, and skills. Each SolverNet has exactly one. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. *Operators may also install other plugins (regular Claude Code / Gemini plugins) for additional tools/skills — those are not SolverPlugins, they're operator-side additions outside any SolverNet's canonical substrate.* |
 | **Task** | The on-chain posted item. Today: `JinnRouter.createRestorationJob`'s product. Carries a `specCid` referencing the IPFS-stored spec. The Solver claims a Task, runs it via their Harness, and submits a Solution. |
 | **Solution** | The Solver's output for a Task. The thing today called `RestorationOutput`. |
 | **Verdict** | The Evaluator's output scoring a Solution. Carries a `verdictPayload` (kept; protocol-level field). |
@@ -92,40 +92,47 @@ Two levels with distinct concerns; primitives at each level keep clean boundarie
 ─── Level 1 (group / persistent definition) ────────────────────────────────
      SolverNet (operator config + reference in-repo)
        ├── name
-       ├── solverType         → schema-versioned identifier (prediction.v0)
+       ├── solverPlugin       → THE canonical SolverPlugin for this SolverNet (curated; not casually swapped)
        ├── objective          → public scalar + aggregation rule
        ├── taskGenerator      → posts Tasks on a cadence (optional)
-       ├── startingPlugin     → recommended SolverPlugin for new operators (swappable)
-       └── startingHarness    → recommended Harness for new operators (swappable)
+       └── startingHarness    → recommended Harness for new operators (operators DO swap this)
+
+     The SolverType identifier (e.g., prediction.v0) is derived from the canonical
+     plugin's manifest — single source of truth, not redundantly declared in the
+     SolverNet config.
 
 ─── Level 2 (per-item / ephemeral) ──────────────────────────────────────────
      Task (one per posted item; many per SolverNet)
        ├── on-chain           → JinnRouter object with escrow + eligibility
-       └── spec (IPFS)        → solverType + per-Task fields (predicate, window, ...)
+       └── spec (IPFS)        → type identifier + per-Task fields (predicate, window, ...)
 
        Solver claims Task → Harness runs → Solution submitted
        Evaluator scores Solution → Verdict produced
        Verdict's score contributes to SolverNet's Objective
 
 ─── Operator-installed primitives (the things that make a SolverNet runnable) ─
-     SolverPlugin (host-plugin-format package; one or more per SolverType)
-       ├── jinn.supportsSolverTypes
-       ├── jinn.schemas (if Type-defining)         ← canonical schemas for the SolverType
-       ├── mcpServers (host plugin field)
-       └── skills (host plugin field; knowledge embedded as skill content)
+     SolverPlugin (canonical; one per SolverNet)
+       ├── jinn.solverType   → THIS plugin's SolverType identifier (e.g., "prediction.v0")
+       ├── jinn.schemas      → canonical schemas for the SolverType
+       ├── mcpServers        → standard host-plugin field
+       └── skills            → standard host-plugin field (knowledge embedded as skill content)
+
+     Other plugins (operator-installed; not SolverNet-canonical)
+       Standard Claude Code / Gemini plugins. The host runtime loads them; the
+       Harness can use their tools/skills like any plugin's. They are not part
+       of any SolverNet definition.
 
      Harness (npm package)
-       ├── owns flow + improve-phase + tunables (Harness-internal)
-       └── consumes installed SolverPlugins at session-start (registers tools/skills/schemas)
+       └── owns flow + improve-phase + tunables (Harness-internal)
 ```
 
-- **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its SolverType and Objective don't change between Tasks; its scalar accumulates as Tasks resolve.
+- **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its canonical plugin and Objective don't change between Tasks; its scalar accumulates as Tasks resolve.
 - **Level 2 is ephemeral.** Each Task is posted, claimed, solved, scored, settled, indexed.
-- **The join key is SolverType.** On-chain a Task carries its SolverType identifier; operator-side a SolverNet declares which SolverType it coordinates around; SolverPlugins declare which SolverTypes they provide substrate for. JinnRouter (protocol) only knows about SolverTypes; SolverNet is operator/config-level coordination.
-- **SolverPlugin and Harness are independent.** A SolverPlugin ships substrate (schemas + tools + skills) for a SolverType. A Harness owns the runtime (flow, improve-phase, tunables) and consumes whatever plugins are installed. Neither dictates the other; the SolverNet's starting plugin and starting Harness are starting points, not bindings.
-- **Schemas live in the Type-defining plugin.** Permissionless: anyone can publish a plugin with new schemas + tools + skills and operators install it without going through the core team. Cross-language: schemas are JSON Schema, readable by any Harness regardless of language. First-party SolverNets ship with their Type-defining plugin pre-installed so first-boot operators don't see a schema-missing failure.
+- **The join key is the SolverType identifier (a string).** On-chain a Task carries `spec.type`. The daemon looks up the SolverNet whose canonical plugin declares that type, fetches the plugin's schemas to validate the spec, and dispatches to the SolverNet's starting Harness (or operator-overridden Harness via `bySolverType`).
+- **One canonical plugin per SolverNet — no conflicts possible.** The plugin is the source of truth for its SolverType (identifier + schemas + substrate). Operators don't typically swap canonical plugins; if they want different substrate they participate in (or fork) a different SolverNet. Operators may install *other* plugins for additional tools/skills; those are regular host-plugin-system plugins, not SolverPlugins.
+- **SolverPlugin and Harness are independent.** Plugin ships substrate; Harness owns the runtime (flow, improve-phase, tunables). The SolverNet's canonical plugin is fixed by the curator; the starting Harness is just a recommendation operators can override.
 
-The clean separation: **SolverType supplies an *identifier*; SolverPlugin supplies *what shape (via schemas) and what tools/skills are useful*; Harness supplies *how to actually run it*; SolverNet supplies *what we're trying to improve*; Task supplies *the specific thing to solve right now*.**
+The clean separation: **canonical SolverPlugin supplies *shape (via schemas) and substrate (tools + skills)*; Harness supplies *how to actually run it*; SolverNet supplies *what we're trying to improve*; Task supplies *the specific thing to solve right now*.**
 
 ---
 
@@ -138,36 +145,36 @@ A SolverNet is a composition pattern declared in operator config and (for first-
 ```jsonc
 {
   "name": "Prediction",
-  "solverType": "prediction.v0",
+  "solverPlugin": "@jinn-network/prediction-plugin",
   "objective": {
     "scalar": "brier-spread-vs-polymarket",
     "polarity": "lower-is-better",
     "rollingWindowDays": 84
   },
   "taskGenerator": "polymarket-derived-auto-poster",
-  "startingPlugin": "@jinn-network/prediction-plugin",
   "startingHarness": "claude-code-learner",
   "publicDashboard": "https://jinn.network/solvernets/prediction"
 }
 ```
 
-A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with SolverTypes. The SolverNet is operator-side coordination — the way a daemon decides "which plugin and Harness to start with for a Task with `spec.type: 'prediction.v0'`," and the way the network publicly rallies around an Objective.
+A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with type identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `spec.type` matches my canonical plugin's `jinn.solverType`, here is the Harness to start with and the Objective to roll up the verdict score into."
 
 ### 4.2 What a SolverNet declares
 
 | Field | Purpose |
 |---|---|
 | `name` | Human-readable label. Used for dashboards, prose, and the `<name> SolverNet` proper-noun in docs. |
-| `solverType` | The schema-versioned SolverType the SolverNet coordinates around. Per `spec/2026-05-schema-versioning.md`. |
+| `solverPlugin` | THE canonical SolverPlugin for this SolverNet. Source of truth for the SolverType identifier and its schemas. Curated; not casually swapped. |
 | `objective` | The public scalar definition: how to compute it, polarity, rolling window. Used by the dashboard and (eventually) by Solvers' improve phases as the meta-feedback signal. |
 | `taskGenerator` | The auto-poster (today: `creator.ts` + `getTestnetAutoConfig`). Optional — operators can disable to consume Tasks posted by others without contributing to creation. |
-| `startingPlugin` | The SolverPlugin a new operator's daemon installs by default. Operators can swap or remove. |
-| `startingHarness` | The Harness a new operator's daemon uses by default for this SolverType. Operators can override via `harnesses.bySolverType`. |
+| `startingHarness` | The Harness a new operator's daemon uses by default. Operators are *expected* to override via `harnesses.bySolverType` if they want to compete with a different runtime — Harness competition is the whole point of the SolverNet. |
 | `publicDashboard` | Informational. Where the rolling Objective trend is rendered. |
+
+**Note: `solverType` is not a SolverNet field.** It's derived from `solverPlugin`'s `jinn.solverType` manifest field. Single source of truth; no possibility of drift between SolverNet config and plugin declaration.
 
 ### 4.3 Multiple SolverNets per daemon
 
-A daemon can run more than one SolverNet at a time — e.g., Prediction + Portfolio. Each SolverNet declares its own SolverType; the daemon's registry routes incoming Tasks by SolverType to the correct Harness. SolverNets do not compete inside one daemon; they coexist. Cross-SolverNet selection ("which SolverNet should this generic Task go to?") is not a protocol concern — Tasks identify their SolverNet by SolverType.
+A daemon can run more than one SolverNet at a time — e.g., Prediction + Portfolio. Each SolverNet has its own canonical plugin declaring its own SolverType; the daemon's registry routes incoming Tasks by `spec.type` to the correct SolverNet's Harness. SolverNets do not compete inside one daemon; they coexist. Cross-SolverNet selection ("which SolverNet should this generic Task go to?") is not a protocol concern — Tasks identify their SolverNet by their type identifier.
 
 ---
 
@@ -179,9 +186,9 @@ A SolverPlugin is **what an operator plugs into their Harness to handle a partic
 
 A SolverPlugin contains:
 
-- **Schemas (optional)** — JSON Schemas for the SolverType's Task / Solution / Verdict shapes. A plugin that ships schemas is *Type-defining* (see §5.3). A plugin that omits schemas is adding tools/skills atop a SolverType already defined by another plugin.
+- **Schemas** — JSON Schemas for the SolverType's Task / Solution / Verdict shapes. The canonical SolverPlugin is the source of truth for the type's shape.
 - **MCP-tool servers** — process-based tools any MCP-aware Harness can spawn.
-- **Skills** — markdown files with frontmatter that plugin-aware Harnesses register (in Claude Code / Gemini, the host plugin format's standard `skills` field). Knowledge files (forecasting techniques, calibration approaches, etc.) are shipped as skills — there's no separate "knowledge" concept.
+- **Skills** — markdown files with frontmatter that plugin-aware host runtimes register (in Claude Code / Gemini, the host plugin format's standard `skills` field). Knowledge files (forecasting techniques, calibration approaches, etc.) are shipped as skills — there's no separate "knowledge" concept.
 
 A SolverPlugin does NOT contain:
 
@@ -189,7 +196,7 @@ A SolverPlugin does NOT contain:
 - **Tunables** — the Harness owns its improve-phase contract; tunables describe what the *Harness* mutates, not what the plugin ships.
 - **Starting Harness** — plugin is harness-neutral. The SolverNet's operator config carries a starting Harness for ergonomics; the plugin itself doesn't bind to one.
 
-The `jinn` extension on a SolverPlugin manifest is **two fields total**: `supportsSolverTypes` and (optionally) `schemas`.
+The `jinn` extension on a SolverPlugin manifest is **two fields total**: `solverType` (singular) and `schemas`.
 
 ### 5.2 Format — extension of existing AI-tool plugin manifests
 
@@ -223,7 +230,7 @@ The full Prediction SolverPlugin manifest:
 
   // Jinn extension — two fields.
   "jinn": {
-    "supportsSolverTypes": ["prediction.v0"],
+    "solverType": "prediction.v0",
     "schemas": {
       "task":     "schemas/task.json",
       "solution": "schemas/solution.json",
@@ -237,47 +244,25 @@ The full Prediction SolverPlugin manifest:
 
 | Field | Purpose |
 |---|---|
-| `jinn.supportsSolverTypes` | Per `spec/2026-05-schema-versioning.md` grammar. The SolverType identifiers this plugin's substrate is intended for. The daemon's join key — match a Task's `spec.type` to a plugin via this field. |
-| `jinn.schemas` (optional) | JSON Schemas defining the SolverType's payloads. **If present**, the plugin is *Type-defining*: it ships the canonical shape for `task`, `solution`, `verdict`. **If absent**, the plugin is *tools-only*: it adds MCP servers and skills atop a SolverType already defined by another plugin. See §5.3. |
+| `jinn.solverType` | The single SolverType identifier this plugin defines. Per `spec/2026-05-schema-versioning.md` grammar. Singular: each SolverPlugin defines exactly one SolverType. The on-chain `spec.type` carries this same string. |
+| `jinn.schemas` | JSON Schemas defining the SolverType's payloads (`task`, `solution`, `verdict`). The plugin is the source of truth for the SolverType's shape. |
 
 That's the entire `jinn` surface. Two fields.
 
-The standard plugin fields (`mcpServers`, `skills`, optionally `agents`, `hooks`, etc.) carry everything else.
+The standard plugin fields (`mcpServers`, `skills`, optionally `agents`, `hooks`, etc.) carry the substrate.
 
 The manifest is JSON-Schema validated at install time and at session start. Unknown `jinn.*` keys fail loud (forward-compat).
 
-### 5.3 Three usage shapes (emergent from `jinn.schemas` being optional)
+### 5.3 No-canonical-plugin-installed behaviour
 
-The optionality of `jinn.schemas` produces three natural plugin shapes — usage patterns, not architectural roles:
-
-| Shape | Has `jinn.schemas` | Has `mcpServers` / `skills` | Purpose |
-|---|---|---|---|
-| **Type-defining + substrate** | yes | yes | The canonical case for a first-party SolverNet. `@jinn-network/prediction-plugin` ships schemas + tools + skills together. |
-| **Tools-only** | no | yes | Extends a SolverType already defined by another plugin. Example: `@some-author/extra-polymarket-tools` adds Kalshi tools alongside the canonical prediction plugin. |
-| **Schemas-only** | yes | no | Defines a SolverType for downstream consumers (evaluators, dashboard implementers, cross-language Harnesses) who want schemas without running the substrate. |
-
-All three are valid. The daemon doesn't distinguish them as roles; it just reads the manifest and uses what's there.
-
-**Conflict resolution when two plugins ship `jinn.schemas` for the same SolverType:**
-
-The daemon SHA-256-compares the schema files at install time:
-
-- **Identical** → both load. (Common case: a Tools-only plugin re-ships the same schemas as a sanity copy.)
-- **Different** → install fails with a clear error pointing at which file differs and which Type-defining plugin is already canonical.
-- **First-claim-wins:** the first Type-defining plugin registered for a SolverType effectively defines its canonical shape. Subsequent Type-defining plugins must match exactly.
-
-This mirrors how npm package-name claiming works in practice: there's no central authority, but conflicts are surfaced at install time. SolverType evolution lives in the Type-defining plugin's version bumps; consumers of that plugin upgrade alongside.
-
-### 5.4 No-Type-defining-plugin behaviour
-
-If a Task arrives for a SolverType with no Type-defining plugin installed:
+If a Task arrives for a SolverType whose canonical plugin isn't installed:
 
 - The daemon cannot validate the spec.
-- The Task is dispatched to whichever Harness claims the SolverType. The Harness decides: refuse with `canAttempt → { ok: false, reason: 'no schema for ...' }`, or proceed permissively (consume raw spec content).
-- For first-party SolverTypes like `prediction.v0`, the default daemon ships `@jinn-network/prediction-plugin` pre-installed — so this case is moot in practice.
-- Permissionless operators introducing new SolverTypes ship a Type-defining plugin alongside the SolverNet config. The plugin IS the canonical shape definition.
+- The Task is dispatched to whichever Harness claims that type. The Harness decides: refuse via `canAttempt → { ok: false, reason: 'no plugin for prediction.v0' }`, or proceed permissively (consume raw spec content).
+- For first-party SolverNets like Prediction, the default daemon ships `@jinn-network/prediction-plugin` pre-installed — so this case is moot in practice.
+- Permissionless operators introducing new SolverNets ship a canonical plugin alongside the SolverNet config. The plugin IS the canonical shape definition for its SolverType.
 
-### 5.5 Distribution and install
+### 5.4 Distribution and install
 
 The SolverPlugin format is distribution-agnostic. The daemon's `jinn plugins add` verb supports multiple resolvers:
 
@@ -301,18 +286,18 @@ jinn plugins add ipfs://bafy...
 Each resolver fetches the package and validates:
 
 1. Manifest parses (whichever of `.claude-plugin/plugin.json`, `gemini-extension.json`, or a standalone `jinn.plugin.json` is present).
-2. `jinn.supportsSolverTypes` validates against the SolverType grammar.
-3. If `jinn.schemas` present: paths exist, parse as JSON Schema, hash-compare against any other Type-defining plugin already installed for the same SolverType (§5.3).
+2. `jinn.solverType` validates against the SolverType grammar.
+3. `jinn.schemas` paths exist, parse as JSON Schema.
 4. Standard plugin fields parse against the host plugin schema (skills paths exist, MCP entries are well-formed, etc.).
-5. Appends to `~/.jinn-client/config.json` under `solverPlugins[]`.
+5. The plugin is associated with whichever SolverNet config(s) name it via `solverPlugin`.
 
 **Default operator config installs `@jinn-network/prediction-plugin` automatically for new daemons** so the Prediction SolverNet works out of the box. Migration handling for existing operators: §11.8.
 
-### 5.6 Versioning + compatibility
+### 5.5 Versioning + compatibility
 
 - **SolverPlugin content** (`@jinn-network/prediction-plugin` itself) follows semver. Breaking changes to schemas bump the major; new tools / skills are minor; bug fixes are patches.
 - **The `jinn` extension's own schema** follows semver with a 12-week deprecation window. v1 ships with two fields; minor adds (e.g., a future optional metadata field) won't break existing plugins.
-- **Harness compatibility** is informal — Harness plugin-loaders read whatever `jinn` fields they recognize and ignore unknown ones (forward-compat). A Harness that requires a future `jinn.*` field declares its minimum supported version in its own manifest and refuses to load plugins missing it.
+- **Operators receive new plugin versions** via the same upgrade path as any npm dep / plugin-marketplace package. The SolverNet config can pin a version range; the curator updates that range as the canonical plugin evolves.
 
 ---
 
@@ -333,7 +318,7 @@ A Task is what `JinnRouter.createRestorationJob` produces today, with the rename
 
 ### 6.2 The IPFS-stored spec
 
-The Task's spec is the JSON-stored description of *what* this specific Task is asking for. It carries a `type` field identifying the SolverType, plus SolverType-specific fields validated against the Type-defining plugin's `jinn.schemas.task`:
+The Task's spec is the JSON-stored description of *what* this specific Task is asking for. It carries a `type` field identifying the SolverType, plus SolverType-specific fields validated against the canonical SolverPlugin's `jinn.schemas.task`:
 
 ```jsonc
 // example: a single Polymarket-derived Prediction Task
@@ -346,7 +331,7 @@ The Task's spec is the JSON-stored description of *what* this specific Task is a
 }
 ```
 
-The `type` field in the spec is the **join key** between protocol and operator-side. The daemon receives the Task, reads its spec from IPFS, looks up the Type-defining plugin by `type`, validates the spec against that plugin's `schemas.task`, looks up the SolverNet declaring `solverType: 'prediction.v0'`, dispatches to that SolverNet's starting Harness (or the operator's per-SolverType override).
+The `type` field in the spec is the **join key** between protocol and operator-side. The daemon receives the Task, reads its spec from IPFS, looks up the SolverNet whose canonical plugin's `jinn.solverType` matches, validates the spec against that plugin's `jinn.schemas.task`, dispatches to that SolverNet's starting Harness (or the operator's per-SolverType override).
 
 ### 6.3 What changes vs. today
 
@@ -438,28 +423,28 @@ The registry resolves a Harness for a Task by:
 
 **The wrapper is gone.** `wrapWith` config and `DEFAULT_WRAP_WITH` are removed. The first-match-wrapper-with-specialist construct in `wrapper.ts` is deleted.
 
-### 7.4 Plugin-awareness
+### 7.4 Plugins land via the host runtime, not via Jinn-specific loading
 
-A Harness declares plugin-awareness in its package metadata:
+Earlier drafts of this spec introduced an explicit `pluginAware: true` flag and `pluginLoader` interface on Harnesses. Both are removed in v0.6 because they were over-engineered:
 
-```jsonc
-{
-  "name": "@jinn-network/claude-code-learner",
-  "jinn": {
-    "kind": "harness",
-    "pluginAware": true,
-    "pluginLoader": "./dist/plugin-loader.js"
-  }
-}
-```
+- **Substrate (tools + skills) lands via the host plugin system.** `claude-code-learner` spawns a Claude Code subprocess; Claude Code's native plugin loader picks up installed plugins (skills, MCP servers, hooks) automatically. Gemini-CLI Harnesses inherit Gemini's plugin loader. The Jinn daemon doesn't intermediate.
+- **Schema validation is the daemon's job.** When a Task arrives, the daemon reads the SolverNet's canonical plugin's `jinn.schemas`, validates the spec, dispatches. When a Solution comes back, the daemon validates it before envelope assembly. Harnesses don't need to do schema work themselves.
+- **Path 2 specialists** (e.g., a hardcoded `prediction-v0-baseline` that doesn't run a Claude Code subprocess) simply don't read the plugin directory. There's no flag to declare; they just don't engage with the substrate.
 
-A plugin-aware Harness loads the operator's installed SolverPlugins at session-start via its declared plugin-loader. A plugin-unaware Harness ignores plugins entirely — the substrate is invisible to it. Both shapes are first-class.
+So plugin handling distributes naturally:
+- Daemon: resolves plugins, validates manifests, validates Task/Solution shapes against `jinn.schemas`, ensures plugin content lives where the host runtime expects.
+- Host runtime (Claude Code / Gemini): loads plugin tools/skills natively at subprocess start.
+- Harness: just runs.
+
+No `PluginLoader` interface, no `HarnessRuntimeArtifacts` type, no `pluginAware` flag. Less spec surface, less code, fewer concepts to keep aligned.
 
 ### 7.5 The default learner under this model
 
-`claude-code-learner` is a plugin-aware Harness. It runs the seven-phase pipeline (per `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) end-to-end — the pipeline (orient → strategize → plan → execute → debrief → improve → memory-consolidation) is **the Harness's flow, not the SolverPlugin's**. The plugin-loader registers the operator's installed plugins' tools and skills so the pipeline's agents can use them, and exposes the Type-defining plugin's schemas for Task / Solution validation.
+`claude-code-learner` runs the seven-phase pipeline (per `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) end-to-end — the pipeline (orient → strategize → plan → execute → debrief → improve → memory-consolidation) is **the Harness's flow, not the SolverPlugin's**. When the learner spawns its Claude Code subprocess, Claude Code natively loads the operator's installed plugins; the canonical SolverPlugin's tools and skills become available to the pipeline's agents alongside any other operator-installed plugins.
 
-Without any plugin matching the Task's SolverType, the learner runs vanilla — the seven-phase pipeline still executes, just without SolverType-specific tools, skills, or schema validation.
+Schema validation happens at the daemon boundary, not inside the learner. The daemon validates incoming Task specs against the canonical plugin's `jinn.schemas.task`; the learner produces a Solution payload; the daemon validates it against `jinn.schemas.solution` before envelope assembly. The learner doesn't need to import schemas itself.
+
+Without the canonical SolverPlugin installed for a Task's SolverType, the daemon refuses to dispatch (or — if the operator opts in to permissive mode — dispatches with no validation). For first-party SolverNets, the canonical plugin is pre-installed; this is a non-issue in practice.
 
 The improve phase mutates `implStateDir/`. The mutation surfaces are:
 - **`implStateDir/skills/<name>/SKILL.md`** — operator-learned skills. Loaded alongside plugin-shipped skills; on name collision, operator-learned wins (override semantics below).
@@ -467,51 +452,20 @@ The improve phase mutates `implStateDir/`. The mutation surfaces are:
 - **`implStateDir/tunables/<tunable>.json`** — operator-learned values for *Harness-declared* tunables (the learner declares its own knobs — calibration aggressiveness, ensemble size for its own ensemble step, corpus-lookup top-k, etc.). Tunables are a Harness contract, not a plugin contract; alternative Harnesses define different tunables relevant to their own pipelines.
 - **`implStateDir/configs/<name>.json`** — operator-learned config overrides.
 
-**Override semantics:** at session-start the plugin-loader registers plugin-shipped skills first, then operator-learned skills; on name collision (`forecasting-techniques` shipped by a plugin vs. `forecasting-techniques` written by the operator's promoter into `implStateDir/skills/`), the operator-learned skill wins. The plugin-shipped skill remains on disk for inspection / `git diff` purposes; it is just not loaded into the runtime when an override exists. Clean separation: "from the plugin" (read-only, inspectable) vs. "operator-learned" (loaded, mutable).
+**Override semantics:** at subprocess start, Claude Code natively loads plugin-shipped skills (from the host plugin directory) alongside operator-learned skills (from `implStateDir/skills/`). On name collision, the operator-learned skill wins per the host's existing override rules. The plugin-shipped skill remains on disk for inspection / `git diff` purposes; it is just not the one loaded when an override exists. Clean separation: "from the plugin" (read-only, inspectable) vs. "operator-learned" (loaded, mutable).
 
-### 7.6 The plugin-loader (implementation detail)
+### 7.6 Daemon's plugin responsibility (minimal)
 
-A plugin-loader is a per-Harness module that reads installed SolverPlugins at session-start and emits whatever the Harness needs. Not a top-level architectural primitive — it's the code each plugin-aware Harness ships internally to consume the (harness-agnostic) plugin format.
+The daemon's plugin handling is small and entirely outside the Harness:
 
-Contract:
+1. **Resolve.** For each SolverNet in `config.solverNets[]`, resolve `solverPlugin` (npm / marketplace / git / local / IPFS) and ensure the plugin contents are unpacked where the host runtime expects (e.g., the operator's Claude Code plugin directory).
+2. **Validate manifests.** Parse the plugin manifest, confirm `jinn.solverType` is well-formed, confirm `jinn.schemas` paths exist and parse as JSON Schema, confirm standard plugin fields (`mcpServers`, `skills`) reference real paths.
+3. **Register schemas in-memory** keyed by SolverType identifier. Used by the daemon to validate Task specs at dispatch and Solution payloads at envelope assembly.
+4. **Health-check plugins on install** (manifest parses, schemas valid, MCP entry files exist). Runtime health (do the MCP servers actually start? do skills load?) is the host runtime's domain — the daemon doesn't intermediate.
 
-```ts
-export interface PluginLoader {
-  /** The Harness package this loader targets. */
-  readonly harness: string;
+That's it. No Harness-side `PluginLoader` interface, no `HarnessRuntimeArtifacts` translation, no `pluginAware` flag. When the learner spawns its Claude Code subprocess, Claude Code does the work of loading plugin tools/skills natively. Path 2 specialists that don't run a Claude Code subprocess simply don't engage with plugins — no negotiation needed.
 
-  /**
-   * Read installed SolverPlugins and emit the harness-specific runtime artifacts.
-   * Called once per session-start.
-   */
-  loadPlugins(input: {
-    plugins: SolverPluginManifest[];
-    implStateDir: string;
-    activeSolverType: string;
-  }): Promise<HarnessRuntimeArtifacts>;
-}
-```
-
-`HarnessRuntimeArtifacts` is harness-shaped. For `claude-code-learner`:
-
-```ts
-export interface ClaudeCodeLearnerArtifacts {
-  registeredSkills: Array<{ name: string; path: string }>;          // mounted into the harness's skill registry
-  mcpServerSpawns: Array<{ name: string; entry: string }>;
-  schemas: { task?: object; solution?: object; verdict?: object };  // for input/output validation
-}
-```
-
-V1 ships exactly one plugin-loader: `claude-code-learner`'s. It lives in `client/src/harnesses/claude-code-learner/plugin-loader.ts`. The loader:
-
-1. Reads each plugin's standard plugin fields (`mcpServers`, `skills`) and `jinn.schemas` if present.
-2. Filters by `jinn.supportsSolverTypes` against the active SolverType (plugins with empty / missing `supportsSolverTypes` apply universally).
-3. Spawns each surviving plugin's `mcpServers[]` entries and registers their tools with the Harness's MCP client.
-4. Mounts each surviving plugin's `skills[]` entries into the Harness's skill registry.
-5. Selects schemas from the Type-defining plugin (the one with `jinn.schemas`) and exposes them for Task / Solution validation. If no Type-defining plugin is installed for the active SolverType, the loader returns empty schemas and the learner's `canAttempt` may refuse based on its own policy.
-6. Does **not** synthesize phase agents from any plugin content — the Harness owns its flow.
-
-Alternative-Harness plugin-loaders (Pi.dev / Codex / Gemini-CLI ports) are out of scope for v1 — they appear when those Harnesses do.
+The `client/src/plugins/` module (§11.6) is small for the same reason — it's resolvers + manifest validator + schema-by-type lookup + CLI verbs. No translation layer.
 
 ---
 
@@ -541,6 +495,17 @@ Per #59 §1, "two layers of compounding: corpus-level and harness-level." Under 
 
 The 26-week reversion threshold from #57 §5 reads (1)+(2)+(3) together: if Brier-spread doesn't trend positive, *one of these three layers is failing to compound*. The dashboard tells us which.
 
+### 9.1 Plugin lineage on envelopes
+
+For (3) to actually compound, downstream consumers (indexer, corpus library, future agents, plugin authors observing their own work) need to know which plugins ran for which envelope. This spec commits two related changes to the executor block of the envelope schema (extending `docs/superpowers/specs/2026-04-23-jinn-execution-envelope-tee-scope.md`):
+
+1. **`executor.codeDigest` extends to cover the full runtime bundle including operator-installed plugins.** Today's `client/src/build-info.ts` hashes only `dist/main.js`; the spec'd intent (per envelope-tee-scope §225) was already broader ("compiled bundle + resolved `node_modules`"). Implementation grows to walk installed plugins at envelope-creation time and fold them into the digest. No new top-level field; `codeDigest` semantically means "everything that ran" and the implementation makes that true.
+2. **`executor.plugins[]` is added as a queryable breakdown** — explicit per-plugin entries: `{ name, version, cid, sha256 }` for each installed plugin loaded during the run. This lets indexers and the corpus library answer queries like "show me all envelopes that used `@some-author/polymarket-extras`" without re-deriving `codeDigest`. The list is what's *inside* the digest, surfaced for query convenience.
+
+Together: `codeDigest` is the integrity hash; `plugins[]` is the readable manifest. Both ship in `executor`; both are populated at envelope-creation time by the daemon.
+
+The schema change to `executor` is small and lands as a follow-up plan extending the envelope-tee-scope spec — implementation is not in scope for this design but the commitment is.
+
 ---
 
 ## 10. The Prediction SolverNet (v1 worked example)
@@ -548,11 +513,11 @@ The 26-week reversion threshold from #57 §5 reads (1)+(2)+(3) together: if Brie
 | Component | Concrete |
 |---|---|
 | Name | `Prediction` |
-| SolverType | `prediction.v0` (defined by the Type-defining plugin's `jinn.schemas`) |
-| SolverPlugin | `@jinn-network/prediction-plugin`, lives at `client/plugins/jinn-prediction-plugin/` |
+| Canonical SolverPlugin | `@jinn-network/prediction-plugin`, lives at `client/plugins/jinn-prediction-plugin/`. Declares `jinn.solverType: "prediction.v0"` and `jinn.schemas.{task,solution,verdict}`. |
+| SolverType (derived) | `prediction.v0` — sourced from the canonical plugin's manifest |
 | Objective | Brier-spread vs. Polymarket consensus, rolling 84-day window, lower-is-better (#57 §5) |
 | Task generator | Polymarket-derived auto-poster (Phase A.3 — separate plan) |
-| Starting Harness | `claude-code-learner` (the bundled default) |
+| Starting Harness | `claude-code-learner` (the bundled default; operators are expected to override via `bySolverType` to compete with their own runtime) |
 | Public dashboard | `https://jinn.network/solvernets/prediction` (separate plan) |
 
 **Out-of-the-box state for a default operator:**
@@ -561,14 +526,14 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 
 **v1 contents of `@jinn-network/prediction-plugin`:**
 
-- `schemas/{task,solution,verdict}.json` published — Type-defining plugin.
+- `schemas/{task,solution,verdict}.json` published — the plugin is the source of truth for `prediction.v0`'s shape.
   - `task.json`: requires `type: "prediction.v0"`, `predicate`, `resolutionMarket`, `resolutionTime`, `resolutionSource`.
   - `solution.json`: requires `probability ∈ [0,1]`; optional `confidence`, `reasoningCid`, `evidenceCids`, `methodology`.
   - `verdict.json`: `resolved: bool`, optional `outcome ∈ {YES,NO,INVALID}`, `brierScore ∈ [0,1]`.
 - `mcp-servers/polymarket-api/` ships and tests pass against the live Polymarket API on testnet. Provides `market_state`, `resolution`, `recent_volume`, `resolution_rule` tools.
 - `skills/` populated with at least: `forecasting-techniques`, `calibration-approaches`, `base-rates`, `common-biases`, `polymarket-specifics`. Each skill is a markdown file with frontmatter — domain knowledge embedded as instruction, consumable by any Claude Code-shaped Harness.
-- `jinn.supportsSolverTypes: ["prediction.v0"]` and `jinn.schemas` populated.
-- The learner's plugin-loader registers all skills, spawns all MCP servers, and exposes schemas at session-start with no errors against this plugin.
+- `jinn.solverType: "prediction.v0"` and `jinn.schemas` populated.
+- Claude Code natively loads the plugin when the learner's subprocess starts; daemon validates Task specs and Solutions against the plugin's schemas at the dispatch and envelope-assembly boundaries.
 - An end-to-end e2e test posts a fake `prediction.v0` Task on Anvil and asserts the learner produces a `Solution.solutionPayload` validated against the plugin's solution schema.
 
 **What is NOT in the v1 plugin** (lives elsewhere):
@@ -615,11 +580,11 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 - `spec.kind → spec.type` in the IPFS-stored spec format (carries the SolverType identifier).
 - `spec.type: 'restoration' | 'evaluation'` → `spec.role: 'restoration' | 'evaluation'`. Avoids collision with the renamed SolverType-identifier field.
 - `byKind → bySolverType` in operator config.
-- `supportedKinds → supportedSolverTypes` in Path 2 Harness manifests.
+- Path 2 Harness manifests declare which SolverTypes they handle via their existing per-Type structures (no `supportsSolverTypes` array — Path 2 specialists already declare per-Type handling in their manifests).
 
 The schema-versioning grammar in `spec/2026-05-schema-versioning.md` continues to apply — only the field name changes; values like `'prediction.v0'` are unchanged.
 
-### 11.5 SolverType modules → Type-defining plugin
+### 11.5 SolverType modules → canonical SolverPlugin
 
 The existing `client/src/intents/kinds/<kind>/` modules contain Zod schemas + TypeScript types for first-party SolverTypes. Under the in-plugin-schemas model:
 
@@ -633,13 +598,15 @@ The auto-poster wiring in `client/src/intents/kinds/index.ts` (`SPEC_KINDS`, `ge
 
 - New module: `client/src/plugins/`.
   - `resolvers/` — multi-format resolvers: `npm.ts`, `cc-marketplace.ts`, `git.ts`, `local.ts`, (Phase B+) `ipfs.ts`. Each resolver takes a spec string, fetches the package, and returns a normalized `SolverPluginManifest` regardless of which host-format (Claude Code plugin / Gemini extension / standalone) the package uses.
-  - `loader.ts` — reads `config.solverPlugins[]`, calls the appropriate resolver, validates the `jinn.*` extension, hash-checks Type-defining schema conflicts, builds an in-memory `SolverPluginRegistry`.
-  - `loader-registry.ts` — registry of installed plugin-loaders keyed by Harness name.
-  - `types.ts` — `SolverPluginManifest`, `PluginLoader`, `HarnessRuntimeArtifacts`.
+  - `loader.ts` — reads `config.solverNets[]`, resolves each SolverNet's `solverPlugin` reference via the appropriate resolver, validates the `jinn.*` extension, builds an in-memory `SolverPluginRegistry` keyed by SolverType.
+  - `validator.ts` — at Task dispatch and Solution submission, looks up the SolverNet's canonical plugin by `spec.type` and validates against `jinn.schemas`.
+  - `types.ts` — `SolverPluginManifest`.
   - `cli.ts` — `jinn plugins list / add / remove / show`.
-- Daemon `main.ts` initialises the SolverPluginRegistry before constructing the Harness registry; plugin-aware Harnesses receive their plugin-loader handle in their constructor env.
+- Daemon `main.ts` initialises the SolverPluginRegistry before constructing the Harness registry. Plugins are placed on disk where the host plugin runtime expects (e.g., the Claude Code plugin directory) so when the learner spawns its subprocess, Claude Code natively loads them.
 - `@jinn-network/prediction-plugin` ships at `client/plugins/jinn-prediction-plugin/` as the first concrete plugin — a Claude Code plugin with the `jinn` extension populated per §5.2.
-- The `claude-code-learner` plugin-loader ships at `client/src/harnesses/claude-code-learner/plugin-loader.ts`. It registers plugins' standard plugin `mcpServers` and `skills` into the learner's runtime, exposes the Type-defining plugin's schemas for input/output validation, and does *not* synthesize phase agents — the learner owns its flow.
+- **No Jinn-specific plugin-loader inside the Harness.** Removed in v0.6 — the host runtime's native plugin loading does the work. See §7.4.
+
+The runtime-bundle digest (`executor.codeDigest`) extends to cover the resolved plugin set; `executor.plugins[]` ships per §9.1. Implementation extends `client/src/build-info.ts` plus envelope-assembly to populate both fields. See §9.1 for the schema commitment; mechanical implementation is a follow-up plan extending the envelope-tee-scope spec.
 
 ### 11.7 Path 1 retirement
 
@@ -679,14 +646,13 @@ The cost of retirement is real: phase-agent-overrides and skill-bundles were the
   "solverNets": [
     {
       "name": "Prediction",
-      "solverType": "prediction.v0",
+      "solverPlugin": "@jinn-network/prediction-plugin",
       "objective": {
         "scalar": "brier-spread-vs-polymarket",
         "polarity": "lower-is-better",
         "rollingWindowDays": 84
       },
       "taskGenerator": "polymarket-derived-auto-poster",
-      "startingPlugin": "@jinn-network/prediction-plugin",
       "startingHarness": "claude-code-learner"
     }
   ]
@@ -714,13 +680,12 @@ Existing operators on testnet receive a one-time config-migration prompt at daem
 
 1. **Should the default config silently install `@jinn-network/prediction-plugin`, or surface a one-line consent prompt at first boot?** Lean: silent install for new operators; one-line prompt on `jinn migrate-config` for existing operators.
 2. **Where do Harness-declared tunables live?** Each Harness declares its own tunables (calibration aggressiveness, ensemble size, corpus-lookup top-k for the learner). Format: in the Harness's `package.json` `jinn` field? In a separate `harness.tunables.json`? Lean: in the Harness's `package.json` `jinn.tunables[]` array. Keeps the declaration close to the code that reads them.
-3. **Should the `claude-code-learner` plugin-loader cache its registration work by `(pluginVersion, pluginContentHash)`?** Lean: yes for performance; with a `--no-cache` daemon flag for debugging.
-4. **Path 2 builders losing the slot ergonomics — is "fork the learner" actually a viable recruit path?** This is the most genuine concern of the Path 1 retirement. Mitigation: the learner repo includes a `learner-template/` directory with a stripped-down skeleton; the recruit story becomes "fork the template, swap your specialist code in, optionally re-use the same `@jinn-network/harness-sdk` SDK." If recruits report this is too high-friction, Phase A.4 retro re-opens the slot taxonomy as a follow-up.
-5. **What's left in `client/src/solver-types/` after schemas move into plugins?** The directory currently holds Zod schemas + TS types + auto-poster wiring. Schemas move to plugins; auto-poster wiring stays. Open: do TypeScript adapters that derive types from plugin JSON Schemas at build time live there, or directly import from the plugin? Lean: thin adapter modules in `client/src/solver-types/` that re-export plugin schemas as Zod for ergonomic in-repo usage. Drop the directory entirely if/when no first-party in-repo callers need TypeScript types separately from the plugin.
-6. **Should evaluator Harnesses also be plugin-aware?** Today evaluators are deterministic and don't need substrate. If a future evaluator wants knowledge or tools, the same plugin mechanism applies — no architecture change needed.
-7. **Should `solverNets[]` config be operator-side declarative as shown in §11.9, or should SolverNet definitions ship as their own npm packages (e.g., `@jinn-network/prediction-solvernet`) that bundle objective + Task-generator config + plugin reference together?** Lean: operator-side config in v1 (simpler); promote to dedicated SolverNet packages if multiple SolverNets ship and the bundling reduces operator burden.
-8. **Solver as a noun in code.** The vocabulary uses "Solver" informally for an operator running a Harness. Should this surface in code (e.g., a `Solver` class composing `Harness` + identity), or stay purely a prose-level term? Lean: prose-only in v1; the operator entity is already represented by the Safe + Harness pair, no need for a new class.
-9. **Cross-host plugin-format mapping.** Claude Code uses `.claude-plugin/plugin.json`; Gemini uses `gemini-extension.json`; Codex has its own. The shapes are similar but field names differ. The plugin-loader should accept any of these as host-shape and read its `jinn` extension uniformly. v1 commits to: a plugin ships *one* canonical host-shape (Claude Code plugin in v1, since that's what Jinn's daemon spawns); other hosts can read the same package via field-mapping shims. A formal multi-host manifest spec (single plugin manifest renderable into N host shapes) is a follow-up bead if we ship a Gemini-CLI Harness and discover the shim is too lossy.
+3. **Path 2 builders losing the slot ergonomics — is "fork the learner" actually a viable recruit path?** This is the most genuine concern of the Path 1 retirement. Mitigation: the learner repo includes a `learner-template/` directory with a stripped-down skeleton; the recruit story becomes "fork the template, swap your specialist code in, optionally re-use the same `@jinn-network/harness-sdk` SDK." If recruits report this is too high-friction, Phase A.4 retro re-opens the slot taxonomy as a follow-up.
+4. **What's left in `client/src/solver-types/` after schemas move into plugins?** The directory currently holds Zod schemas + TS types + auto-poster wiring. Schemas move to plugins; auto-poster wiring stays. Open: do TypeScript adapters that derive types from plugin JSON Schemas at build time live there, or directly import from the plugin? Lean: thin adapter modules in `client/src/solver-types/` that re-export plugin schemas as Zod for ergonomic in-repo usage. Drop the directory entirely if/when no first-party in-repo callers need TypeScript types separately from the plugin.
+5. **Curator role formalization.** The SolverNet curator (the entity who declares the canonical SolverPlugin, the objective, the Task generator) is named in this spec but not formalized as a distinct role. Whether it surfaces in code (e.g., a curator address recorded with each SolverNet config), in canonical docs (Creator / Solver / Evaluator / Curator), or stays implicit — open. Worth its own pass.
+6. **Should `solverNets[]` config be operator-side declarative as shown in §11.9, or should SolverNet definitions ship as their own npm packages (e.g., `@jinn-network/prediction-solvernet`) that bundle objective + Task-generator config + plugin reference together?** Lean: operator-side config in v1 (simpler); promote to dedicated SolverNet packages if multiple SolverNets ship and the bundling reduces operator burden.
+7. **Solver as a noun in code.** The role rename to Solver is committed; should it surface in code (e.g., a `Solver` class composing `Harness` + identity), or stay a role-label only? Lean: role-label only in v1; the operator entity is already represented by the Safe + Harness pair.
+8. **Cross-host plugin-format mapping.** Claude Code uses `.claude-plugin/plugin.json`; Gemini uses `gemini-extension.json`; Codex has its own. The shapes are similar but field names differ. v1 commits to: a plugin ships *one* canonical host-shape (Claude Code plugin in v1, since that's what Jinn's daemon spawns); other hosts can read the same package via field-mapping shims. A formal multi-host manifest spec is a follow-up bead if we ship a Gemini-CLI Harness and discover the shim is too lossy.
 
 ---
 
@@ -733,10 +698,10 @@ This spec is accepted when:
 3. **`@jinn-network/harness-sdk` v1.0.0 published** (renamed from `restorer-sdk`); 12-week dual-publish window declared.
 4. **Wrapper code deleted** per §11.1.
 5. **Rename PR merged** per §11.2 + §11.3 + §11.4; `jinn-mono-juw` / GH#43 closed.
-6. **`client/src/plugins/` module shipped** with loader, loader-registry, CLI, and unit tests.
-7. **`claude-code-learner` plugin-loader shipped** under `client/src/harnesses/claude-code-learner/plugin-loader.ts`.
+6. **`client/src/plugins/` module shipped** with resolvers, loader, validator, CLI, and unit tests.
+7. **`executor.codeDigest` extended to cover the runtime bundle (harness + plugins) and `executor.plugins[]` field added** per §9.1. Implementation extends `client/src/build-info.ts` and envelope-assembly.
 8. **`@jinn-network/prediction-plugin` v0.1.0 shipped** at `client/plugins/jinn-prediction-plugin/` with the §10 contents — schemas + tools + skills + `jinn` extension — and passing CI.
-9. **e2e validation** — the existing `yarn e2e` script extended to assert: prediction plugin loads, plugin-loader registers skills/MCP servers/schemas, the learner produces a schema-valid `solutionPayload` against an Anvil-posted `prediction.v0` Task.
+9. **e2e validation** — the existing `yarn e2e` script extended to assert: prediction plugin resolves, daemon validates Task spec against `jinn.schemas.task`, Claude Code subprocess loads the plugin natively, the learner produces a `solutionPayload` validated against `jinn.schemas.solution`, envelope's `executor.plugins[]` correctly lists the loaded plugin.
 10. **Specialists re-disposed** per §11.8; `examples/external-harnesses/` directory created.
 11. **Default config updated** per §11.9; `jinn migrate-config` verb shipped.
 12. **In-repo SolverType modules migrated** per §11.5 (schemas live in the plugin; in-repo holds adapter / auto-poster wiring only).
