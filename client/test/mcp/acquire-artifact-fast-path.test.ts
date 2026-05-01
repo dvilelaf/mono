@@ -61,7 +61,7 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
     fetchSpy.mockRestore();
   });
 
-  it('proxies to daemon when no fast path hits', async () => {
+  it('proxies to daemon when no fast path hits and forwards bearer header', async () => {
     const sha256 = 'c'.repeat(64);
     const fetchedBytes = Buffer.from('fetched');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
@@ -78,10 +78,15 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
     );
-    const result = await handleAcquireArtifact('http://127.0.0.1:7331', store, {
-      sha256,
-      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
-    });
+    const result = await handleAcquireArtifact(
+      'http://127.0.0.1:7331',
+      store,
+      {
+        sha256,
+        access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+      },
+      'unit-token',
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.content.source).toBe('origin');
@@ -90,7 +95,35 @@ describe('acquire_artifact (daemon proxy + fast paths)', () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const call = fetchSpy.mock.calls[0]!;
     expect(call[0]).toBe('http://127.0.0.1:7331/v1/artifacts/acquire');
-    expect((call[1] as RequestInit).method).toBe('POST');
+    const init = call[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer unit-token');
+    fetchSpy.mockRestore();
+  });
+
+  it('omits Authorization header when no daemonApiToken is supplied', async () => {
+    const sha256 = 'h'.repeat(64);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sha256,
+          content: Buffer.from('x').toString('base64'),
+          artifactType: 'design_document',
+          source: 'origin',
+          paidAmountUsdc: '0',
+          fetchedAt: '2026-04-30T00:00:00.000Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    await handleAcquireArtifact('http://127.0.0.1:7331', store, {
+      sha256,
+      access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+    });
+    const headers = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['Authorization']).toBeUndefined();
     fetchSpy.mockRestore();
   });
 
