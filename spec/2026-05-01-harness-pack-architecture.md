@@ -3,7 +3,7 @@
 - **Date:** 2026-05-01
 - **Author:** opus (drafted on jinn-mono-dwqm; Captain ritsukai)
 - **Status:** Proposal
-- **Version:** 0.3
+- **Version:** 0.4
 - **Tracks:** Phase A.2 reframe — supersedes the wrapper-with-specialist construct introduced in PR #63; replaces `spec/2026-04-30-plug-in-surface.md` Path 1 with a harness-agnostic Pack mechanism.
 
 **Sibling specs (load-bearing pre-reads):**
@@ -33,7 +33,7 @@ Five coordinated architectural moves that re-align the implementation with what 
 
 1. **Delete the universal wrapper.** `claude-code-learner` becomes a peer Harness in the registry, not a substrate that wraps every Type. Its `supports()` returns `true` for any non-evaluation restoration; it is the registry's *default* when no other Harness claims a Type. It owns its `run()` end-to-end.
 2. **Rename `RestorerImpl → Harness`.** The thing-an-operator-runs is a Harness. The Restorer remains a protocol role; the rename disambiguates role from implementation.
-3. **Introduce Packs.** A Pack is a harness-agnostic bundle that supplies Type-specific substrate: schemas, MCP-tool servers, knowledge files, a flow declaration, and (optionally) declared tunables. **A Pack is a superset of existing AI-tool plugin formats** (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) — a single artifact that's a Claude Code plugin, a Gemini extension, *and* a Jinn Pack at the same time, depending on which consumer reads it. Pack-loading is an internal Harness concern, not a top-level architectural primitive.
+3. **Introduce Packs.** A Pack is a harness-agnostic bundle that supplies Type-specific *substrate* — the things you'd plug into your Harness to handle a SolverType: MCP-tool servers, skills, and (optionally) the schemas defining the Type. **A Pack is a superset of existing AI-tool plugin formats** (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) — a single artifact that's a Claude Code plugin, a Gemini extension, *and* a Jinn Pack at the same time, depending on which consumer reads it. Pack-loading is an internal Harness concern, not a top-level architectural primitive. **Packs do not dictate flow, knowledge, tunables, or recommended Harness** — those are Harness-owned (flow, tunables) or SolverNet-config-owned (defaults). Packs supply substrate; how it's used is up to the Harness.
 4. **Introduce SolverNets and Tasks as distinct levels.** A SolverNet is the campaign / group / objective. A Task is one posted item — the on-chain unit a Solver claims and produces a Solution for. The SolverNet declares one Type and ships one Pack; many Tasks of that Type flow through it.
 5. **Ship the Prediction SolverNet as the first instance.** `jinn-prediction-pack` ships in-repo, on by default for new operators. The default Harness (the learner) + Prediction Pack combination is what the GTM in #57 calls the "client as meta-harness" running against the Polymarket-derived Task stream.
 
@@ -74,7 +74,7 @@ Five coordinated architectural moves that re-align the implementation with what 
 | **SolverNet** | A composition: (Type + Pack + Task generator + Objective + recommended Harness). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and reference in-repo; not a protocol object. |
 | **Objective** | The public scalar a SolverNet rallies around. For the Prediction SolverNet: spread vs. Polymarket consensus. Trend matters more than level (#57 §5). |
 | **Type** | The schema-versioned shape a Task's spec conforms to. Examples today: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. The SolverNet declares one Type; Tasks identify their SolverNet by carrying that Type. |
-| **Pack** | A harness-agnostic package supplying Type-specific substrate. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. |
+| **Pack** | A harness-agnostic package supplying Type-specific *substrate* — MCP servers + skills + (optionally) schemas — that an operator plugs into their Harness to handle a SolverType. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a minimal `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. |
 | **Task** | The on-chain posted item. Today: `JinnRouter.createRestorationJob`'s product. Carries a `specCid` referencing the IPFS-stored spec. The Solver claims a Task, runs the Pack's flow, and submits a Solution. |
 | **Solution** | The Solver's output for a Task. The thing today called `RestorationOutput`. Validated against the Pack's solution schema before envelope assembly. |
 | **Verdict** | The Evaluator's output scoring a Solution. Carries a `verdictPayload` (kept; protocol-level field). |
@@ -92,28 +92,41 @@ Two levels with distinct concerns, four primitives total:
 
 ```
 ─── Level 1 (group / persistent definition) ────────────────────────────────
-     SolverNet
-       ├── Objective       → the public scalar
-       ├── Type            → schema-versioned shape (prediction.v0)
-       ├── Pack            → substrate (schemas + MCP servers + knowledge + flow)
-       ├── Task generator  → posts Tasks on a cadence
-       └── Recommended Harness
+     SolverNet (operator config + reference in-repo)
+       ├── name
+       ├── type             → schema-versioned identifier (prediction.v0)
+       ├── objective        → public scalar + aggregation rule
+       ├── taskGenerator    → posts Tasks on a cadence (optional)
+       ├── defaultPack      → recommended Pack for new operators (swappable)
+       └── defaultHarness   → recommended Harness for new operators (swappable)
 
 ─── Level 2 (per-item / ephemeral) ──────────────────────────────────────────
      Task (one per posted item; many per SolverNet)
-       ├── on-chain        → JinnRouter object with escrow + eligibility
-       └── spec (IPFS)     → Type + per-Task fields (predicate, window, ...)
+       ├── on-chain         → JinnRouter object with escrow + eligibility
+       └── spec (IPFS)      → type + per-Task fields (predicate, window, ...)
 
        Solver claims Task → Harness runs → Solution submitted
        Evaluator scores Solution → Verdict produced
        Verdict's score contributes to SolverNet's Objective
+
+─── Operator-installed primitives (the things that make a SolverNet runnable) ─
+     Pack (plugin-format package; one or more per Type)
+       ├── jinn.supportsTypes
+       ├── jinn.schemas (if Type-defining)
+       ├── mcpServers (host plugin field)
+       └── skills (host plugin field; knowledge embedded as skill content)
+
+     Harness (npm package)
+       ├── owns flow + improve-phase + tunables (Harness-internal)
+       └── consumes installed Packs at session-start
 ```
 
-- **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its Type and Pack don't change between Tasks; its Objective accumulates as Tasks resolve.
+- **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its Type and Objective don't change between Tasks; its scalar accumulates as Tasks resolve.
 - **Level 2 is ephemeral.** Each Task is posted, claimed, solved, scored, settled, indexed. Each one moves the Objective by 1/N.
-- **The join key is Type.** On-chain a Task carries its Type identifier; operator-side a SolverNet declares which Type it owns. JinnRouter (protocol) only knows about Types; SolverNet is operator/config-level coordination.
+- **The join key is Type.** On-chain a Task carries its Type identifier; operator-side a SolverNet declares which Type it coordinates around; Packs declare which Types they provide substrate for. JinnRouter (protocol) only knows about Types; SolverNet is operator/config-level coordination.
+- **Pack and Harness are independent.** A Pack ships substrate (tools + skills + optional schemas) for a Type. A Harness owns the runtime (flow, improve-phase, tunables) and consumes whatever Packs are installed. Neither dictates the other; the SolverNet's defaults are starting points, not bindings.
 
-The clean separation is: **Pack supplies *what to know* and *what to do* for a Type; Harness supplies *how to run it*; SolverNet supplies *what we're trying to improve*; Task supplies *the specific thing to solve right now*.**
+The clean separation: **SolverType supplies *what shape* (via a Type-defining Pack's schemas); Pack supplies *what tools / skills are useful*; Harness supplies *how to actually run it*; SolverNet supplies *what we're trying to improve*; Task supplies *the specific thing to solve right now*.**
 
 ---
 
@@ -161,74 +174,62 @@ A daemon can run more than one SolverNet at a time — e.g., Prediction + Portfo
 
 ## 5. The Pack
 
-### 5.1 Format — extension of existing AI-tool plugin manifests
+### 5.1 What a Pack is — and isn't
 
-A Pack is a superset of existing AI-tool plugin formats (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) with a `jinn` field carrying SolverNet-specific extension. **Same artifact, multiple consumers** — Claude Code and Gemini consume the standard plugin fields; the Jinn daemon's pack-aware Harnesses additionally consume the `jinn.*` fields. Other plugin hosts that don't recognize `jinn.*` ignore it.
+A Pack is **what an operator plugs into their Harness to handle a particular SolverType**. It is *substrate* — tools, skills, optionally schemas. It does not prescribe how to use them.
 
-This avoids fragmenting the AI-tool plugin ecosystem. Pack authors who already ship Claude Code plugins extend with one field; new Pack authors get marketplace install UX, format documentation, and tooling for free.
+Concretely, a Pack contains:
+
+- **MCP-tool servers** — process-based tools any MCP-aware Harness can spawn.
+- **Skills** — markdown files with frontmatter that pack-aware Harnesses register (in Claude Code / Gemini, this means the host plugin format's standard `skills` field). Knowledge files (forecasting techniques, calibration approaches, etc.) are shipped as skills — there's no separate "knowledge" concept.
+- **Schemas (optional)** — JSON Schemas for the Type's Task / Solution / Verdict shapes. A Pack that ships schemas is *Type-defining*; one that omits them is *tools-only* (see §5.3).
+
+A Pack does NOT contain:
+
+- **Flow** — the Harness owns the pipeline. Mandating flow at the Pack level would prescribe how to solve, contradicting the SolverNet's purpose of discovering what works.
+- **Tunables** — the Harness owns its improve-phase contract; Tunables describe what the *Harness* mutates, not what the Pack ships.
+- **Recommended Harness** — Pack is harness-neutral. The SolverNet's operator config carries a default Harness for ergonomics; the Pack itself doesn't bind to one.
+
+This makes the `jinn` extension on a Pack manifest **two fields total**: `supportsTypes` and (optionally) `schemas`.
+
+### 5.2 Format — extension of existing AI-tool plugin manifests
+
+A Pack is a superset of existing AI-tool plugin formats (Claude Code's `.claude-plugin/plugin.json`, Gemini's `gemini-extension.json`) with a minimal `jinn` field carrying the SolverType-specific extension. **Same artifact, multiple consumers** — Claude Code and Gemini consume the standard plugin fields; the Jinn daemon's pack-aware Harnesses additionally consume the `jinn.*` fields. Other plugin hosts ignore `jinn.*`.
+
+This avoids fragmenting the AI-tool plugin ecosystem. Pack authors who already ship plugins extend with one field; new Pack authors get marketplace install UX, format documentation, and tooling for free.
 
 The full Prediction Pack manifest:
 
 ```jsonc
-// .claude-plugin/plugin.json (or gemini-extension.json with renamed fields)
+// .claude-plugin/plugin.json (also valid as gemini-extension.json with field-name shim)
 {
   "name": "@jinn-network/prediction-pack",
   "version": "0.1.0",
   "description": "Prediction SolverNet substrate — Polymarket-style binary forecasts.",
 
-  // Standard plugin fields — Claude Code / Gemini both consume these.
+  // Standard plugin fields — Claude Code / Gemini both consume.
   "mcpServers": {
     "polymarket": {
       "command": "node",
       "args": ["./mcp-servers/polymarket-api/server.js"]
     }
   },
-
-  // OPTIONAL pre-baked Claude Code skills/agents (cache for the pack-loader; see §5.3).
   "skills": [
-    "skills/forecasting-coordinator/SKILL.md",
-    "skills/calibration/SKILL.md"
-  ],
-  "agents": [
-    "agents/ensemble-forecaster.md",
-    "agents/calibrator.md"
+    "skills/forecasting-techniques/SKILL.md",   // domain knowledge as skill content
+    "skills/calibration-approaches/SKILL.md",
+    "skills/base-rates/SKILL.md",
+    "skills/common-biases/SKILL.md",
+    "skills/polymarket-specifics/SKILL.md"
   ],
 
-  // Jinn-specific extension. Other plugin hosts ignore.
+  // Jinn extension — minimal.
   "jinn": {
-    "schemaVersion": "1.0.0",
-    "supportedTypes": ["prediction.v0"],
+    "supportsTypes": ["prediction.v0"],
     "schemas": {
-      "task": "schemas/task.json",
+      "task":     "schemas/task.json",
       "solution": "schemas/solution.json",
-      "verdict": "schemas/verdict.json"
-    },
-    "flow": "flow.yaml",
-    "knowledge": [
-      "knowledge/forecasting-techniques.md",
-      "knowledge/calibration-approaches.md",
-      "knowledge/base-rates.md",
-      "knowledge/common-biases.md",
-      "knowledge/polymarket-specifics.md"
-    ],
-    "tunables": [
-      { "name": "calibration.temperature", "type": "number", "default": 1.0,
-        "description": "Strength of calibration adjustment on raw ensemble probability." },
-      { "name": "calibration.recency_weight", "type": "number", "default": 0.7,
-        "description": "Exponential decay on historical Brier when computing calibration." },
-      { "name": "ensemble.num_samples", "type": "integer", "default": 5,
-        "description": "Independent estimates per question. Higher = lower variance, higher cost." },
-      { "name": "ensemble.weights", "type": "json", "default": null,
-        "description": "Per-method weights (base-rate, reference-class, inside-view, outside-view, market-anchor). Null = equal-weighted." },
-      { "name": "research.depth", "type": "enum", "values": ["minimal", "standard", "deep"], "default": "standard",
-        "description": "How aggressively gather-context and corpus-lookup phases work." },
-      { "name": "corpus.lookup_top_k", "type": "integer", "default": 5,
-        "description": "How many analogous past cases to retrieve from Jinn corpus per question." },
-      { "name": "decomposition.threshold", "type": "number", "default": 0.6,
-        "description": "Confidence threshold below which a question gets decomposed into sub-questions." }
-    ],
-    "recommendedHarness": "claude-code-learner",
-    "testedAgainst": ["claude-code-learner@>=0.2.0"]
+      "verdict":  "schemas/verdict.json"
+    }
   }
 }
 ```
@@ -237,90 +238,44 @@ The full Prediction Pack manifest:
 
 | Field | Purpose |
 |---|---|
-| `jinn.schemaVersion` | Schema version of the `jinn.*` extension. v1 ships `1.0.0`. 12-week deprecation window on breaking changes (parity with #57 §5.1). |
-| `jinn.supportedTypes` | Per `spec/2026-05-schema-versioning.md` grammar. The schema-version identifiers this Pack supplies substrate for. The daemon's join key — match a Task's `spec.type` to a Pack via this field. |
-| `jinn.schemas.task` | JSON Schema validating the Task spec (the IPFS-stored content). For prediction: requires `predicate`, `resolutionMarket`, `resolutionTime`, `resolutionSource`. |
-| `jinn.schemas.solution` | JSON Schema validating the Solution payload. For prediction: requires `probability ∈ [0,1]`; optional `confidence`, `reasoningCid`, `evidenceCids`, `methodology`. |
-| `jinn.schemas.verdict` | JSON Schema validating the Verdict payload. For prediction: `resolved: bool`, optional `outcome ∈ {YES,NO,INVALID}`, `brierScore ∈ [0,1]`. |
-| `jinn.flow` | Path to a YAML/JSON file declaring the pipeline (§5.4). The pack-loader translates phases into harness-native runtime artifacts. |
-| `jinn.knowledge[]` | Markdown files with Type-specific domain knowledge. Pack-loader embeds these into agent prompt contexts at the phases that reference them. |
-| `jinn.tunables[]` | Declared mutable parameters the Harness's improve phase may adjust based on Verdicts. Each entry: `name`, `type` (number/integer/enum/json/string), `default`, optional `description`, optional `values` for enums. Pack signs the list; not the values. |
-| `jinn.recommendedHarness` | Informational. The Harness package the Pack author tested against. |
-| `jinn.testedAgainst[]` | Informational. Harness package + version ranges the Pack has been validated against. |
+| `jinn.supportsTypes` | Per `spec/2026-05-schema-versioning.md` grammar. The Type identifiers this Pack supplies substrate for. The daemon's join key — match a Task's `spec.type` to a Pack via this field. |
+| `jinn.schemas` (optional) | JSON Schemas defining the Type's payloads. **If present**, the Pack is *Type-defining*: it ships the canonical shape for `task`, `solution`, `verdict`. **If absent**, the Pack is *tools-only*: it adds MCP servers and skills atop a Type already defined elsewhere. See §5.3. |
+
+That's the entire `jinn` surface. Two fields.
+
+The standard plugin fields (`mcpServers`, `skills`, optionally `agents`, `hooks`, etc.) carry everything else. Pack authors who already ship Claude Code plugins add `jinn` and they're done.
 
 The manifest is JSON-Schema validated at install time and at session start. Unknown `jinn.*` keys fail loud (forward-compat).
 
-### 5.2 Pre-baked harness-specific content (optimization, not requirement)
+### 5.3 Type-defining vs. tools-only Packs; conflict resolution
 
-Pack authors MAY ship pre-baked harness-specific content (Claude Code skills/agents/hooks; Gemini commands; Codex skills) as fields outside `jinn.*`, treating them as **a cache** of what the pack-loader would otherwise synthesize from `jinn.flow`.
+`jinn.schemas` being optional creates two natural Pack roles:
 
-- **Source of truth** is `jinn.flow` + `jinn.knowledge` + `jinn.schemas` + `mcpServers`.
-- **Pre-baked artifacts** are an optimization for performance, inspectability, and dogfooding the host's existing tooling (so a Claude Code user without Jinn awareness can install the Pack and get a useful plugin).
-- **Pack-loader behaviour:** if pre-baked artifacts targeting the running Harness exist, prefer them; otherwise synthesize from the agnostic content. Gemini-Harness operators ignore the Claude-Code skills bundle; they get an equivalent generated from the flow.
-- **Pack-author burden** stays low: ship just the `jinn.*` fields + MCP servers and you have a fully-functional cross-harness Pack. Pre-baking is a follow-up effort for popular Packs that want polish.
+| Role | Has `jinn.schemas` | Purpose |
+|---|---|---|
+| **Type-defining** | yes | Ships the canonical schemas + tools + skills for a Type. First-party example: `@jinn-network/prediction-pack`. |
+| **Tools-only** | no | Adds substrate to a Type already defined by another Pack. Example: `@some-author/extra-polymarket-tools` extends prediction.v0 without redefining schemas. |
 
-This relaxes the original "no harness-specific content in a Pack" rule. The harness-agnostic *contract* is preserved (any pack-aware Harness can consume `jinn.*` + MCP); harness-specific *optimizations* are allowed alongside.
+Multiple Packs can coexist for the same Type — typically one Type-defining Pack plus zero-or-more Tools-only Packs.
 
-### 5.3 Flow declaration — `flow.yaml`
+**Conflict resolution:** if two Packs both ship `jinn.schemas` for the same `supportsTypes` entry, the daemon SHA-256-compares the schema files at install time:
 
-```yaml
-phases:
-  - name: gather-context
-    goal: Fetch market state, recent volume, and resolution rule from the source.
-    inputs: [task]
-    outputs: [market-state, recent-volume, resolution-rule]
-    tools: [polymarket.market_state, polymarket.recent_volume, polymarket.resolution_rule]
+- **Identical** → both load.
+- **Different** → install fails with a clear error pointing at the conflict (which file differs, which Pack the operator already had installed).
+- **First-claim-wins:** the first Type-defining Pack registered for a Type effectively defines its canonical shape. Subsequent Type-defining Packs must match exactly.
 
-  - name: corpus-lookup
-    goal: Retrieve analogous past predictions from Jinn corpus to inform reasoning.
-    inputs: [task]
-    outputs: [analogous-cases]
-    tools: [jinn.corpus.search]
-    tunables: [corpus.lookup_top_k]
+This mirrors how npm package-name claiming works in practice: there's no central authority, but conflicts are surfaced at install time.
 
-  - name: frame-question
-    goal: Parse the predicate, identify ambiguity, fix resolution criteria.
-    inputs: [task, market-state, resolution-rule]
-    outputs: [forecast-question]
-    knowledge: [base-rates.md, polymarket-specifics.md]
+### 5.4 No-Pack-installed behaviour
 
-  - name: decompose
-    goal: If the question has independent sub-conditions, break it down. Otherwise pass through.
-    inputs: [forecast-question]
-    outputs: [sub-questions]
-    tunables: [decomposition.threshold]
+If a Task arrives for a Type with no Pack installed:
 
-  - name: ensemble-estimate
-    goal: Generate N independent probability estimates using diverse forecasting techniques.
-    inputs: [sub-questions, market-state, analogous-cases]
-    outputs: [estimates]
-    knowledge: [forecasting-techniques.md, common-biases.md]
-    tunables: [ensemble.num_samples]
+- The daemon pulls the IPFS spec but cannot validate it (no schema).
+- The Task is passed through to whichever Harness claims the Type. Harness decides whether to refuse (no schema → can't construct a valid Solution confidently) or proceed permissively.
+- For first-party Types like `prediction.v0`, the default daemon ships the Type-defining Pack pre-installed, so this case is moot in practice.
+- Permissionless operators introducing new Types ship a Type-defining Pack alongside the new Type's auto-poster.
 
-  - name: calibrate
-    goal: Combine estimates and apply learned calibration adjustment.
-    inputs: [estimates]
-    outputs: [calibrated-probability]
-    knowledge: [calibration-approaches.md]
-    tunables: [calibration.temperature, calibration.recency_weight, ensemble.weights]
-
-  - name: validate
-    goal: Sanity-check probability is in [0,1], reasoning is internally consistent, no obvious red flags.
-    inputs: [calibrated-probability, forecast-question]
-    outputs: [validated-probability]
-
-  - name: package-solution
-    goal: Format into prediction.v0 Solution payload validated against schemas.solution.
-    inputs: [validated-probability, task]
-    outputs: [solution-payload]
-    schemas: [solution]
-```
-
-**The flow is declarative, not executable.** It tells the pack-loader *what steps the Harness should run for this Type, and what each step needs*. The pack-loader's job is to translate this into the Harness's runtime artifacts. For `claude-code-learner`, each phase becomes a generated skill or agent the coordinator routes to; tools become MCP-tool dependencies; knowledge files become embedded prompt context at the referencing phases; tunables become reads against `implStateDir/tunables/<pack>/`.
-
-A Harness without a Pack runs its own internal pipeline (e.g., the seven-phase coordinator) without flow-derived steps — the flow is *additive substrate*, not a mandatory contract.
-
-### 5.4 Distribution and install
+### 5.5 Distribution and install
 
 The Pack format is distribution-agnostic. The daemon's `jinn packs add` verb supports multiple resolvers:
 
@@ -344,19 +299,18 @@ jinn packs add ipfs://bafy...
 Each resolver fetches the package and validates:
 
 1. Manifest parses (whichever of `.claude-plugin/plugin.json`, `gemini-extension.json`, or a standalone `jinn.pack.json` is present).
-2. `jinn.supportedTypes` validates against the Type grammar.
-3. `jinn.schemas.*` paths exist and parse as JSON Schema.
-4. `jinn.flow` parses and conforms to the flow schema.
-5. Pre-baked harness-specific paths (if any) exist.
-6. Appends to `~/.jinn-client/config.json` under `packs[]`.
+2. `jinn.supportsTypes` validates against the Type grammar.
+3. If `jinn.schemas` present: paths exist, parse as JSON Schema, hash-compare against any other Type-defining Pack already installed for the same Type (§5.3).
+4. Standard plugin fields parse against the host plugin schema (skills paths exist, MCP entries are well-formed, etc.).
+5. Appends to `~/.jinn-client/config.json` under `packs[]`.
 
 **Default operator config installs `@jinn-network/prediction-pack` automatically for new daemons** so the Prediction SolverNet works out of the box. Migration handling for existing operators: §11.7.
 
-### 5.5 Versioning + compatibility
+### 5.6 Versioning + compatibility
 
-- **Pack manifest schema** (`jinn.pack.json` shape) follows semver with a 12-week deprecation window.
-- **Pack content** (`@jinn-network/prediction-pack` itself) follows semver. Breaking changes to schemas, flow shape, or tunables list bump the major.
-- **Harness compatibility** is declared informationally via `testedAgainst[]`. Harness pack-loaders declare their own compatibility against pack `schemaVersion` and refuse to load Packs outside their range with a clear error.
+- **Pack content** (`@jinn-network/prediction-pack` itself) follows semver. Breaking changes to schemas bump the major; new tools / skills are minor; bug fixes are patches.
+- **The `jinn` extension's own schema** follows semver with a 12-week deprecation window. v1 ships with two fields; minor adds (e.g., a future optional metadata field) won't break existing Packs.
+- **Harness compatibility** is informal — Harness pack-loaders read whatever `jinn` fields they recognize and ignore unknown ones (forward-compat). A Harness that requires a future `jinn.*` field declares its minimum supported version in its own manifest and refuses to load Packs missing it.
 
 ---
 
@@ -450,17 +404,17 @@ A pack-aware Harness loads the operator's installed Packs at session-start via i
 
 ### 7.5 The default learner under this model
 
-`claude-code-learner` is a pack-aware Harness. It runs the seven-phase pipeline (per `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) end-to-end. It consults the bundled pack-loader at session-start to load any Pack matching the Task's Type. Without a matching Pack, it runs vanilla — the pipeline still executes, just without Type-specific knowledge or tools.
+`claude-code-learner` is a pack-aware Harness. It runs the seven-phase pipeline (per `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md`) end-to-end — the pipeline (orient → strategize → plan → execute → debrief → improve → memory-consolidation) is **the Harness's flow, not the Pack's**. The pack-loader registers the operator's installed Packs' tools and skills so the pipeline's agents can use them, and exposes the Pack's schemas for Task/Solution validation.
+
+Without a matching Pack, the learner runs vanilla — the seven-phase pipeline still executes, just without Type-specific tools / skills / schema validation.
 
 The improve phase mutates `implStateDir/`. The mutation surfaces are:
-- **`implStateDir/skills/<name>/SKILL.md`** — operator-learned skills. Override pack-derived skills at load time.
-- **`implStateDir/agents/<name>.md`** — operator-learned agents. Override pack-derived agents at load time.
-- **`implStateDir/tunables/<pack-name>/<tunable>.json`** — operator-learned values for pack-declared tunables. Read by pack-loader-generated phase agents at runtime.
+- **`implStateDir/skills/<name>/SKILL.md`** — operator-learned skills. Loaded alongside pack-shipped skills; on name collision, operator-learned wins (override semantics below).
+- **`implStateDir/agents/<name>.md`** — operator-learned agents. Same override semantics.
+- **`implStateDir/tunables/<tunable>.json`** — operator-learned values for *Harness-declared* tunables (the learner declares its own knobs — calibration aggressiveness, ensemble size for its own ensemble step, corpus-lookup top-k, etc.). Tunables are a Harness contract, not a Pack contract; alternative Harnesses define different tunables relevant to their own pipelines.
 - **`implStateDir/configs/<name>.json`** — operator-learned config overrides.
 
-Pack-derived artifacts live under `implStateDir/packs/<pack>/` and are *regenerated on Pack version change* by the pack-loader. They are not edited by the promoter — operator-derived overrides go to the parent `implStateDir/skills|agents|configs/` namespaces.
-
-**Override semantics:** at session-start the pack-loader writes pack-derived artifacts first, then loads operator-derived artifacts; on filename collision (`implStateDir/skills/forecasting-techniques/SKILL.md` vs. `implStateDir/packs/<pack>/skills/forecasting-techniques/SKILL.md`), the operator-derived file wins. The pack-derived file remains on disk for inspection / `git diff` purposes; it is just not loaded into the runtime when an override exists. Clean separation: "from the Pack" (regenerated, inspectable) vs. "operator-learned" (loaded, preserved).
+**Override semantics:** at session-start the pack-loader registers pack-shipped skills first, then operator-learned skills; on name collision (`forecasting-techniques` shipped by the Pack vs. `forecasting-techniques` written by the operator's promoter into `implStateDir/skills/`), the operator-learned skill wins. The pack-shipped skill remains on disk for inspection / `git diff` purposes; it is just not loaded into the runtime when an override exists. Clean separation: "from the Pack" (read-only, inspectable) vs. "operator-learned" (loaded, mutable).
 
 ### 7.6 The pack-loader (implementation detail)
 
@@ -492,22 +446,19 @@ export interface PackLoader {
 
 ```ts
 export interface ClaudeCodeLearnerArtifacts {
-  generatedSkills: Array<{ path: string; content: string }>; // written under implStateDir/packs/<pack>/skills/
-  generatedAgents: Array<{ path: string; content: string }>; // written under implStateDir/packs/<pack>/agents/
+  registeredSkills: Array<{ name: string; path: string }>;       // mounted into the harness's skill registry
   mcpServerSpawns: Array<{ name: string; entry: string }>;
-  knowledgeFiles: Array<{ name: string; markdown: string }>; // embedded into agent prompt contexts
-  schemas: { task?: object; solution?: object; verdict?: object };
-  tunablesPath: string; // implStateDir/tunables/<pack-name>/
+  schemas: { task?: object; solution?: object; verdict?: object }; // for input/output validation
 }
 ```
 
 V1 ships exactly one pack-loader: `claude-code-learner`'s. It lives in `client/src/harnesses/claude-code-learner/pack-loader.ts`. The loader:
 
-1. Reads `pack.flow` and generates one skill per phase under `implStateDir/packs/<pack>/skills/<phase-name>/SKILL.md`.
-2. Spawns each `pack.mcpServers[]` entry and registers its tools with the Harness's MCP client.
-3. Embeds `pack.knowledge[]` markdown into the appropriate phase agents as prompt context.
-4. Validates `Solution.solutionPayload` against `pack.schemas.solution` before returning.
-5. Initialises `implStateDir/tunables/<pack-name>/` with the Pack's declared defaults if not present; reads operator-learned values if present.
+1. Reads the Pack's standard plugin fields (`mcpServers`, `skills`).
+2. Spawns each `mcpServers[]` entry and registers its tools with the Harness's MCP client.
+3. Mounts each `skills[]` entry into the Harness's skill registry so the seven-phase pipeline's agents can `Skill` into them.
+4. Reads `jinn.schemas` (if present); validates Tasks on dispatch and Solutions before envelope assembly.
+5. Does **not** synthesize phase agents from a flow declaration — the Harness owns its flow. Pack content is consumed as substrate the Harness chooses to use, not as a pipeline override.
 
 Alternative-Harness pack-loaders (Pi.dev / Codex / Gemini-CLI ports) are out of scope for v1 — they appear when those Harnesses do.
 
@@ -519,9 +470,9 @@ The reframe gives three named surfaces with clear ownership:
 
 | Surface | Owner | Mutability | How signed |
 |---|---|---|---|
-| Pack content (`jinn.pack.json` + everything it references except `tunables` values) | Pack author | Read-only at runtime | npm publish + (Phase B) signed manifest per `spec/2026-05-executor-trust-boundary.md` |
-| Harness code | Harness author | Read-only at runtime | npm publish + Path 2 manifest signing per existing trust-boundary spec |
-| Operator state (`implStateDir/`) | Operator | Mutable by Harness's improve phase | Git-history within the operator's local implStateDir; no external attestation |
+| Pack content (manifest + tools + skills + schemas) | Pack author | Read-only at runtime | Plugin-marketplace publish / npm publish + (Phase B) signed manifest per `spec/2026-05-executor-trust-boundary.md` |
+| Harness code (and its declared tunables list) | Harness author | Read-only at runtime | npm publish + Path 2 manifest signing per existing trust-boundary spec |
+| Operator state (`implStateDir/`, including tunable *values*) | Operator | Mutable by Harness's improve phase | Git-history within the operator's local implStateDir; no external attestation |
 
 This resolves the `jinn-mono-dwqm` contradiction directly: there is no "signed code that learns at runtime." Signed code (Harness, Pack) doesn't mutate. Operator state mutates. The improve phase's action surface is bounded to operator state.
 
@@ -559,13 +510,18 @@ The daemon installs the Prediction Pack, the learner becomes the Harness for `pr
 
 **v1 contents of `jinn-prediction-pack`:**
 
-- `schemas/{task,solution,verdict}.json` published.
-- `mcp-servers/polymarket-api/` ships and tests pass against the live Polymarket API on testnet.
-- `knowledge/{forecasting-techniques,calibration-approaches,base-rates}.md` populated.
-- `flow.yaml` with at least the §5.3 example phases.
-- `tunables` list declared (defaults safe for cold-start operators).
-- The learner's pack-loader generates all artifacts at session-start with no errors against this Pack.
+- `schemas/{task,solution,verdict}.json` published (Type-defining Pack).
+- `mcp-servers/polymarket-api/` ships and tests pass against the live Polymarket API on testnet. Provides `market_state`, `resolution`, `recent_volume`, `resolution_rule` tools.
+- `skills/` populated with at least: `forecasting-techniques` (Tetlock-style superforecasting principles), `calibration-approaches` (how to use historical Brier feedback), `base-rates` (known base rates for common event types), `common-biases` (overconfidence / anchoring / recency warnings), `polymarket-specifics` (re-listing, cancellation, ambiguous-resolution edge cases). Each skill is a markdown file with frontmatter — domain knowledge embedded as instruction, consumable by any Claude Code-shaped Harness.
+- `jinn.supportsTypes: ["prediction.v0"]` and `jinn.schemas` populated.
+- The learner's pack-loader registers all skills and spawns all MCP servers at session-start with no errors against this Pack.
 - An end-to-end e2e test posts a fake `prediction.v0` Task on Anvil and asserts the learner produces a `Solution.solutionPayload` validated against the Pack's solution schema.
+
+**What is NOT in the v1 Pack** (lives elsewhere):
+
+- The seven-phase flow → owned by `claude-code-learner` (its existing pipeline; uses Pack tools and skills as resources).
+- Calibration / ensemble / corpus-lookup tunables → owned by `claude-code-learner` and declared in its own manifest, populated with operator-learned values under `implStateDir/tunables/` over time.
+- The Objective and Task generator → declared in the SolverNet config (§4 / §11.8).
 
 ---
 
@@ -617,7 +573,7 @@ The schema-versioning grammar in `spec/2026-05-schema-versioning.md` continues t
   - `cli.ts` — `jinn packs list / add / remove / show`.
 - Daemon `main.ts` initialises the Pack registry before constructing the Harness registry; pack-aware Harnesses receive their pack-loader handle in their constructor env.
 - `jinn-prediction-pack` ships at `client/plugins/jinn-prediction-pack/` as the first concrete Pack — a Claude Code plugin with the `jinn` extension populated per §5.1.
-- The `claude-code-learner` pack-loader ships at `client/src/harnesses/claude-code-learner/pack-loader.ts` and prefers pre-baked Claude Code skills/agents when present, synthesizing from `jinn.flow` otherwise.
+- The `claude-code-learner` pack-loader ships at `client/src/harnesses/claude-code-learner/pack-loader.ts`. It registers the Pack's standard plugin `mcpServers` and `skills` into the learner's runtime, exposes `jinn.schemas` for input/output validation, and does *not* synthesize phase agents — the learner owns its flow.
 
 ### 11.6 Path 1 retirement
 
@@ -691,9 +647,9 @@ Existing operators on testnet receive a one-time config-migration prompt at daem
 ## 13. Open questions
 
 1. **Should the default config silently install `@jinn-network/prediction-pack`, or surface a one-line consent prompt at first boot?** Lean: silent install for new operators; one-line prompt on `jinn migrate-config` for existing operators.
-2. **Where should the flow declaration live within a Pack — `flow.yaml`, `flow.json`, or inline in the manifest?** Lean: separate `flow.yaml` so it's diffable and versionable, but the manifest schema accepts inline as well for tiny Packs.
-3. **Should `tunables` carry a JSON Schema for value validation?** Lean: yes, in v1.1; v1 starts with `type` + `default` only and a simple validator.
-4. **Should the `claude-code-learner` pack-loader generate skills/agents on every session-start, or cache by `(packVersion, packContentHash)` and reuse?** Lean: cache, with a `--no-cache` daemon flag for debugging.
+2. **Should there be a separate SolverType registry independent of Packs?** v0.4 leaves Type-schemas to Type-defining Packs; the in-repo daemon ships pre-installed with the prediction Pack so the schema is always available out-of-the-box. Permissionless new Types travel via Pack publication. Open question: does this work for Tasks where the SolverType is widely known but no Pack is installed (e.g., an evaluator-only operator who wants to score Tasks without running the substrate)? Lean: ship a "schemas-only" sub-package convention (Pack with `jinn.supportsTypes` + `jinn.schemas`, no MCP servers, no skills) for these cases. Cheap to add; doesn't alter the architecture.
+3. **Where do Harness-declared tunables live?** Each Harness declares its own tunables (calibration aggressiveness, ensemble size, corpus-lookup top-k for the learner). Format: in the Harness's `package.json` `jinn` field? In a separate `harness.tunables.json`? Lean: in the Harness's `package.json` `jinn.tunables[]` array, mirroring the shape that was previously on Pack manifests. Keeps the declaration close to the code that reads them.
+4. **Should the `claude-code-learner` pack-loader cache its registration work by `(packVersion, packContentHash)`?** Lean: yes for performance; with a `--no-cache` daemon flag for debugging.
 5. **Path 2 builders losing the slot ergonomics — is "fork the learner" actually a viable recruit path?** This is the most genuine concern of the Path 1 retirement. Mitigation: the learner repo includes a `learner-template/` directory with a stripped-down skeleton; the recruit story becomes "fork the template, swap your specialist code in, optionally re-use the same `@jinn-network/harness-sdk` SDK." If recruits report this is too high-friction, Phase A.4 retro re-opens the slot taxonomy as a follow-up.
 6. **Should evaluator Harnesses also be pack-aware?** Today evaluators are deterministic and don't need substrate. If a future evaluator wants knowledge or tools, the same Pack mechanism applies — no architecture change needed.
 7. **Should `solverNets[]` config be operator-side declarative as shown in §11.8, or should SolverNet definitions ship as their own npm packages (e.g., `@jinn-network/prediction-solvernet`) that bundle Pack + Type schema + objective definition together?** Lean: operator-side config in v1 (simpler); promote to dedicated SolverNet packages if multiple SolverNets ship and the bundling reduces operator burden.
