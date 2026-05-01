@@ -746,6 +746,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     dbPath: config.dbPath,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
+    apiBindHost: config.apiBindHost ?? '127.0.0.1',
     peers: config.peers.length > 0 ? config.peers : undefined,
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,

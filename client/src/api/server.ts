@@ -30,6 +30,13 @@ import { AcquireError, HashMismatchError } from '../corpus/index.js';
 
 export interface ApiServerConfig {
   port: number;
+  /**
+   * Bind host. Defaults to `127.0.0.1` so the daemon API is unreachable
+   * across the network unless the operator explicitly opts in via
+   * `apiBindHost` / `JINN_API_BIND_HOST`. Cost-mutating routes additionally
+   * require a bearer token; the bind host is the outer firewall.
+   */
+  bindHost?: string;
   store: Store;
   requireAuth?: boolean;
   onArtifactPublished?: (artifact: { id: string; title: string; tags: string[]; outcome: string }) => void;
@@ -290,7 +297,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     const server = serve({
       fetch: app.fetch,
       port: config.port,
-      hostname: '0.0.0.0',
+      hostname: config.bindHost ?? '127.0.0.1',
     }, () => {
       const addr = server.address();
       const actualPort = (typeof addr === 'object' && addr) ? addr.port : config.port;

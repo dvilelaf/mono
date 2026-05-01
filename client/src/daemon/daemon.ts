@@ -28,6 +28,12 @@ export interface DaemonConfig {
   /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
   pollIntervalMs?: number;
   apiPort?: number;
+  /**
+   * Bind host for the HTTP API server. Defaults to `127.0.0.1` so the
+   * daemon API is unreachable across the network unless operators opt in.
+   * Cost-mutating routes additionally require a bearer token.
+   */
+  apiBindHost?: string;
   peers?: string[];
   signer?: EthHttpSigner;
   subgraphUrl?: string;
@@ -165,6 +171,7 @@ export class Daemon {
       : undefined;
     this.apiServer = await startApiServer({
       port: this.apiPort,
+      bindHost: this.config.apiBindHost,
       store: this.store,
       x402: this.config.x402,
       status: this.config.status,
