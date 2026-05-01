@@ -12,9 +12,10 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,6 +93,38 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   app.use(cors());
 
+  // ── Bearer-token gate for cost-mutating routes ─────────────────────────────
+  //
+  // `POST /artifacts` and `POST /v1/artifacts/acquire` both have side effects
+  // that cost the operator (artifact insert; signing x402 payments with the
+  // agent EOA). Without auth, an attacker reachable on the daemon API port
+  // could fabricate `access.endpoint` URLs and drain USDC. The bearer token
+  // is generated at daemon startup (or read from `DAEMON_API_TOKEN`) and
+  // forwarded to the MCP subprocess via the same env var. Read-only routes
+  // (`GET /v1/status`, `GET /artifacts/search`, `GET /artifacts/:id/content`)
+  // and the x402 cross-operator content routes stay public — they are
+  // intentionally network-reachable / payment-gated. The ERC-8128 middleware
+  // (gated by `requireAuth=true`, never set in prod) layers on top of this.
+  const expectedAuth = `Bearer ${config.apiToken}`;
+  const expectedBuf = Buffer.from(expectedAuth);
+  const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+    const provided = c.req.header('Authorization') ?? '';
+    const providedBuf = Buffer.from(provided);
+    let ok = false;
+    if (providedBuf.length === expectedBuf.length) {
+      try {
+        ok = timingSafeEqual(providedBuf, expectedBuf);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      return c.json({ error: 'unauthorized', reason: 'bearer_required' }, 401);
+    }
+    await next();
+    return;
+  };
+
   app.get('/', (c) => c.html(dashboardHtml));
 
   app.get('/v1/status', async (c) => {
@@ -116,6 +149,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     addX402Routes(app, store, config.x402);
     console.log(`[api] x402 artifact serving enabled`);
   }
+
+  // Bearer-token gate for POST /artifacts. Registered as `app.use` so it
+  // runs BEFORE the ERC-8128 middleware (when both are active) — an
+  // unauthenticated client gets a `bearer_required` 401 instead of leaking
+  // through to ERC-8128's nonce machinery. Method-narrowed to POST so GETs
+  // (search, content) stay public.
+  app.use('/artifacts', async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    return requireBearer(c, next);
+  });
 
   // ERC-8128 auth middleware for POST routes
   const authNonceStore = config.requireAuth ? new InMemoryNonceStore() : null;
@@ -166,7 +209,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return c.json({ id, content });
   });
 
-  // POST /artifacts
+  // POST /artifacts (bearer gate via app.use above; ERC-8128 layered on top
+  // when requireAuth=true). The middleware order means bearer fails first.
   app.post('/artifacts', async (c) => {
     const body = pendingBody ?? await c.req.json<Record<string, unknown>>();
     pendingBody = null;
@@ -215,7 +259,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // the cache. Map entries clear themselves once the inner promise settles.
     const inFlight = new Map<string, Promise<ArtifactContent>>();
 
-    app.post('/v1/artifacts/acquire', async (c) => {
+    app.post('/v1/artifacts/acquire', requireBearer, async (c) => {
       let body: Record<string, unknown>;
       try {
         body = await c.req.json<Record<string, unknown>>();
