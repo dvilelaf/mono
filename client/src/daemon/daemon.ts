@@ -14,6 +14,7 @@ import { RestorationEngine, type RestorationEngineOptions } from '../restorer/en
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
+import { emitStructured } from '../events/emitter.js';
 import { StaticConfiguredIntentSource, type IntentSource } from '../intents/sources.js';
 import type { RestorationJob } from '../types/index.js';
 
@@ -168,6 +169,12 @@ export class Daemon {
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'daemon');
+        emitStructured({
+          kind: 'error',
+          message: 'subgraph backfill failed',
+          errorCode: 'subgraph_backfill',
+          details: { error: err instanceof Error ? err.message : String(err) },
+        });
       }
     }
 
@@ -180,43 +187,116 @@ export class Daemon {
         signer: this.config.signer,
       });
       this.loopPromises.push(
-        this.peerSync.run().catch(err => console.error('[daemon] peer-sync crashed:', err)),
+        this.peerSync.run().catch(err => {
+          console.error('[daemon] peer-sync crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'peer-sync loop crashed',
+            errorCode: 'peer_sync_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
       );
     }
 
     const engine = this.restorationEngine;
     await engine.recoverInFlight();
     this.loopPromises.push(
-      this.creatorLoop.run().catch(err => console.error('[daemon] creator crashed:', err)),
-      this._runEngineWatcherLoop(engine).catch(err => console.error('[daemon] engine-watcher crashed:', err)),
-      engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => console.error('[daemon] engine-tick crashed:', err)),
-      this.deliveryWatcherLoop.run().catch(err => console.error('[daemon] delivery-watcher crashed:', err)),
+      this.creatorLoop.run().catch(err => {
+        console.error('[daemon] creator crashed:', err);
+        emitStructured({
+          kind: 'error',
+          message: 'creator loop crashed',
+          errorCode: 'creator_crashed',
+          details: { error: err instanceof Error ? err.message : String(err) },
+        });
+      }),
+      this._runEngineWatcherLoop(engine).catch(err => {
+        console.error('[daemon] engine-watcher crashed:', err);
+        emitStructured({
+          kind: 'error',
+          message: 'engine-watcher loop crashed',
+          errorCode: 'engine_watcher_crashed',
+          details: { error: err instanceof Error ? err.message : String(err) },
+        });
+      }),
+      engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => {
+        console.error('[daemon] engine-tick crashed:', err);
+        emitStructured({
+          kind: 'error',
+          message: 'engine-tick loop crashed',
+          errorCode: 'engine_tick_crashed',
+          details: { error: err instanceof Error ? err.message : String(err) },
+        });
+      }),
+      this.deliveryWatcherLoop.run().catch(err => {
+        console.error('[daemon] delivery-watcher crashed:', err);
+        emitStructured({
+          kind: 'error',
+          message: 'delivery-watcher loop crashed',
+          errorCode: 'delivery_watcher_crashed',
+          details: { error: err instanceof Error ? err.message : String(err) },
+        });
+      }),
     );
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
-        this.rewardClaimLoop.run().catch(err => console.error('[daemon] reward-claim crashed:', err)),
+        this.rewardClaimLoop.run().catch(err => {
+          console.error('[daemon] reward-claim crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'reward-claim loop crashed',
+            errorCode: 'reward_claim_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
       );
     }
     if (this.balanceTopupLoop) {
       this.loopPromises.push(
-        this.balanceTopupLoop.run().catch(err => console.error('[daemon] balance-topup crashed:', err)),
+        this.balanceTopupLoop.run().catch(err => {
+          console.error('[daemon] balance-topup crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'balance-topup loop crashed',
+            errorCode: 'balance_topup_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
       );
     }
     if (this.jinnClaimLoop) {
       this.loopPromises.push(
-        this.jinnClaimLoop.run().catch(err => console.error('[daemon] jinn-claim crashed:', err)),
+        this.jinnClaimLoop.run().catch(err => {
+          console.error('[daemon] jinn-claim crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'jinn-claim loop crashed',
+            errorCode: 'jinn_claim_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
       );
     }
+
+    emitStructured({ kind: 'system', message: 'daemon loops started' });
   }
 
   async stop(): Promise<void> {
+    emitStructured({ kind: 'system', message: 'daemon loops stopping' });
     this.creatorLoop.stop();
     this.engineStopped = true;
     this.restorationEngine.stop();
-    await this.restorationEngine.releaseClaimedNotStarted().catch(err =>
-      console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err),
-    );
+    await this.restorationEngine.releaseClaimedNotStarted().catch(err => {
+      console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err);
+      emitStructured({
+        kind: 'error',
+        message: 'engine releaseClaimedNotStarted failed',
+        errorCode: 'engine_release_failed',
+        details: { error: err instanceof Error ? err.message : String(err) },
+      });
+    });
     this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
