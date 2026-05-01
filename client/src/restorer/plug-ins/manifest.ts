@@ -6,7 +6,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ErrorObject, type Plugin } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -16,6 +16,16 @@ const addFormats = (addFormatsModule as unknown as { default: Plugin<unknown> })
   .default;
 
 import type { JinnPlugInManifest } from './types.js';
+
+// TODO: refactor to import from client/src/util/path-safety.ts once Stream A
+// creates that module (isInsidePackageDir mirrors isInsideWorkingDir from
+// client/src/restorer/engine/packaging.ts).
+function isInsidePackageDir(base: string, candidate: string): boolean {
+  const b = resolve(base);
+  const c = resolve(candidate);
+  const rel = relative(b, c);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
 
 const SCHEMA_PATH = fileURLToPath(
   new URL('../../../schemas/jinn-plugin-v1.json', import.meta.url),
@@ -93,6 +103,11 @@ export async function loadPlugInManifest(
   for (const slot of manifest.slots) {
     if ('entry' in slot && slot.entry) {
       const entryAbs = join(root, slot.entry);
+      if (!isInsidePackageDir(root, entryAbs)) {
+        throw new Error(
+          `slot entry escapes package root (path traversal): ${slot.entry} (slot type: ${slot.type})`,
+        );
+      }
       if (!existsSync(entryAbs)) {
         throw new Error(
           `slot entry not found: ${slot.entry} (slot type: ${slot.type})`,
@@ -101,6 +116,11 @@ export async function loadPlugInManifest(
     }
     if ('skillsDir' in slot && slot.skillsDir) {
       const skillsAbs = join(root, slot.skillsDir);
+      if (!isInsidePackageDir(root, skillsAbs)) {
+        throw new Error(
+          `slot skillsDir escapes package root (path traversal): ${slot.skillsDir}`,
+        );
+      }
       if (!existsSync(skillsAbs)) {
         throw new Error(`slot skillsDir not found: ${slot.skillsDir}`);
       }

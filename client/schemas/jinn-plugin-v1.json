@@ -59,7 +59,7 @@
         "phase": { "enum": ["strategize", "plan", "execute", "debrief", "improve", "memory-consolidation"] },
         "agent": { "enum": ["strategist", "planner", "step-worker", "analyst", "promoter", "consolidator"] },
         "scope": { "$ref": "#/$defs/scope" },
-        "entry": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+\\.md$" }
+        "entry": { "type": "string", "pattern": "^(?!.*\\.\\.)([A-Za-z0-9_.][A-Za-z0-9_./]*)?\\.md$" }
       }
     },
     "topicExplorer": {
@@ -71,7 +71,7 @@
         "phase": { "enum": ["orient", "debrief"] },
         "topic": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
         "scope": { "$ref": "#/$defs/scope" },
-        "entry": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+\\.md$" }
+        "entry": { "type": "string", "pattern": "^(?!.*\\.\\.)([A-Za-z0-9_.][A-Za-z0-9_./]*)?\\.md$" }
       }
     },
     "mcpTool": {
@@ -91,7 +91,7 @@
       "required": ["type", "skillsDir"],
       "properties": {
         "type": { "const": "skill-bundle" },
-        "skillsDir": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+/?$" },
+        "skillsDir": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_.][A-Za-z0-9_./]*/?$" },
         "scope": { "$ref": "#/$defs/scope" }
       }
     },
@@ -114,7 +114,7 @@
         "type": { "const": "hook" },
         "event": { "enum": ["session-start", "pre-phase", "post-phase", "session-end"] },
         "phase": { "enum": ["orient", "strategize", "plan", "execute", "debrief", "improve", "memory-consolidation"] },
-        "entry": { "type": "string", "pattern": "^[A-Za-z0-9_./-]+$" },
+        "entry": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_.][A-Za-z0-9_./]*$" },
         "scope": { "$ref": "#/$defs/scope" }
       }
     },

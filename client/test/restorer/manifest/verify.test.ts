@@ -124,4 +124,89 @@ describe('canonicaliseManifest', () => {
     expect(out).not.toContain('"X"');
     expect(out).not.toContain('"Y"');
   });
+
+  it('serialises nested objects (regression: array-form replacer collapsed nested keys)', () => {
+    const m = makeManifest();
+    const out = canonicaliseManifest(m);
+    // RFC 8785 JCS recursively sorts keys at every depth — nested
+    // package fields MUST appear in the pre-image. The previous
+    // `JSON.stringify(body, Object.keys(body).sort())` filtered keys
+    // globally so nested objects collapsed to `{}`; this regression
+    // test guards against re-introducing that bug.
+    expect(out).toContain('"cid"');
+    expect(out).toContain('"hash"');
+    expect(out).toContain(m.package.cid);
+    expect(out).toContain(m.package.hash);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: nested-field tampering must invalidate the signature.
+// Pre-fix `JSON.stringify(body, Object.keys(body).sort())` filtered keys at
+// every depth so `package`, `capabilities`, `author` collapsed to `{}`. A
+// signature over the original would still verify against a manifest with a
+// mutated `package.hash` / `capabilities.signer.selectors[*]` / `author.url`.
+// These tests pin the JCS-canonicalised behaviour.
+// ---------------------------------------------------------------------------
+
+describe('verifyManifestSignature — nested tamper detection', () => {
+  async function signed(): Promise<{ manifest: JinnManifest; pkB64: string }> {
+    const sk = ed.utils.randomSecretKey();
+    const pk = await ed.getPublicKeyAsync(sk);
+    const m: JinnManifest = {
+      ...makeManifest(),
+      capabilities: {
+        signer: {
+          selectors: [
+            {
+              chainId: 8453,
+              to: '0x1111111111111111111111111111111111111111',
+              selector: '0xdeadbeef',
+            },
+          ],
+        },
+      },
+      author: { name: 'example', url: 'https://example.com' },
+    };
+    const body = canonicaliseManifest(m);
+    const sig = await ed.signAsync(new TextEncoder().encode(body), sk);
+    m.signature = {
+      alg: 'ed25519',
+      publicKey: b64(pk),
+      sig: b64(sig),
+    };
+    return { manifest: m, pkB64: b64(pk) };
+  }
+
+  it('rejects mutation of manifest.package.hash', async () => {
+    const { manifest, pkB64 } = await signed();
+    manifest.package.hash =
+      ('sha256:' + 'f'.repeat(64)) as `sha256:${string}`;
+    const ok = await verifyManifestSignature(manifest, [
+      { alg: 'ed25519', publicKey: pkB64 },
+    ]);
+    expect(ok).toBe(false);
+  });
+
+  it('rejects mutation of manifest.capabilities.signer.selectors[0].selector', async () => {
+    const { manifest, pkB64 } = await signed();
+    // Mutate a deeply nested allow-list selector.
+    const selectors = manifest.capabilities.signer!.selectors as unknown as Array<{
+      selector: `0x${string}`;
+    }>;
+    selectors[0].selector = '0xcafef00d';
+    const ok = await verifyManifestSignature(manifest, [
+      { alg: 'ed25519', publicKey: pkB64 },
+    ]);
+    expect(ok).toBe(false);
+  });
+
+  it('rejects mutation of manifest.author.url', async () => {
+    const { manifest, pkB64 } = await signed();
+    manifest.author = { ...(manifest.author ?? { name: 'x' }), url: 'https://evil.invalid' };
+    const ok = await verifyManifestSignature(manifest, [
+      { alg: 'ed25519', publicKey: pkB64 },
+    ]);
+    expect(ok).toBe(false);
+  });
 });
