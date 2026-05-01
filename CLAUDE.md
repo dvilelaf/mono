@@ -288,6 +288,20 @@ To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-fil
 
 Spec files are named `YYYY-MM-DD-<topic>.md` and placed in `spec/`. Each has a version, date, and author in the header.
 
+## Public communications
+
+Rules for any content Claude drafts that will be posted publicly — GitHub Discussions and discussion comments, Twitter, public docs, blog posts, RFCs that will be linked externally.
+
+**Author disclosure.** Claude must identify itself as the author. Do not ghost-write under a human's account. Use one of:
+- A leading line: `_Drafted by Claude (with @handle). Source: <link if applicable>._`
+- A trailing footer: `— Drafted by Claude (with @handle)`
+
+The human reviews and posts; the byline stays.
+
+**Distil twice.** Write the draft, cut by 50%, then cut by 50% again. The user course-corrects if it has gone too far. Drop trailing summaries, recaps of what was just said, and "I hope this helps" closures in the first cut.
+
+**Jargon discipline.** Use jargon only when it is the shortest accurate word. Two acceptable kinds: (a) industry terms insiders need (e.g. staking contract, subgraph, x402); (b) repo- or conversation-specific terms defined in [`GLOSSARY.md`](GLOSSARY.md) or in active threads (e.g. meta-harness, SolverNet, outcome). Strip everything else; reach for plain words first.
+
 ## Design System
 
 Voice and posture are canonical in [`BRAND.md`](BRAND.md) — read it before any user-facing artifact. The visual sidecar (tokens, spec) is below; folding it into `BRAND.md` is a separate spec.
