@@ -504,6 +504,8 @@ For (3) to actually compound, downstream consumers (indexer, corpus library, fut
 
 Together: `codeDigest` is the integrity hash; `plugins[]` is the readable manifest. Both ship in `executor`; both are populated at envelope-creation time by the daemon.
 
+**On the granularity choice (plugin-level rather than per-skill / per-MCP-server / per-tool):** the plugin is the unit of versioned, network-wide identity — sub-elements (skills, MCP servers, tools, hooks) have identity *as part of* a plugin and don't carry independent semvers, so sub-plugin queries fall out via plugin lookup; per-call activity (which tool was actually invoked) lives in the trajectory layer; and operator-private state in `implStateDir` is intentionally not in the envelope (a separate opt-in concern).
+
 The schema change to `executor` is small and lands as a follow-up plan extending the envelope-tee-scope spec — implementation is not in scope for this design but the commitment is.
 
 ---
