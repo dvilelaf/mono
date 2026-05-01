@@ -25,7 +25,7 @@ export interface E2eConformanceFixture {
 
 export async function buildGoodRestorationFixture(): Promise<E2eConformanceFixture> {
   const fx: RestorationFixture = await buildEnvFixture();
-  const traj = buildGoodTrajectoryFixture(fx.envelope.intent.cid);
+  const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
   return {
     envelopeCid: fx.envelopeCid,
     envelopeBytes: fx.envelopeBytes,

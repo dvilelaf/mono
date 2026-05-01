@@ -13,8 +13,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/store.js';
-import { IntentPersistence } from '../restorer/engine/persistence.js';
-import type { PersistedIntent } from '../restorer/engine/persistence.js';
+import { IntentPersistence } from '../harnesses/engine/persistence.js';
+import type { PersistedIntent } from '../harnesses/engine/persistence.js';
 
 /** Default per-intent engine work root; kept in sync with `config.engine.workingDirRoot`. */
 export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(homedir(), '.jinn-client', 'engine', 'work');
@@ -25,7 +25,7 @@ const RECENT_CLAUDE_OUTCOMES_LIMIT = 10;
 export interface InFlightIntentSummary {
   requestId: string;
   state: string;
-  specKind: string | null;
+  solverType: string | null;
   implName: string | null;
   windowStartTs: number;
   windowEndTs: number;
@@ -38,7 +38,7 @@ export interface VerdictSummary {
   requestId: string;
   state: 'COMPLETE' | 'FAILED';
   implName: string | null;
-  specKind: string | null;
+  solverType: string | null;
   windowStartTs: number;
   windowEndTs: number;
   stateUpdatedAt: number;
@@ -106,7 +106,7 @@ function toInFlight(intent: PersistedIntent): InFlightIntentSummary {
   return {
     requestId: intent.requestId,
     state: intent.state,
-    specKind: intent.specKind,
+    solverType: intent.solverType,
     implName: intent.implName,
     windowStartTs: intent.windowStartTs,
     windowEndTs: intent.windowEndTs,
@@ -120,7 +120,7 @@ function toVerdict(intent: PersistedIntent): VerdictSummary {
     requestId: intent.requestId,
     state: intent.state as 'COMPLETE' | 'FAILED',
     implName: intent.implName,
-    specKind: intent.specKind,
+    solverType: intent.solverType,
     windowStartTs: intent.windowStartTs,
     windowEndTs: intent.windowEndTs,
     stateUpdatedAt: intent.stateUpdatedAt,

@@ -1,7 +1,7 @@
 /**
  * @jinn-examples/alternative-harness — Path 2 worked example.
  *
- * Restorer for `prediction.v0` running the seven-phase learning
+ * Harness for `prediction.v0` running the seven-phase learning
  * pipeline (Orient → Strategize → Plan → Execute → Debrief → Improve
  * → Memory) against a non-Claude-Code harness. The package owns the
  * coordinator + per-phase modules; the harness is swappable through
@@ -13,42 +13,42 @@
  */
 
 import type {
-  RestorerImpl,
-  ExternalRestorerEnv,
-  RestorationContext,
-  RestorationOutput,
-} from '@jinn-network/restorer-sdk';
+  Harness,
+  ExternalHarnessEnv,
+  HarnessContext,
+  Solution,
+} from '@jinn-network/harness-sdk';
 import type { HarnessAdapter } from './harness.js';
 import { runCoordinator } from './coordinator.js';
 import { createMockHarness } from './mock-harness.js';
 
 export interface AlternativeHarnessConfig {
   /** The harness to drive. Defaults to the deterministic mock for tests. */
-  harnessFactory?: (env: ExternalRestorerEnv) => HarnessAdapter;
+  harnessFactory?: (env: ExternalHarnessEnv) => HarnessAdapter;
 }
 
-export default function createRestorer(
-  env: ExternalRestorerEnv,
+export default function createHarness(
+  env: ExternalHarnessEnv,
   config: AlternativeHarnessConfig = {},
-): RestorerImpl {
+): Harness {
   const factory = config.harnessFactory ?? createMockHarness;
   const harness = factory(env);
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type !== 'evaluation';
+    supports({ solverType, role }) {
+      return solverType === 'prediction.v0' && role !== 'evaluation';
     },
     async isReady() {
       return env.stub
         ? { ready: false, reason: 'stub mode' }
         : { ready: true };
     },
-    async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    async run(ctx: HarnessContext): Promise<Solution> {
       env.log({
         level: 'info',
         msg: 'alternative-harness.start',
-        data: { intentId: ctx.intent.id },
+        data: { taskId: ctx.task.id },
       });
       return runCoordinator({ ctx, harness });
     },

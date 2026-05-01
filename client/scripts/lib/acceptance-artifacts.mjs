@@ -36,7 +36,7 @@ export function normalizeTags(rawTags) {
 }
 
 export function summarizeArtifactRows(rows, desiredStateIds) {
-  const byRestorationJob = Object.fromEntries(
+  const byTask = Object.fromEntries(
     desiredStateIds.map((id) => [id, {
       restorationArtifacts: 0,
       successfulRestorations: 0,
@@ -48,7 +48,7 @@ export function summarizeArtifactRows(rows, desiredStateIds) {
   );
 
   for (const row of rows) {
-    const state = byRestorationJob[row.desired_state_id];
+    const state = byTask[row.desired_state_id];
     if (!state) continue;
     const tagSet = new Set(normalizeTags(row.tags));
     if (tagSet.has('restoration-result')) {
@@ -70,7 +70,7 @@ export function summarizeArtifactRows(rows, desiredStateIds) {
   }
 
   const completedCycles = desiredStateIds.reduce((sum, desiredStateId) => {
-    const state = byRestorationJob[desiredStateId];
+    const state = byTask[desiredStateId];
     return sum + (
       state.successfulRestorations > 0 && state.successfulEvaluations > 0
         ? 1
@@ -80,7 +80,7 @@ export function summarizeArtifactRows(rows, desiredStateIds) {
 
   return {
     rows,
-    byRestorationJob,
+    byTask,
     completedCycles,
   };
 }

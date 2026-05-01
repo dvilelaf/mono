@@ -1,15 +1,15 @@
 # @jinn-examples/polymarket-forecaster
 
-Path 2 worked example for the Jinn plug-in surface: a Polymarket forecaster external restorer impl for `prediction.v0` on Base.
+Path 2 worked example for the Jinn plug-in surface: a Polymarket forecaster external harness impl for `prediction.v0` on Base.
 
-This is the warmest-cohort recruit's reference path — a Polymarket / Kalshi bot operator wrapping their existing forecasting pipeline as a Jinn restorer impl.
+This is the warmest-cohort recruit's reference path — a Polymarket / Kalshi bot operator wrapping their existing forecasting pipeline as a Jinn harness impl.
 
 ## What this shows
 
-- Default-export factory shape (`ExternalRestorerEnv -> RestorerImpl`) per `spec/2026-05-external-restorer-impls.md` §3.2.
-- `supports({ kind: 'prediction.v0', type: 'restoration' })` — claims restoration, declines evaluation.
+- Default-export factory shape (`ExternalHarnessEnv -> Harness`) per `spec/2026-05-external-harness-impls.md` §3.2.
+- `supports({ solverType: 'prediction.v0', role: 'restoration' })` — claims restoration, declines evaluation.
 - `isReady()` switches on `env.stub` so CLI introspection reports correctly.
-- `run(ctx)` reads `ctx.intent.spec.marketId`, fetches a market snapshot, returns a `RestorationOutput` whose `gating.probability` is the forecast.
+- `run(ctx)` reads `ctx.task.spec.marketId`, fetches a market snapshot, returns a `Solution` whose `gating.probability` is the forecast.
 - A signed manifest (`jinn.manifest.json`) declares supported kinds + RPC capability allow-list. The PLACEHOLDER signature must be replaced before production use.
 
 ## Run the tests
@@ -30,7 +30,7 @@ Once the daemon's external-impl loader integration ships (Plan §5.7-5.8 follow-
   "trustedImplSigners": [
     { "alg": "ed25519", "publicKey": "<your base64 pubkey>", "label": "polymarket-forecaster author" }
   ],
-  "restorers": {
+  "harnesses": {
     "externalImpls": [
       {
         "name": "@jinn-examples/polymarket-forecaster",
@@ -61,5 +61,5 @@ return {
 ## Spec
 
 - `spec/2026-04-30-plug-in-surface.md` §3.3.1 — forecaster pattern.
-- `spec/2026-05-external-restorer-impls.md` §3 — loader contract.
+- `spec/2026-05-external-harness-impls.md` §3 — loader contract.
 - `spec/2026-05-executor-trust-boundary.md` §5 — manifest signing.

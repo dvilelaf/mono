@@ -2,7 +2,7 @@
  * sources.ts — IntentCandidate shape and intent preservation.
  *
  * Verifies that both StaticConfiguredIntentSource and GeneratedIntentSource
- * pass the RestorationJob through to IntentCandidate.restorationJob unchanged,
+ * pass the Task through to IntentCandidate.task unchanged,
  * including an embedded SignedIntentV1 when present.
  */
 
@@ -12,7 +12,7 @@ import {
   GeneratedIntentSource,
 } from '../../src/intents/sources.js';
 import type { SignedIntentV1 } from '../../src/types/intent.js';
-import type { RestorationJob } from '../../src/types/desired-state.js';
+import type { Task } from '../../src/types/desired-state.js';
 
 const STUB_INTENT: SignedIntentV1 = {
   schemaVersion: 'intent.v1',
@@ -36,8 +36,8 @@ const STUB_INTENT: SignedIntentV1 = {
 };
 
 describe('StaticConfiguredIntentSource', () => {
-  it('emits one candidate per configured RestorationJob with once_per_safe policy', async () => {
-    const jobs: RestorationJob[] = [
+  it('emits one candidate per configured Task with once_per_safe policy', async () => {
+    const jobs: Task[] = [
       { id: 'ds-1', description: 'first' },
       { id: 'ds-2', description: 'second' },
     ];
@@ -48,12 +48,12 @@ describe('StaticConfiguredIntentSource', () => {
     expect(candidates[0].sourceKey).toBe('configured:ds-1');
     expect(candidates[1].sourceKey).toBe('configured:ds-2');
     expect(candidates[0].postingPolicy).toEqual({ kind: 'once_per_safe' });
-    expect(candidates[0].restorationJob).toBe(jobs[0]);
-    expect(candidates[1].restorationJob).toBe(jobs[1]);
+    expect(candidates[0].task).toBe(jobs[0]);
+    expect(candidates[1].task).toBe(jobs[1]);
   });
 
-  it('preserves embedded SignedIntentV1 on the restorationJob unchanged', async () => {
-    const job: RestorationJob = {
+  it('preserves embedded SignedIntentV1 on the task unchanged', async () => {
+    const job: Task = {
       id: 'sources-test-intent',
       description: 'sources test',
       intent: STUB_INTENT,
@@ -61,19 +61,20 @@ describe('StaticConfiguredIntentSource', () => {
     const source = new StaticConfiguredIntentSource([job]);
     const [candidate] = await source.collect(new Date());
 
-    expect(candidate.restorationJob.intent).toBe(STUB_INTENT);
+    expect(candidate.task.intent).toBe(STUB_INTENT);
   });
 
-  it('sets sourceMeta.kind from spec.kind when present', async () => {
-    const job: RestorationJob = {
+  it('sets sourceMeta.solverType from solverType when present', async () => {
+    const job: Task = {
       id: 'typed-1',
       description: 'typed',
-      spec: { kind: 'prediction.v0' },
+      solverType: 'prediction.v0',
+      spec: {},
     };
     const source = new StaticConfiguredIntentSource([job]);
     const [candidate] = await source.collect(new Date());
 
-    expect(candidate.sourceMeta?.kind).toBe('prediction.v0');
+    expect(candidate.sourceMeta?.solverType).toBe('prediction.v0');
   });
 
   it('returns empty array for an empty desiredStates list', async () => {
@@ -85,7 +86,7 @@ describe('StaticConfiguredIntentSource', () => {
 
 describe('GeneratedIntentSource', () => {
   it('calls the generator and wraps the result in once_per_bucket candidate', async () => {
-    const job: RestorationJob = {
+    const job: Task = {
       id: 'gen-1',
       description: 'generated',
       window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
@@ -97,7 +98,7 @@ describe('GeneratedIntentSource', () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0].sourceKey).toBe('gen:prediction.v0');
     expect(candidates[0].postingPolicy.kind).toBe('once_per_bucket');
-    expect(candidates[0].restorationJob).toBe(job);
+    expect(candidates[0].task).toBe(job);
   });
 
   it('returns empty array when generator returns null', async () => {
@@ -107,8 +108,8 @@ describe('GeneratedIntentSource', () => {
     expect(candidates).toHaveLength(0);
   });
 
-  it('preserves embedded SignedIntentV1 on the generated RestorationJob unchanged', async () => {
-    const job: RestorationJob = {
+  it('preserves embedded SignedIntentV1 on the generated Task unchanged', async () => {
+    const job: Task = {
       id: 'sources-test-intent',
       description: 'sources test',
       window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
@@ -118,11 +119,11 @@ describe('GeneratedIntentSource', () => {
     const source = new GeneratedIntentSource('gen:signed', generator);
     const [candidate] = await source.collect(new Date());
 
-    expect(candidate.restorationJob.intent).toBe(STUB_INTENT);
+    expect(candidate.task.intent).toBe(STUB_INTENT);
   });
 
   it('uses window boundaries as bucketKey when window is present', async () => {
-    const job: RestorationJob = {
+    const job: Task = {
       id: 'windowed-1',
       description: 'windowed',
       window: { startTs: 1_700_000_000_000, endTs: 1_700_003_600_000 },
@@ -136,7 +137,7 @@ describe('GeneratedIntentSource', () => {
   });
 
   it('falls back to id as bucketKey when no window', async () => {
-    const job: RestorationJob = { id: 'no-window-1', description: 'no window' };
+    const job: Task = { id: 'no-window-1', description: 'no window' };
     const generator = vi.fn(async () => job);
     const source = new GeneratedIntentSource('gen:no-window', generator);
     const [candidate] = await source.collect(new Date());

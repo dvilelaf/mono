@@ -1,13 +1,13 @@
 /**
  * Shared helpers for the `jinn intents` CLI surface.
  *
- * - Builds a RestorerImplRegistry populated with the same impls the daemon
+ * - Builds a HarnessRegistry populated with the same impls the daemon
  *   registers at boot (minus the ones that need live dependencies like a
  *   running master wallet). The generic `intents list/status/enable/disable`
  *   verbs use this to dispatch to per-impl onEnable / isReady logic without
  *   standing up the full daemon.
  *
- * - Reads/writes the `restorers.disabled[]` list in the operator's config
+ * - Reads/writes the `harnesses.disabled[]` list in the operator's config
  *   file so `enable` / `disable` can flip per-impl participation.
  */
 
@@ -15,8 +15,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-import { RestorerImplRegistry } from '../restorer/engine/registry.js';
-import { buildRestorerImpls } from '../restorer/impls/index.js';
+import { HarnessRegistry } from '../harnesses/engine/registry.js';
+import { buildHarnesses } from '../harnesses/impls/index.js';
 import type { JinnConfig } from '../config.js';
 
 /**
@@ -25,21 +25,12 @@ import type { JinnConfig } from '../config.js';
  * one place so `main.ts` and the `intents` CLI share a single source of truth.
  */
 export const DEFAULT_DISABLED_IMPLS = ['claude-mcp-hyperliquid'] as const;
-export const DEFAULT_BY_KIND = {
+export const DEFAULT_BY_SOLVER_TYPE = {
   'portfolio.v0': 'claude-mcp-hyperliquid',
   'prediction.v0': 'prediction-v0-baseline',
   'prediction.apy.v0': 'prediction-apy-v0-baseline',
 } as const;
-/**
- * Default universal-wrap impl name (jinn-mono-0k2). When set, every
- * non-evaluation dispatch routes through the named impl's `supports()` —
- * historically claude-code-learner wrapping every restoration with the
- * Orient/Strategize/Plan + specialist Execute + Debrief/Improve/Memory
- * envelope. Operators flip this off via `restorers.wrapWith` to dispatch
- * directly to specialists (raw-impl benchmarking, learning-envelope cost
- * comparison).
- */
-export const DEFAULT_WRAP_WITH = 'claude-code-learner';
+export const DEFAULT_HARNESS = 'claude-code-learner';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -48,22 +39,21 @@ export function resolveConfigPath(explicit?: string): string {
 }
 
 /**
- * Uses {@link buildRestorerImpls} with `stub: true` and no runner (no
+ * Uses {@link buildHarnesses} with `stub: true` and no runner (no
  * `legacy-claude` — requires the daemon process + Claude runner).
  * Honest readiness for stub is refined in 7ee.2.
  *
- * @param buildImpls - Injectable factory (defaults to {@link buildRestorerImpls}).
+ * @param buildImpls - Injectable factory (defaults to {@link buildHarnesses}).
  *   Pass a custom function in tests to observe the env arg without mocking the module.
  */
 export function buildIntentsCliRegistry(
   config: JinnConfig,
-  buildImpls: typeof buildRestorerImpls = buildRestorerImpls,
-): RestorerImplRegistry {
-  const registry = new RestorerImplRegistry({
-    byKind: resolveEffectiveByKind(config),
-    default: 'legacy-claude',
+  buildImpls: typeof buildHarnesses = buildHarnesses,
+): HarnessRegistry {
+  const registry = new HarnessRegistry({
+    bySolverType: resolveEffectiveBySolverType(config),
+    default: config.harnesses?.default ?? DEFAULT_HARNESS,
     disabled: resolveEffectiveDisabled(config),
-    wrapWith: resolveEffectiveWrapWith(config),
   });
 
   // `implStateDirRoot` matches daemon/doctor construction; stub `isReady()` is
@@ -89,42 +79,17 @@ export function buildIntentsCliRegistry(
  * surprised by new defaults sneaking in.
  */
 export function resolveEffectiveDisabled(config: JinnConfig): string[] {
-  const userDisabled = config.restorers?.disabled;
+  const userDisabled = config.harnesses?.disabled;
   if (userDisabled !== undefined) return [...userDisabled];
   return [...DEFAULT_DISABLED_IMPLS];
 }
 
 /** Resolve effective kind → impl mapping, applying operator overrides over ship defaults. */
-export function resolveEffectiveByKind(config: JinnConfig): Record<string, string> {
+export function resolveEffectiveBySolverType(config: JinnConfig): Record<string, string> {
   return {
-    ...DEFAULT_BY_KIND,
-    ...(config.restorers?.byKind ?? {}),
+    ...DEFAULT_BY_SOLVER_TYPE,
+    ...(config.harnesses?.bySolverType ?? {}),
   };
-}
-
-/**
- * Resolve the effective universal-wrap impl name (jinn-mono-0k2).
- *
- * Semantics: the user's `restorers.wrapWith` fully replaces the default —
- * including when set to `null` (operator opting out) or a different impl
- * name. Distinguishing "key absent" (use default) from "key explicitly
- * undefined/null" (opt-out) is important: zod's optional() collapses both,
- * so we treat any presence of `restorers` config as authoritative for
- * wrapWith iff the operator wrote that key. Concretely: if the user wrote
- * `restorers: { wrapWith: null }` they want it OFF; if they wrote
- * `restorers: { byKind: { ... } }` (no wrapWith key) they want the default.
- *
- * In practice the `restorers` config object is parsed by zod into a flat
- * record where missing keys remain undefined, so we keep this helper
- * conservative: any explicitly-set wrapWith on the user config wins; an
- * absent key falls back to the ship default.
- */
-export function resolveEffectiveWrapWith(config: JinnConfig): string | undefined {
-  const r = config.restorers;
-  if (r && Object.prototype.hasOwnProperty.call(r, 'wrapWith')) {
-    return r.wrapWith ?? undefined;
-  }
-  return DEFAULT_WRAP_WITH;
 }
 
 /** Is an impl currently disabled in the effective config? */
@@ -132,14 +97,14 @@ export function isImplDisabled(implName: string, config: JinnConfig): boolean {
   return resolveEffectiveDisabled(config).includes(implName);
 }
 
-interface RestorersPatch {
-  byKind?: Record<string, string>;
+interface HarnessesPatch {
+  bySolverType?: Record<string, string>;
   default?: string;
   disabled?: string[];
 }
 
 /**
- * Patch the user's config file to add/remove an impl from the `restorers.disabled[]`
+ * Patch the user's config file to add/remove an impl from the `harnesses.disabled[]`
  * list.
  *
  * Semantics (important): since user config fully replaces the default list,
@@ -166,8 +131,8 @@ export function setImplEnabledInConfig(
     }
   }
 
-  const restorers = (current['restorers'] ?? {}) as RestorersPatch;
-  const existing = new Set(restorers.disabled ?? []);
+  const harnesses = (current['harnesses'] ?? {}) as HarnessesPatch;
+  const existing = new Set(harnesses.disabled ?? []);
   // Operator-added extras: anything they've explicitly disabled that isn't a ship default.
   const defaults = new Set(DEFAULT_DISABLED_IMPLS as readonly string[]);
   const operatorExtras = new Set(
@@ -185,8 +150,8 @@ export function setImplEnabledInConfig(
   }
 
   const next = [...rebuilt];
-  restorers.disabled = next;
-  current['restorers'] = restorers;
+  harnesses.disabled = next;
+  current['harnesses'] = harnesses;
 
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
@@ -194,9 +159,9 @@ export function setImplEnabledInConfig(
   return next;
 }
 
-/** Persist an explicit impl mapping for a specific intent kind. */
+/** Persist an explicit impl mapping for a specific solverType. */
 export function setImplForKindInConfig(
-  kind: string,
+  solverType: string,
   implName: string,
   configPath: string = DEFAULT_CONFIG_PATH,
 ): void {
@@ -209,20 +174,20 @@ export function setImplForKindInConfig(
     }
   }
 
-  const restorers = (current['restorers'] ?? {}) as RestorersPatch;
-  restorers.byKind = {
-    ...(restorers.byKind ?? {}),
-    [kind]: implName,
+  const harnesses = (current['harnesses'] ?? {}) as HarnessesPatch;
+  harnesses.bySolverType = {
+    ...(harnesses.bySolverType ?? {}),
+    [solverType]: implName,
   };
-  current['restorers'] = restorers;
+  current['harnesses'] = harnesses;
 
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });
 }
 
-/** Remove an explicit impl mapping for one kind, reverting to ship default. */
+/** Remove an explicit impl mapping for one solverType, reverting to ship default. */
 export function resetImplForKindInConfig(
-  kind: string,
+  solverType: string,
   configPath: string = DEFAULT_CONFIG_PATH,
 ): void {
   let current: Record<string, unknown> = {};
@@ -234,11 +199,11 @@ export function resetImplForKindInConfig(
     }
   }
 
-  const restorers = (current['restorers'] ?? {}) as RestorersPatch;
-  const byKind = { ...(restorers.byKind ?? {}) };
-  delete byKind[kind];
-  restorers.byKind = byKind;
-  current['restorers'] = restorers;
+  const harnesses = (current['harnesses'] ?? {}) as HarnessesPatch;
+  const bySolverType = { ...(harnesses.bySolverType ?? {}) };
+  delete bySolverType[solverType];
+  harnesses.bySolverType = bySolverType;
+  current['harnesses'] = harnesses;
 
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(current, null, 2) + '\n', { encoding: 'utf-8' });

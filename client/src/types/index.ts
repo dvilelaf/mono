@@ -1,13 +1,13 @@
 export {
-  type RestorationJob,
+  type Task,
   type RequestId,
-  type RestorationRequest,
-  type RestorationResult,
+  type TaskRequest,
+  type TaskResult,
   type DeliveredResult,
   type Window,
-  parseRestorationJob,
+  parseTask,
   WindowSchema,
-  RestorationJobSchema,
+  TaskSchema,
 } from './desired-state.js';
 
 export {

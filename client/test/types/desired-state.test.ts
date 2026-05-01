@@ -1,24 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { parseRestorationJob } from '../../src/types/desired-state.js';
+import { parseTask } from '../../src/types/desired-state.js';
 
-describe('RestorationJob', () => {
+describe('Task', () => {
   it('parses a valid desired state', () => {
     const input = {
       description: 'The API should return 200 on /health',
       context: { endpoint: 'https://api.example.com/health' },
     };
-    const result = parseRestorationJob(input);
+    const result = parseTask(input);
     expect(result.description).toBe(input.description);
     expect(result.context).toEqual(input.context);
     expect(result.id).toBeDefined();
   });
 
   it('rejects a desired state without description', () => {
-    expect(() => parseRestorationJob({ context: {} })).toThrow();
+    expect(() => parseTask({ context: {} })).toThrow();
   });
 });
 
-describe('parseRestorationJob intent hydration', () => {
+describe('parseTask intent hydration', () => {
   it('hydrates loose fields from intent when loose fields are absent', () => {
     const intent = {
       schemaVersion: 'intent.v1' as const,
@@ -38,10 +38,11 @@ describe('parseRestorationJob intent hydration', () => {
       },
     };
 
-    const parsed = parseRestorationJob({ intent });
+    const parsed = parseTask({ intent });
     expect(parsed.description).toBe('trade');
     expect(parsed.window).toEqual({ startTs: 1, endTs: 86400001 });
-    expect(parsed.spec?.kind).toBe('portfolio.v0');
+    expect(parsed.solverType).toBe('portfolio.v0');
+    expect(parsed.spec).toEqual({});
     expect(parsed.intent).toBeDefined();
   });
 
@@ -64,7 +65,7 @@ describe('parseRestorationJob intent hydration', () => {
       },
     };
 
-    const parsed = parseRestorationJob({
+    const parsed = parseTask({
       description: 'loose-wins',
       intent,
     });

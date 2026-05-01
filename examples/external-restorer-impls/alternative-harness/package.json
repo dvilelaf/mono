@@ -1,7 +1,7 @@
 {
   "name": "@jinn-examples/alternative-harness",
   "version": "0.1.0",
-  "description": "Path 2 worked example — non-Claude-Code restorer running the seven-phase learning pipeline against a swappable HarnessAdapter.",
+  "description": "Path 2 worked example — non-Claude-Code harness running the seven-phase learning pipeline against a swappable HarnessAdapter.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
@@ -25,7 +25,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jinn-network/restorer-sdk": "portal:../../../packages/restorer-sdk"
+    "@jinn-network/harness-sdk": "portal:../../../packages/harness-sdk"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

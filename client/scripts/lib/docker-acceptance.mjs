@@ -74,7 +74,7 @@ export function buildDockerComposeEnv({
     JINN_REWARD_CLAIM_INTERVAL_MS: String(rewardClaimIntervalMs),
     JINN_TARGET_SERVICES: String(targetServices),
     // Release acceptance gates on prediction.v0 cycles produced by the
-    // testnet auto-intent generator (kind=prediction.v0, id prefix
+    // testnet auto-intent generator (solverType=prediction.v0, id prefix
     // `pred-v0-auto-…`). Leaving auto-intents enabled is required for the
     // gate to observe the protocol loop end-to-end.
     JINN_DISABLE_AUTO_INTENTS: merged['JINN_DISABLE_AUTO_INTENTS'] ?? '0',

@@ -1,37 +1,37 @@
 /**
  * @jinn-examples/polymarket-forecaster — Path 2 worked example.
  *
- * Wraps a Polymarket-style price fetch into a Jinn restorer impl for
+ * Wraps a Polymarket-style price fetch into a Jinn harness impl for
  * `prediction.v0`. Real builders swap `polymarket-client.ts` for the
  * live API + their own calibration model.
  */
 
 import type {
-  RestorerImpl,
-  ExternalRestorerEnv,
-  RestorationContext,
-  RestorationOutput,
-} from '@jinn-network/restorer-sdk';
+  Harness,
+  ExternalHarnessEnv,
+  HarnessContext,
+  Solution,
+} from '@jinn-network/harness-sdk';
 import { fetchMarketSnapshot } from './polymarket-client.js';
 
-export default function createRestorer(
-  env: ExternalRestorerEnv,
-): RestorerImpl {
+export default function createHarness(
+  env: ExternalHarnessEnv,
+): Harness {
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type !== 'evaluation';
+    supports({ solverType, role }) {
+      return solverType === 'prediction.v0' && role !== 'evaluation';
     },
     async isReady() {
       return env.stub
         ? { ready: false, reason: 'stub mode' }
         : { ready: true };
     },
-    async run(ctx: RestorationContext): Promise<RestorationOutput> {
+    async run(ctx: HarnessContext): Promise<Solution> {
       const marketId =
-        (ctx.intent.spec as { marketId?: string } | undefined)?.marketId ??
-        ctx.intent.id;
+        (ctx.task.spec as { marketId?: string } | undefined)?.marketId ??
+        ctx.task.id;
       env.log({
         level: 'info',
         msg: 'polymarket-forecaster.fetch',

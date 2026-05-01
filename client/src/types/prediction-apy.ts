@@ -13,7 +13,6 @@ import { WindowSchema } from './desired-state.js';
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
 
 export const PredictionApyV0SpecSchema = z.object({
-  kind: z.literal('prediction.apy.v0'),
   oracle: z.object({
     venue: z.enum(['aave-v3-base-sepolia', 'aave-v3-base', 'aave-v3-mainnet']),
     pool: HexStringSchema,
@@ -48,6 +47,7 @@ export const PredictionApyV0IntentSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
+    solverType: z.literal('prediction.apy.v0').optional(),
     window: WindowSchema,
     spec: PredictionApyV0SpecSchema,
     eligibility: PredictionApyV0EligibilitySchema.default({}),

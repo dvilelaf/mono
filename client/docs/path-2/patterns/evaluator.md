@@ -1,13 +1,13 @@
 # Pattern: evaluator
 
 **Example package:** [`examples/external-restorer-impls/prediction-evaluator`](../../../../examples/external-restorer-impls/prediction-evaluator)
-**In-repo anchor:** [`client/src/restorer/impls/prediction-v0-evaluator/`](../../../../client/src/restorer/impls/prediction-v0-evaluator)
+**In-repo anchor:** [`client/src/harnesses/impls/prediction-v0-evaluator/`](../../../../client/src/harnesses/impls/prediction-v0-evaluator)
 
 ## Recruit shape
 
 You're an evaluator-builder with an alternative scoring approach: log-loss instead of Brier, calibration decomposition, Numerai-shape continuous loss, a domain-specific accuracy metric. You don't run a forecaster — you score forecasters.
 
-The evaluator pattern wraps your scoring rule as a `RestorerImpl` that claims evaluation intents and emits a `verdictPayload`.
+The evaluator pattern wraps your scoring rule as a `Harness` that claims evaluation intents and emits a `verdictPayload`.
 
 ## What the pattern does
 
@@ -22,7 +22,7 @@ The in-repo `prediction-v0-evaluator` is the canonical reference — a determini
   "schemaVersion": "1.0.0",
   "name": "@jinn-examples/prediction-evaluator",
   "version": "0.1.0",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": { "cid": "bafybei...", "hash": "sha256:..." },
   "capabilities": {
@@ -43,18 +43,18 @@ Evaluators usually need a slightly wider RPC allow-list than forecasters because
 
 ```ts
 import type {
-  RestorerImpl,
+  Harness,
   RestorationContext,
   RestorationOutput,
-  ExternalRestorerEnv,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+} from '@jinn-network/harness-sdk';
 
-export default function createEvaluator(env: ExternalRestorerEnv): RestorerImpl {
+export default function createEvaluator(env: ExternalHarnessEnv): Harness {
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type === 'evaluation';
+    supports({ solverType, type }) {
+      return solverType === 'prediction.v0' && type === 'evaluation';
     },
     async run(ctx: RestorationContext): Promise<RestorationOutput> {
       const prediction = readPredictionFromIntent(ctx.intent);

@@ -160,7 +160,8 @@ describe('submit-intent command', () => {
     expect(parsed.dryRun).toBe(true);
     expect(parsed.verb).toBe('submit-intent');
     expect(parsed.plan[0]).toMatchObject({ id: 'pred-1' });
-    expect(parsed.plan[0].spec?.kind).toBe('prediction.v0');
+    expect(parsed.plan[0].solverType).toBe('prediction.v0');
+    expect(parsed.plan[0].spec?.kind).toBeUndefined();
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 
@@ -170,12 +171,12 @@ describe('submit-intent command', () => {
       gatherIntrospectionRaw: vi.fn(async () => mockRaw),
     }));
 
-    // Capture what gets passed to postRestorationJob via the adapter
+    // Capture what gets passed to postTask via the adapter
     const postedJobs: unknown[] = [];
     const mockAdapter = {
       name: 'mock',
       initialize: vi.fn(async () => {}),
-      postRestorationJob: vi.fn(async (job: unknown) => {
+      postTask: vi.fn(async (job: unknown) => {
         postedJobs.push(job);
         return 'mock-request-id-1';
       }),
@@ -228,7 +229,7 @@ describe('submit-intent command', () => {
     // Should have posted exactly one job
     expect(postedJobs.length).toBeGreaterThanOrEqual(1);
     const posted = postedJobs[0] as Record<string, unknown>;
-    // The restorationJob must carry a SignedIntentV1 on .intent
+    // The task must carry a SignedIntentV1 on .intent
     const intent = posted.intent as Record<string, unknown> | undefined;
     expect(intent).toBeDefined();
     expect(intent!.schemaVersion).toBe('intent.v1');
@@ -245,7 +246,7 @@ describe('submit-intent command', () => {
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });
 
-  it('--spec-file with unknown spec.kind emits invalid_invocation', async () => {
+  it('--spec-file with unknown solverType emits invalid_invocation', async () => {
     vi.resetModules();
     vi.doMock('../../../src/cli/introspection-context.js', () => ({
       gatherIntrospectionRaw: vi.fn(async () => mockRaw),
@@ -256,8 +257,9 @@ describe('submit-intent command', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'cli-submit-intent-'));
     const tmpFile = join(tmp, 'bad-kind.json');
     writeFileSync(tmpFile, JSON.stringify({
+      solverType: 'demo.v0',
       window: { startTs: 1, endTs: 2 },
-      spec: { kind: 'demo.v0', foo: 1 },
+      spec: { foo: 1 },
       eligibility: {},
     }));
     const { default: cmd } = await import('../../../src/cli/commands/submit-intent.js');
@@ -270,8 +272,8 @@ describe('submit-intent command', () => {
     await cmd.run(ctx);
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
-    expect(parsed.message).toMatch(/unknown intent kind: demo\.v0/);
-    expect(parsed.message).toMatch(/known kinds:/);
+    expect(parsed.message).toMatch(/unknown SolverType: demo\.v0/);
+    expect(parsed.message).toMatch(/known SolverTypes:/);
     expect(exits).toEqual([11]);
     vi.doUnmock('../../../src/cli/introspection-context.js');
   });

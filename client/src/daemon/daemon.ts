@@ -12,13 +12,13 @@ import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } fro
 import type { X402Config } from '../x402/handler.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
-import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
+import { RestorationEngine, type RestorationEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { JinnClaimLoop, type JinnClaimLoopConfig } from './jinn-claim-loop.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import { StaticConfiguredIntentSource, type IntentSource } from '../intents/sources.js';
-import type { RestorationJob } from '../types/index.js';
+import type { Task } from '../types/index.js';
 
 const DEFAULT_API_PORT = 7331;
 
@@ -110,7 +110,7 @@ export interface DaemonConfig {
   /** Restoration intent sources polled by CreatorLoop. */
   intentSources?: IntentSource[];
   /** Backwards-compatible static intents; used when intentSources is omitted. */
-  desiredStates?: RestorationJob[];
+  desiredStates?: Task[];
 
   /**
    * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
@@ -417,8 +417,8 @@ export class Daemon {
    * For portfolio.v0 intents, the engine dispatches to claude-mcp-hyperliquid.
    * For portfolio.v0.eval intents, the engine dispatches to portfolio-v0-evaluator.
    *
-   * On-chain provenance (intentCid, onchainCreationTx, onchainCreationBlock) is
-   * populated from the RestorationRequest when available (MechAdapter sets these
+   * On-chain provenance (taskCid, onchainCreationTx, onchainCreationBlock) is
+   * populated from the TaskRequest when available (MechAdapter sets these
    * from the MarketplaceRequest event log). Legacy paths that don't populate them
    * fall back to safe defaults with a warning.
    */
@@ -429,13 +429,13 @@ export class Daemon {
       if (this.engineStopped) break;
       if (!request.requestId) continue;
 
-      const specKind = request.restorationJob.spec?.kind ?? undefined;
-      const windowStartTs = request.restorationJob.window?.startTs ?? Date.now();
-      const windowEndTs = request.restorationJob.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
+      const solverType = request.task.solverType ?? undefined;
+      const windowStartTs = request.task.window?.startTs ?? Date.now();
+      const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
       // Warn on missing provenance — legacy intents may legitimately lack it.
-      if (!request.intentCid) {
-        console.warn(`[daemon] intent ${request.requestId} missing provenance field intentCid — manifest integrity checks may fail`);
+      if (!request.taskCid) {
+        console.warn(`[daemon] intent ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
       }
       if (!request.onchainCreationTx) {
         console.warn(`[daemon] intent ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
@@ -447,14 +447,14 @@ export class Daemon {
       try {
         await engine.observe({
           requestId: request.requestId,
-          intentCid: request.intentCid ?? '',
+          taskCid: request.taskCid ?? '',
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,
-          specKind,
-          intentType: (request.restorationJob.type ?? 'restoration') as 'restoration' | 'evaluation',
+          solverType,
+          taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,
           windowEndTs,
-          restorationJob: request.restorationJob,
+          task: request.task,
         });
 
         // Drive the engine state machine for this request.
@@ -469,7 +469,7 @@ export class Daemon {
           emitEvent(this.store, {
             kind: 'tick_error',
             requestId: request.requestId,
-            specKind,
+            solverType,
             outcome: 'failed',
             detail: err instanceof Error ? err.message : String(err),
           }, 'daemon');
@@ -479,7 +479,7 @@ export class Daemon {
         emitEvent(this.store, {
           kind: 'tick_error',
           requestId: request.requestId,
-          specKind,
+          solverType,
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'daemon');

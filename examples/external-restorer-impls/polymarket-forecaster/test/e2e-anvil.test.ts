@@ -5,7 +5,7 @@
  * skips when `anvil` is not on PATH.
  *
  * Note: this test does NOT exercise the daemon's loader — that lives
- * in client/test/restorer/external-impls/loader.test.ts. This test
+ * in client/test/harnesses/external-impls/loader.test.ts. This test
  * exercises the impl in isolation; an integration test that loads
  * this package via the daemon's loader is a follow-up plan.
  */
@@ -14,11 +14,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
 import { execSync } from 'node:child_process';
-import createRestorer from '../src/index.js';
+import createHarness from '../src/index.js';
 import type {
-  ExternalRestorerEnv,
-  RestorationContext,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+  HarnessContext,
+} from '@jinn-network/harness-sdk';
 
 const ANVIL_PORT = 8765;
 
@@ -51,7 +51,7 @@ describeMaybe('polymarket-forecaster e2e (Anvil fork)', () => {
   });
 
   it('runs the impl against a synthetic intent with anvil reachable', async () => {
-    const env: ExternalRestorerEnv = {
+    const env: ExternalHarnessEnv = {
       implName: '@jinn-examples/polymarket-forecaster',
       implVersion: '0.1.0',
       network: 'base-mainnet',
@@ -60,18 +60,21 @@ describeMaybe('polymarket-forecaster e2e (Anvil fork)', () => {
       log: () => {},
       stub: false,
     };
-    const impl = createRestorer(env);
-    const ctx: RestorationContext = {
-      intent: {
+    const impl = createHarness(env);
+    const ctx: HarnessContext = {
+      task: {
         id: 'e2e-1',
-        spec: { kind: 'prediction.v0', marketId: 'mk-trump-2028' },
+        description: 'forecast market',
+        solverType: 'prediction.v0',
+        spec: { marketId: 'mk-trump-2028' },
       },
-      intentCid: undefined,
+      taskCid: undefined,
       implStateDir: '/tmp/polymarket-e2e',
       workingDir: '/tmp/polymarket-e2e-work',
       log: () => {},
       abort: new AbortController().signal,
       msUntilEndTs: () => 60_000,
+    trajectory: { addSpan: () => ({}) },
     };
     const out = await impl.run(ctx);
     expect(out.venueRef.name).toBe('polymarket');

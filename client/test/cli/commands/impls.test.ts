@@ -1,6 +1,6 @@
 /**
  * `jinn impls list/add/remove` — config-mutating CLI for operator-supplied
- * external restorer impls (Path 2 plug-in surface).
+ * external harness impls (Path 2 plug-in surface).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -17,8 +17,8 @@ import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import impls from '../../../src/cli/commands/impls.js';
-import { canonicaliseManifest } from '../../../src/restorer/manifest/index.js';
-import { computePackageHash } from '../../../src/restorer/external-impls/package-hash.js';
+import { canonicaliseManifest } from '../../../src/harnesses/manifest/index.js';
+import { computePackageHash } from '../../../src/harnesses/external-impls/package-hash.js';
 import { makeCommandCtx } from '@test/cli.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
@@ -47,9 +47,9 @@ beforeEach(async () => {
   const packageHash = computePackageHash(PKG_ROOT);
   const manifest = {
     schemaVersion: '1.0.0' as const,
-    name: '@fake/restorer',
+    name: '@fake/harness',
     version: '0.1.0',
-    supportedKinds: ['prediction.v0>=1.0.0'],
+    supportedSolverTypes: ['prediction.v0>=1.0.0'],
     entry: './dist/index.js',
     package: { cid: 'bafyfake', hash: packageHash },
     capabilities: {},
@@ -84,7 +84,7 @@ describe('jinn impls', () => {
     expect(parsed.entries).toEqual([]);
   });
 
-  it('add: appends an entry to restorers.externalImpls and registers signer', async () => {
+  it('add: appends an entry to harnesses.externalImpls and registers signer', async () => {
     writeFileSync(
       CONFIG_PATH,
       JSON.stringify({
@@ -96,10 +96,10 @@ describe('jinn impls', () => {
     });
     await impls.run(made.ctx);
     const cfg = readConfig();
-    const list = (cfg.restorers as { externalImpls: Array<{ name: string; entry: string }> })
+    const list = (cfg.harnesses as { externalImpls: Array<{ name: string; entry: string }> })
       .externalImpls;
     expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('@fake/restorer');
+    expect(list[0].name).toBe('@fake/harness');
     expect(list[0].entry).toBe(PKG_ROOT);
   });
 
@@ -111,7 +111,7 @@ describe('jinn impls', () => {
     await impls.run(made.ctx);
     expect(made.exits).toContain(1);
     const cfg = readConfig();
-    expect(cfg.restorers).toBeUndefined();
+    expect(cfg.harnesses).toBeUndefined();
   });
 
   it('add: refuses when the on-disk package does not match manifest.package.hash (Finding 2)', async () => {
@@ -120,9 +120,9 @@ describe('jinn impls', () => {
     // config.
     const manifest = {
       schemaVersion: '1.0.0' as const,
-      name: '@fake/restorer',
+      name: '@fake/harness',
       version: '0.1.0',
-      supportedKinds: ['prediction.v0>=1.0.0'],
+      supportedSolverTypes: ['prediction.v0>=1.0.0'],
       entry: './dist/index.js',
       package: {
         cid: 'bafyfake',
@@ -155,7 +155,7 @@ describe('jinn impls', () => {
     const errLine = out.split('\n').find((l) => l.includes('package_hash_mismatch'));
     expect(errLine).toBeTruthy();
     const cfg = readConfig();
-    expect(cfg.restorers).toBeUndefined();
+    expect(cfg.harnesses).toBeUndefined();
   });
 
   it('list: shows the entry after add', async () => {
@@ -163,8 +163,8 @@ describe('jinn impls', () => {
       CONFIG_PATH,
       JSON.stringify({
         trustedImplSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
-        restorers: {
-          externalImpls: [{ name: '@fake/restorer', entry: PKG_ROOT }],
+        harnesses: {
+          externalImpls: [{ name: '@fake/harness', entry: PKG_ROOT }],
         },
       }),
     );
@@ -173,33 +173,33 @@ describe('jinn impls', () => {
     const out = made.writes.join('');
     const parsed = JSON.parse(out.split('\n').find((l) => l.startsWith('{'))!);
     expect(parsed.entries).toHaveLength(1);
-    expect(parsed.entries[0].name).toBe('@fake/restorer');
+    expect(parsed.entries[0].name).toBe('@fake/harness');
   });
 
   it('remove: removes the named entry', async () => {
     writeFileSync(
       CONFIG_PATH,
       JSON.stringify({
-        restorers: {
+        harnesses: {
           externalImpls: [
-            { name: '@fake/restorer', entry: PKG_ROOT },
+            { name: '@fake/harness', entry: PKG_ROOT },
             { name: '@other/imp', entry: '/tmp/x' },
           ],
         },
       }),
     );
     const made = makeCommandCtx({
-      argv: ['remove', '@fake/restorer', '--config', CONFIG_PATH, '--json'],
+      argv: ['remove', '@fake/harness', '--config', CONFIG_PATH, '--json'],
     });
     await impls.run(made.ctx);
     const cfg = readConfig();
-    const list = (cfg.restorers as { externalImpls: Array<{ name: string }> }).externalImpls;
+    const list = (cfg.harnesses as { externalImpls: Array<{ name: string }> }).externalImpls;
     expect(list).toHaveLength(1);
     expect(list[0].name).toBe('@other/imp');
   });
 
   it('remove: errors when name is not present', async () => {
-    writeFileSync(CONFIG_PATH, JSON.stringify({ restorers: { externalImpls: [] } }));
+    writeFileSync(CONFIG_PATH, JSON.stringify({ harnesses: { externalImpls: [] } }));
     const made = makeCommandCtx({
       argv: ['remove', '@nope/none', '--config', CONFIG_PATH, '--json'],
     });

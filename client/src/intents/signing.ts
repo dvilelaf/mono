@@ -5,13 +5,13 @@
  * envelope signing pattern in scope v0.9 §4.2a: JCS(intent minus signature)
  * → keccak256 → sign with agent EOA key.
  *
- * Reuses the signCanonical primitive from the restorer engine — one signing
+ * Reuses the signCanonical primitive from the harness engine — one signing
  * implementation for the whole client.
  */
 
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from 'viem';
-import { signCanonical } from '../restorer/engine/signing.js';
+import { signCanonical } from '../harnesses/engine/signing.js';
 import type { IntentV1, SignedIntentV1 } from '../types/intent.js';
 
 export async function signIntentV1(intent: IntentV1, privateKey: Hex): Promise<SignedIntentV1> {

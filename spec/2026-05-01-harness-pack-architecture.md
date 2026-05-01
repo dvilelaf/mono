@@ -3,7 +3,7 @@
 - **Date:** 2026-05-01
 - **Author:** opus (drafted on jinn-mono-dwqm; Captain ritsukai)
 - **Status:** Proposal
-- **Version:** 0.7
+- **Version:** 0.8
 - **Tracks:** Phase A.2 reframe — supersedes the wrapper-with-specialist construct introduced in PR #63; replaces `spec/2026-04-30-plug-in-surface.md` Path 1 with a harness-agnostic SolverPlugin mechanism that extends existing AI-tool plugin formats.
 
 **Sibling specs (load-bearing pre-reads):**
@@ -62,7 +62,7 @@ Five coordinated architectural moves that re-align the implementation with what 
 ### 1.4 Non-goals
 
 - This spec does not commit a marketplace.
-- This spec does not redefine the protocol layer. JinnRouter, IdentityRegistry, ValidationRegistry, ReputationRegistry, ClaimRegistry, x402, ERC-8004 — all unchanged in shape; only the on-chain field name `kind` becomes `type` (carrying the SolverType identifier) per §11.4.
+- This spec does not redefine the protocol layer. JinnRouter, IdentityRegistry, ValidationRegistry, ReputationRegistry, ClaimRegistry, x402, ERC-8004 — all unchanged in shape; only the Task payload's `spec.kind` moves to top-level `solverType` (carrying the SolverType identifier) per §11.4.
 - This spec does not define a new Harness alongside `claude-code-learner`. Alternative Harnesses (Pi.dev / Codex / Gemini-CLI ports) are recruit targets — they ship their own plugin-loaders when they appear.
 
 ---
@@ -73,13 +73,13 @@ Five coordinated architectural moves that re-align the implementation with what 
 |---|---|
 | **SolverNet** | A composition: (SolverType + canonical SolverPlugin + objective + starting Harness + optional Task generator). The campaign / group level. The Prediction SolverNet is the first instance. Defined in operator config and a reference in-repo; not a protocol object. The SolverNet's `solverType` and `solverPlugin.jinn.solverType` MUST agree — the daemon validates this at load time. |
 | **Objective** | The public scalar a SolverNet rallies around. For the Prediction SolverNet: spread vs. Polymarket consensus. Trend matters more than level (#57 §5). |
-| **SolverType** | The schema-versioned identifier a Task's spec conforms to. Examples: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. The SolverType identifier and its schemas are declared by the canonical SolverPlugin's `jinn.solverType` and `jinn.schemas` fields. The on-chain `spec.type` carries this identifier as the protocol-level join key. |
+| **SolverType** | The schema-versioned identifier a Task's spec conforms to. Examples: `prediction.v0`, `prediction.apy.v0`, `portfolio.v0`. Grammar per `spec/2026-05-schema-versioning.md`. The SolverType identifier and its schemas are declared by the canonical SolverPlugin's `jinn.solverType` and `jinn.schemas` fields. The on-chain `solverType` carries this identifier as the protocol-level join key. |
 | **SolverPlugin** | The canonical harness-agnostic package for a SolverNet — supplies the SolverType identifier + schemas, MCP servers, and skills. Each SolverNet has exactly one. Manifested as an extension of an existing AI-tool plugin format (Claude Code plugin / Gemini extension / standalone) with a `jinn` field. Read-only at runtime. Distributable via npm, plugin marketplace, git release, or IPFS. *Operators may also install other plugins (regular Claude Code / Gemini plugins) for additional tools/skills — those are not SolverPlugins, they're operator-side additions outside any SolverNet's canonical substrate.* |
-| **Task** | The on-chain posted item. Today: `JinnRouter.createRestorationJob`'s product. Carries a `specCid` referencing the IPFS-stored spec. The Solver claims a Task, runs it via their Harness, and submits a Solution. |
+| **Task** | The on-chain posted item. Today: `JinnRouter.createRestorationJob`'s product. Carries a `taskCid` referencing the IPFS-stored Task. The Solver claims a Task, runs it via their Harness, and submits a Solution. |
 | **Solution** | The Solver's output for a Task. The thing today called `RestorationOutput`. |
 | **Verdict** | The Evaluator's output scoring a Solution. Carries a `verdictPayload` (kept; protocol-level field). |
 | **Harness** | The runtime an operator runs to claim and solve Tasks. The thing today called `RestorerImpl`. Implements the Solver protocol role. May or may not be plugin-aware; may or may not learn. Owns its flow, improve-phase, and tunables. |
-| **HarnessContext** | The runtime context the daemon hands to a Harness's `run()` method — the bundle of inputs and capabilities a Harness has to do its work. Carries: the `Task`, the `specCid`, an `implStateDir` (the Harness's persistent state directory), a `workingDir` (ephemeral, cleared between attempts), a `log` callback, an `abort` `AbortSignal`, an `msUntilEndTs` deadline accessor, a `trajectory` collector for span emission, and (when the daemon is providing them per the Harness's manifest allow-list) scoped `signer` / `rpc` / `secrets` capability handles per `spec/2026-05-executor-trust-boundary.md` §3. Today: `RestorationContext`, defined in `client/src/restorer/types.ts`. See §7.2.1. |
+| **HarnessContext** | The runtime context the daemon hands to a Harness's `run()` method — the bundle of inputs and capabilities a Harness has to do its work. Carries: the `Task`, the `taskCid`, an `implStateDir` (the Harness's persistent state directory), a `workingDir` (ephemeral, cleared between attempts), a `log` callback, an `abort` `AbortSignal`, an `msUntilEndTs` deadline accessor, a `trajectory` collector for span emission, and (when the daemon is providing them per the Harness's manifest allow-list) scoped `signer` / `rpc` / `secrets` capability handles per `spec/2026-05-executor-trust-boundary.md` §3. Defined in `client/src/harnesses/types.ts`. See §7.2.1. |
 | **Solver** | A protocol role (Creator / Solver / Evaluator) — and the operator who fulfils it. The Solver claims a Task, runs it via their Harness, and submits a Solution. Renamed from `Restorer` (the on-chain function name `createRestorationJob` and other deployed-contract identifiers stay; the conceptual role label changes — see §11.2). |
 
 ---
@@ -106,7 +106,7 @@ Two levels with distinct concerns; primitives at each level keep clean boundarie
 ─── Level 2 (per-item / ephemeral) ──────────────────────────────────────────
      Task (one per posted item; many per SolverNet)
        ├── on-chain           → JinnRouter object with escrow + eligibility
-       └── spec (IPFS)        → type identifier + per-Task fields (predicate, window, ...)
+       └── Task payload (IPFS) → solverType + per-Task spec fields (predicate, window, ...)
 
        Solver claims Task → Harness runs → Solution submitted
        Evaluator scores Solution → Verdict produced
@@ -130,7 +130,7 @@ Two levels with distinct concerns; primitives at each level keep clean boundarie
 
 - **Level 1 is persistent.** A SolverNet is defined once and runs continuously. Its canonical plugin and Objective don't change between Tasks; its scalar accumulates as Tasks resolve.
 - **Level 2 is ephemeral.** Each Task is posted, claimed, solved, scored, settled, indexed.
-- **The join key is the SolverType identifier (a string).** On-chain a Task carries `spec.type`. The daemon looks up the SolverNet whose canonical plugin declares that type, fetches the plugin's schemas to validate the spec, and dispatches to the SolverNet's starting Harness (or operator-overridden Harness via `bySolverType`).
+- **The join key is the SolverType identifier (a string).** The IPFS Task payload carries top-level `solverType`. The daemon looks up the SolverNet whose canonical plugin declares that type, fetches the plugin's schemas to validate the nested `spec`, and dispatches to the SolverNet's starting Harness (or operator-overridden Harness via `bySolverType`).
 - **One canonical plugin per SolverNet — no conflicts possible.** The plugin is the source of truth for its SolverType (identifier + schemas + substrate). Operators don't typically swap canonical plugins; if they want different substrate they participate in (or fork) a different SolverNet. Operators may install *other* plugins for additional tools/skills; those are regular host-plugin-system plugins, not SolverPlugins.
 - **SolverPlugin and Harness are independent.** Plugin ships substrate; Harness owns the runtime (flow, improve-phase, tunables). The SolverNet's canonical plugin is fixed by the curator; the starting Harness is just a recommendation operators can override.
 
@@ -160,7 +160,7 @@ A SolverNet is a composition pattern declared in operator config and (for first-
 }
 ```
 
-A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with type identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `spec.type` matches my SolverNet's `solverType`, here is the canonical plugin's substrate, the Harness to start with, and the Objective to roll up the verdict score into."
+A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNets; it knows about Tasks with type identifiers. The SolverNet is operator-side coordination — the way a daemon decides "for a Task whose `solverType` matches my SolverNet's `solverType`, here is the canonical plugin's substrate, the Harness to start with, and the Objective to roll up the verdict score into."
 
 ### 4.2 What a SolverNet declares
 
@@ -178,7 +178,7 @@ A SolverNet is **not a protocol object**. JinnRouter doesn't know about SolverNe
 
 ### 4.3 Multiple SolverNets per daemon
 
-A daemon can run more than one SolverNet at a time — e.g., Prediction + Portfolio. Each SolverNet has its own canonical plugin declaring its own SolverType; the daemon's registry routes incoming Tasks by `spec.type` to the correct SolverNet's Harness. SolverNets do not compete inside one daemon; they coexist. Cross-SolverNet selection ("which SolverNet should this generic Task go to?") is not a protocol concern — Tasks identify their SolverNet by their type identifier.
+A daemon can run more than one SolverNet at a time — e.g., Prediction + Portfolio. Each SolverNet has its own canonical plugin declaring its own SolverType; the daemon's registry routes incoming Tasks by `solverType` to the correct SolverNet's Harness. SolverNets do not compete inside one daemon; they coexist. Cross-SolverNet selection ("which SolverNet should this generic Task go to?") is not a protocol concern — Tasks identify their SolverNet by their type identifier.
 
 ---
 
@@ -248,7 +248,7 @@ The full Prediction SolverPlugin manifest:
 
 | Field | Purpose |
 |---|---|
-| `jinn.solverType` | The single SolverType identifier this plugin defines. Per `spec/2026-05-schema-versioning.md` grammar. Singular: each SolverPlugin defines exactly one SolverType. The on-chain `spec.type` carries this same string. |
+| `jinn.solverType` | The single SolverType identifier this plugin defines. Per `spec/2026-05-schema-versioning.md` grammar. Singular: each SolverPlugin defines exactly one SolverType. The on-chain `solverType` carries this same string. |
 | `jinn.schemas` | JSON Schemas defining the SolverType's payloads (`task`, `solution`, `verdict`). The plugin is the source of truth for the SolverType's shape. |
 
 That's the entire `jinn` surface. Two fields.
@@ -318,28 +318,31 @@ A Task is what `JinnRouter.createRestorationJob` produces today, with the rename
 | `escrow` | router | Funds held until resolution. |
 | `eligibility` | router | Eligibility-checker contract. |
 | `window` | router | Deadlines. |
-| `specCid` | spec | IPFS CID pointing to the Task's spec content. (Renamed from `intentCid`.) |
+| `taskCid` | task | IPFS CID pointing to the full posted Task payload. (Renamed from `intentCid`.) |
 
-### 6.2 The IPFS-stored spec
+### 6.2 The IPFS-stored Task
 
-The Task's spec is the JSON-stored description of *what* this specific Task is asking for. It carries a `type` field identifying the SolverType, plus SolverType-specific fields validated against the canonical SolverPlugin's `jinn.schemas.task`:
+The Task payload is the JSON-stored description of *what* this specific Task is asking for. It carries a top-level `solverType` field identifying the SolverType, plus a nested `spec` object whose shape is validated against the canonical SolverPlugin's `jinn.schemas.task`:
 
 ```jsonc
 // example: a single Polymarket-derived Prediction Task
 {
-  "type": "prediction.v0",
-  "predicate": "Will the Fed cut by 50bps before July 2026?",
-  "resolutionMarket": "0x...",
-  "resolutionTime": "2026-07-01T00:00:00Z",
-  "resolutionSource": "polymarket"
+  "solverType": "prediction.v0",
+  "role": "restoration",
+  "spec": {
+    "predicate": "Will the Fed cut by 50bps before July 2026?",
+    "resolutionMarket": "0x...",
+    "resolutionTime": "2026-07-01T00:00:00Z",
+    "resolutionSource": "polymarket"
+  }
 }
 ```
 
-The `type` field in the spec is the **join key** between protocol and operator-side. The daemon receives the Task, reads its spec from IPFS, looks up the SolverNet whose canonical plugin's `jinn.solverType` matches, validates the spec against that plugin's `jinn.schemas.task`, dispatches to that SolverNet's starting Harness (or the operator's per-SolverType override).
+The `solverType` field on the Task is the **join key** between protocol and operator-side. The daemon receives the Task, reads the Task payload from IPFS, looks up the SolverNet whose canonical plugin's `jinn.solverType` matches, validates `task.spec` against that plugin's `jinn.schemas.task`, dispatches to that SolverNet's starting Harness (or the operator's per-SolverType override).
 
 ### 6.3 What changes vs. today
 
-Field renames only. The shape of the on-chain object and the IPFS-stored spec are otherwise unchanged. The protocol-level loop (Creator → Solver → Evaluator) operates identically; we are renaming, not redesigning. Deployed contract identifiers (`createRestorationJob`, `deliverToMarketplace`, etc.) stay because they're tied to live contracts; only the conceptual role label and TypeScript-level identifiers change.
+Field renames only. The shape of the on-chain object and the IPFS-stored Task are otherwise unchanged. The protocol-level loop (Creator → Solver → Evaluator) operates identically; we are renaming, not redesigning. Deployed contract identifiers (`createRestorationJob`, `deliverToMarketplace`, etc.) stay because they're tied to live contracts; only the conceptual role label and TypeScript-level identifiers change.
 
 ---
 
@@ -359,16 +362,16 @@ The role-vs-implementation split is preserved: a Solver (role) runs a Harness (i
 export interface Harness {
   readonly name: string;
   readonly version: string;
-  supports(spec: { type: string; role?: 'restoration' | 'evaluation' }): boolean;
-  isReady(spec?: { type: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus>;
+  supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean;
+  isReady(spec?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus>;
   canAttempt?(task: Task): Promise<{ ok: true } | { ok: false; reason: string }>;
-  onEnable?(args: Record<string, string | undefined>, spec?: { type: string; role?: 'restoration' | 'evaluation' }): Promise<EnableResult>;
-  onDisable?(spec?: { type: string; role?: 'restoration' | 'evaluation' }): Promise<void>;
+  onEnable?(args: Record<string, string | undefined>, spec?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<EnableResult>;
+  onDisable?(spec?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<void>;
   run(ctx: HarnessContext): Promise<Solution>;
 }
 ```
 
-**Field-name note:** the old shape was `{ kind: string; type?: 'restoration' | 'evaluation' }`. The rename `kind → type` (carrying the SolverType identifier) collides with the existing role field. Resolved by renaming `type → role` in the same pass — `'restoration' | 'evaluation'` is semantically a *role*, not a *type*, so the rename improves clarity. The role values themselves (`'restoration'` / `'evaluation'`) stay as protocol-level strings until contract redeployment lets them shift to `'solution'` / `'evaluation'`. Migration mechanics: §11.4.
+**Field-name note:** the old shape was `{ kind: string; type?: 'restoration' | 'evaluation' }`. This spec renames `kind → solverType` and `type → role`; `'restoration' | 'evaluation'` is semantically a *role*, not a *type*. The role values themselves stay as protocol-level strings until contract redeployment lets them shift to `'solution'` / `'evaluation'`. Migration mechanics: §11.4.
 
 ### 7.2.1 What HarnessContext carries
 
@@ -379,8 +382,8 @@ export interface HarnessContext {
   /** The Task this Harness is being asked to handle. */
   task: Task;
 
-  /** IPFS CID of the Task's spec content (renamed from `intentCid`). */
-  specCid?: string;
+  /** IPFS CID of the full posted Task payload (renamed from `intentCid`). */
+  taskCid?: string;
 
   /** Persistent directory for Harness-specific state. The improve phase mutates here. */
   implStateDir: string;
@@ -421,7 +424,7 @@ This shape is unchanged from today's `RestorationContext` modulo the field renam
 
 The registry resolves a Harness for a Task by:
 
-1. **`config.harnesses.bySolverType[task.spec.type]`** — explicit per-SolverType binding wins. Used by operators who want a Path 2 specialist for a specific SolverType.
+1. **`config.harnesses.bySolverType[task.solverType]`** — explicit per-SolverType binding wins. Used by operators who want a Path 2 specialist for a specific SolverType.
 2. **Default Harness** — `claude-code-learner`. Claims any non-evaluation Task that wasn't routed to a specialist.
 3. **Disabled list** — `config.harnesses.disabled[]` excludes a Harness from selection regardless.
 
@@ -535,7 +538,7 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 **v1 contents of `@jinn-network/prediction-plugin`:**
 
 - `schemas/{task,solution,verdict}.json` published — the plugin is the source of truth for `prediction.v0`'s shape.
-  - `task.json`: requires `type: "prediction.v0"`, `predicate`, `resolutionMarket`, `resolutionTime`, `resolutionSource`.
+  - `task.json`: validates the nested `spec` object for a `solverType: "prediction.v0"` Task; requires `predicate`, `resolutionMarket`, `resolutionTime`, `resolutionSource`.
   - `solution.json`: requires `probability ∈ [0,1]`; optional `confidence`, `reasoningCid`, `evidenceCids`, `methodology`.
   - `verdict.json`: `resolved: bool`, optional `outcome ∈ {YES,NO,INVALID}`, `brierScore ∈ [0,1]`.
 - `mcp-servers/polymarket-api/` ships and tests pass against the live Polymarket API on testnet. Provides `market_state`, `resolution`, `recent_volume`, `resolution_rule` tools.
@@ -582,19 +585,19 @@ The daemon installs the prediction plugin, the learner becomes the Harness for `
 - All field-level usages updated.
 - Tests and e2e are in scope, not a cleanup afterthought. At minimum, update every current `client/test/` reference to the renamed surfaces:
   - `RestorationJob` call sites and fixtures become `Task`.
-  - `intentCid` call sites and persisted expectations become `specCid`.
+  - `intentCid` call sites and persisted expectations become `taskCid`.
   - `RestorationContext` fixtures become `HarnessContext`.
   - `RestorationOutput` assertions become `Solution`.
   - `byKind` config helpers become `bySolverType`.
   - `wrapWith` tests are deleted with the wrapper path, except for config-migration tests that prove legacy `wrapWith` is removed or ignored.
-- E2e fixtures and manifest assertions must use `Task` / `specCid` / `solutionPayload` vocabulary while preserving compatibility with deployed contract names.
+- E2e fixtures and manifest assertions must use `Task` / `taskCid` / `solutionPayload` vocabulary while preserving compatibility with deployed contract names.
 
 ### 11.4 Task / spec field renames
 
 - `RestorationJob → Task` (the on-chain object's TypeScript name).
-- `intentCid → specCid` on the Task struct + ABIs.
-- `spec.kind → spec.type` in the IPFS-stored spec format (carries the SolverType identifier).
-- `spec.type: 'restoration' | 'evaluation'` → `spec.role: 'restoration' | 'evaluation'`. Avoids collision with the renamed SolverType-identifier field.
+- `intentCid → taskCid` on the Task struct + ABIs.
+- `spec.kind → solverType` in the IPFS-stored Task format (carries the SolverType identifier).
+- `type: 'restoration' | 'evaluation'` → `role: 'restoration' | 'evaluation'`.
 - `byKind → bySolverType` in operator config.
 - Path 2 Harness manifests declare which SolverTypes they handle via their existing per-Type structures (no `supportsSolverTypes` array — Path 2 specialists already declare per-Type handling in their manifests).
 
@@ -608,14 +611,14 @@ The existing `client/src/intents/kinds/<kind>/` modules contain Zod schemas + Ty
 - TypeScript-typed access for in-repo callers happens via a thin adapter that imports the plugin's JSON Schema and runs JSON-Schema-to-TS at build time (e.g., `json-schema-to-typescript`), or via a hand-maintained Zod schema in the plugin itself that re-exports both.
 - The directory `client/src/intents/kinds/` is renamed to `client/src/solver-types/` and contains *adapter* modules only — no canonical schema content. Once all first-party SolverTypes have plugins, the directory may collapse entirely (TBD; see §13 open question 5).
 
-The auto-poster wiring in `client/src/intents/kinds/index.ts` (`SPEC_KINDS`, `getTestnetAutoConfig`, `collectTestnetAutoIntentGenerators`) moves to `client/src/solver-types/index.ts` with the same shape, just imports updated.
+The auto-poster wiring in `client/src/intents/kinds/index.ts` is vocabulary-renamed (`SOLVER_TYPES`, `getTestnetAutoConfig`, `collectTestnetAutoIntentGenerators`). A later cleanup may move those adapter modules to `client/src/solver-types/`; this PR keeps the path stable to reduce churn while removing canonical schema authority from it.
 
 ### 11.6 SolverPlugin mechanism
 
 - New module: `client/src/plugins/`.
   - `resolvers/` — multi-format resolvers: `npm.ts`, `cc-marketplace.ts`, `git.ts`, `local.ts`, (Phase B+) `ipfs.ts`. Each resolver takes a spec string, fetches the package, and returns a normalized `SolverPluginManifest` regardless of which host-format (Claude Code plugin / Gemini extension / standalone) the package uses.
   - `loader.ts` — reads `config.solverNets[]`, resolves each SolverNet's `solverPlugin` reference via the appropriate resolver, validates the `jinn.*` extension, builds an in-memory `SolverPluginRegistry` keyed by SolverType.
-  - `validator.ts` — at Task dispatch and Solution submission, looks up the SolverNet's canonical plugin by `spec.type` and validates against `jinn.schemas`.
+  - `validator.ts` — at Task dispatch and Solution submission, looks up the SolverNet's canonical plugin by `solverType` and validates against `jinn.schemas`.
   - `types.ts` — `SolverPluginManifest`.
   - `cli.ts` — `jinn plugins list / add / remove / show`.
 - Daemon `main.ts` initialises the SolverPluginRegistry before constructing the Harness registry. Plugins are placed on disk where the host plugin runtime expects (e.g., the Claude Code plugin directory) so when the learner spawns its subprocess, Claude Code natively loads them.
@@ -734,4 +737,4 @@ The campaign-launch gate (#57 §1) is *not* acceptance for this spec — it is a
 
 ---
 
-*End of v0.7.*
+*End of v0.8.*

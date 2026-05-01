@@ -11,11 +11,11 @@
  */
 
 import type {
-  RestorerImpl,
-  ExternalRestorerEnv,
-  RestorationContext,
-  RestorationOutput,
-} from '@jinn-network/restorer-sdk';
+  Harness,
+  ExternalHarnessEnv,
+  HarnessContext,
+  Solution,
+} from '@jinn-network/harness-sdk';
 import { brier } from './score.js';
 import { fetchResolution } from './oracle-stub.js';
 
@@ -25,21 +25,21 @@ interface PredictionEnvelopeUnderEvaluation {
 }
 
 export default function createEvaluator(
-  env: ExternalRestorerEnv,
-): RestorerImpl {
+  env: ExternalHarnessEnv,
+): Harness {
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type === 'evaluation';
+    supports({ solverType, role }) {
+      return solverType === 'prediction.v0' && role === 'evaluation';
     },
     async isReady() {
       return env.stub
         ? { ready: false, reason: 'stub mode' }
         : { ready: true };
     },
-    async run(ctx: RestorationContext): Promise<RestorationOutput> {
-      const restoration = (ctx.intent.spec as Record<string, unknown> | undefined)
+    async run(ctx: HarnessContext): Promise<Solution> {
+      const restoration = (ctx.task.spec as Record<string, unknown> | undefined)
         ?.restorationUnderEvaluation as
         | PredictionEnvelopeUnderEvaluation
         | undefined;
@@ -59,7 +59,7 @@ export default function createEvaluator(
           },
         };
       }
-      const oracle = await fetchResolution(ctx.intent.id);
+      const oracle = await fetchResolution(ctx.task.id);
       const score = brier(
         restoration.forecastProbability,
         oracle.resolvedOutcome,
@@ -68,7 +68,7 @@ export default function createEvaluator(
         level: 'info',
         msg: 'evaluator.scored',
         data: {
-          intentId: ctx.intent.id,
+          taskId: ctx.task.id,
           score,
           outcome: oracle.resolvedOutcome,
         },

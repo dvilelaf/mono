@@ -4,7 +4,7 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import type { IntentPostRecord, IntentPostingPolicyType } from '../store/store.js';
-import { TransientError, type RestorationJob, type RequestId } from '../types/index.js';
+import { TransientError, type Task, type RequestId } from '../types/index.js';
 import type { IntentCandidate, IntentPostingPolicy } from './sources.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
@@ -12,7 +12,7 @@ const POST_LOCK_STALE_AFTER_MS = 60_000;
 
 export interface IntentPostResult {
   requestId: RequestId;
-  restorationJob: RestorationJob;
+  task: Task;
   attemptNumber: number;
   attemptId: string;
   idempotent: boolean;
@@ -99,7 +99,7 @@ export class IntentPostingService {
     });
     if (!lockAcquired) {
       throw new TransientError(
-        `Intent post already in progress for ${candidate.sourceKey} (${candidate.restorationJob.id})`,
+        `Intent post already in progress for ${candidate.sourceKey} (${candidate.task.id})`,
       );
     }
 
@@ -127,22 +127,22 @@ export class IntentPostingService {
 
       const previousPostCount = lockedExisting?.postCount ?? 0;
       const attemptNumber = previousPostCount + 1;
-      const attemptId = `${candidate.restorationJob.id}/${attemptNumber}`;
-      const restorationJob: RestorationJob = {
-        ...candidate.restorationJob,
-        type: 'restoration',
+      const attemptId = `${candidate.task.id}/${attemptNumber}`;
+      const task: Task = {
+        ...candidate.task,
+        role: 'restoration',
         attemptId,
         attemptNumber,
       };
-      const requestId = await this.adapter.postRestorationJob(restorationJob);
+      const requestId = await this.adapter.postTask(task);
 
       this.store.recordOwnActivity(requestId, 'created');
       emitEvent(this.store, {
         kind: 'intent_posted',
         requestId,
-        specKind: candidate.restorationJob.spec?.kind,
+        solverType: candidate.task.solverType,
         outcome: 'ok',
-        detail: `Posted intent for desired state ${candidate.restorationJob.id} via ${candidate.sourceKey}`,
+        detail: `Posted task ${candidate.task.id} via ${candidate.sourceKey}`,
       }, 'creator');
 
       // ERC-8004 per-execution registration uses the operator-rooted entity model
@@ -152,7 +152,7 @@ export class IntentPostingService {
         sourceKey: candidate.sourceKey,
         policyType,
         scopeKey,
-        desiredStateId: candidate.restorationJob.id,
+        desiredStateId: candidate.task.id,
         requestId,
         firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
         lastPostedAt: nowIso,
@@ -160,7 +160,7 @@ export class IntentPostingService {
       });
       return {
         requestId,
-        restorationJob,
+        task,
         attemptNumber,
         attemptId,
         idempotent: false,
@@ -195,7 +195,7 @@ export class IntentPostingService {
         sourceKey: candidate.sourceKey,
         policyType: args.policyType,
         scopeKey: args.scopeKey,
-        desiredStateId: candidate.restorationJob.id,
+        desiredStateId: candidate.task.id,
         requestId,
         firstPostedAt: args.nowIso,
         lastPostedAt: args.nowIso,
@@ -213,12 +213,12 @@ export class IntentPostingService {
     source: 'store' | 'legacy_config',
   ): IntentPostResult {
     const attemptNumber = Math.max(1, record.postCount);
-    const attemptId = `${candidate.restorationJob.id}/${attemptNumber}`;
+    const attemptId = `${candidate.task.id}/${attemptNumber}`;
     return {
       requestId: record.requestId,
-      restorationJob: {
-        ...candidate.restorationJob,
-        type: 'restoration',
+      task: {
+        ...candidate.task,
+        role: 'restoration',
         attemptId,
         attemptNumber,
       },

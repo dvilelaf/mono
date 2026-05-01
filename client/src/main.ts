@@ -58,10 +58,10 @@ import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
-import { RestorerImplRegistry } from './restorer/engine/registry.js';
-import { buildRestorerImpls } from './restorer/impls/index.js';
-import { loadExternalImpl } from './restorer/external-impls/index.js';
-import type { RestorerImpl } from './restorer/types.js';
+import { HarnessRegistry } from './harnesses/engine/registry.js';
+import { buildHarnesses } from './harnesses/impls/index.js';
+import { loadExternalImpl } from './harnesses/external-impls/index.js';
+import type { Harness } from './harnesses/types.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
@@ -935,33 +935,28 @@ export async function main(): Promise<DaemonStartupInfo | void> {
 
   // Default-disable impls with external dependencies the operator must opt
   // into (see cli/intent-registry-access.ts). The user's
-  // `config.restorers.disabled[]` fully overrides this default when present,
+  // `config.harnesses.disabled[]` fully overrides this default when present,
   // so `jinn intents enable <kind>` persists the opt-in by writing to that
   // list in ~/.jinn-client/config.json.
-  //
-  // wrapWith: defaults to 'claude-code-learner' so the learning envelope
-  // wraps every restoration kind out of the box (jinn-mono-0k2). Operators
-  // benchmarking or running raw specialist behaviour set
-  // `restorers.wrapWith: null` (or omit, when no other restorers config
-  // exists) to dispatch directly to specialists.
-  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_KIND, DEFAULT_WRAP_WITH } = await import(
+  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_SOLVER_TYPE, DEFAULT_HARNESS } = await import(
     './cli/intent-registry-access.js'
   );
-  const implRegistry = new RestorerImplRegistry({
-    byKind: { ...DEFAULT_BY_KIND },
-    default: 'legacy-claude',
-    disabled: [...DEFAULT_DISABLED_IMPLS],
-    wrapWith: DEFAULT_WRAP_WITH,
-    ...(config.restorers ?? {}),
+  const implRegistry = new HarnessRegistry({
+    bySolverType: {
+      ...DEFAULT_BY_SOLVER_TYPE,
+      ...(config.harnesses?.bySolverType ?? {}),
+    },
+    default: config.harnesses?.default ?? DEFAULT_HARNESS,
+    disabled: config.harnesses?.disabled ?? [...DEFAULT_DISABLED_IMPLS],
   });
 
-  // Load operator-supplied external restorer impls (Path 2 plug-in surface).
-  // Each entry in `config.restorers.externalImpls` is verified against
+  // Load operator-supplied external harness impls (Path 2 plug-in surface).
+  // Each entry in `config.harnesses.externalImpls` is verified against
   // `config.trustedImplSigners` before its factory is invoked. Failed loads
   // are logged + skipped — they don't bring down the daemon.
-  const externalImpls: RestorerImpl[] = [];
+  const externalImpls: Harness[] = [];
   const trustedSigners = config.trustedImplSigners ?? [];
-  const externalEntries = config.restorers?.externalImpls ?? [];
+  const externalEntries = config.harnesses?.externalImpls ?? [];
   if (externalEntries.length > 0) {
     for (const entry of externalEntries) {
       const result = await loadExternalImpl({
@@ -995,39 +990,19 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     }
   }
 
-  // ── Path 1 plug-ins (claude-code-learner slot registry) ──────────────────────
-  // Load operator-installed Path 1 plug-ins from `config.learnerPlugIns[]`,
-  // assemble the in-memory slot registry, and serialise it for hand-off to
-  // the learner shim (which forwards via env to the spawned harness).
-  // See spec/2026-04-30-plug-in-surface.md §4.
-  let slotRegistryJson: string | undefined;
-  const learnerPlugIns = config.learnerPlugIns ?? [];
-  if (learnerPlugIns.length > 0) {
-    const { loadPlugIns, serialiseRegistry } = await import(
-      './restorer/plug-ins/index.js'
-    );
-    // Read the bundled claude-code-learner version from its plugin.json.
-    // main.ts is at client/src/main.ts (src) or client/dist/main.js (compiled);
-    // probe both relative locations so the same code works in both contexts.
-    const __mainDir = dirname(fileURLToPath(import.meta.url));
-    const pluginJsonSrc = join(__mainDir, '../plugins/claude-code-learner/.claude-plugin/plugin.json');
-    const pluginJsonDist = join(__mainDir, '../../plugins/claude-code-learner/.claude-plugin/plugin.json');
-    const pluginJsonPath = existsSync(pluginJsonSrc) ? pluginJsonSrc : pluginJsonDist;
-    const learnerVersion = (
-      JSON.parse(readFileSync(pluginJsonPath, 'utf8')) as { version: string }
-    ).version;
-    const result = await loadPlugIns({
-      entries: learnerPlugIns,
-      learnerVersion,
-    });
-    for (const w of result.warnings) console.warn(`[plug-ins] ${w}`);
-    for (const e of result.errors)
-      console.error(`[plug-ins] ${e.plugInName}: ${e.reason}`);
-    slotRegistryJson = JSON.stringify(
-      serialiseRegistry(result.registry, learnerVersion),
-    );
-    console.log(
-      `[main] Loaded ${learnerPlugIns.length - result.errors.length}/${learnerPlugIns.length} Path 1 plug-in(s)`,
+  const solverPluginRoots: string[] = [];
+  try {
+    const { loadSolverPlugins } = await import('./plugins/index.js');
+    const solverPluginRegistry = await loadSolverPlugins(config.solverPlugins ?? []);
+    for (const plugin of solverPluginRegistry.list()) {
+      solverPluginRoots.push(plugin.root);
+      console.log(
+        `[main] Loaded SolverPlugin: ${plugin.name}@${plugin.version} solverType=${plugin.solverType}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[main] SolverPlugin loading failed: ${err instanceof Error ? err.message : err}`,
     );
   }
 
@@ -1040,7 +1015,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
         }
       : undefined;
 
-  for (const impl of buildRestorerImpls({
+  for (const impl of buildHarnesses({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
     claudePath: config.claudePath,
@@ -1053,14 +1028,14 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
     externalImpls,
-    disabledNames: config.restorers?.disabled,
-    slotRegistryJson,
+    disabledNames: config.harnesses?.disabled,
+    solverPluginRoots,
     corpusEnv,
   })) {
     implRegistry.register(impl);
   }
 
-  console.log(`[main] RestorerImplRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
+  console.log(`[main] HarnessRegistry: ${implRegistry.list().map(i => i.name).join(', ')}`);
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
@@ -1165,14 +1140,14 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
   //
   // After the evaluator's claimDelivery succeeds, the engine fires
-  // `ReputationRegistry.giveFeedback(restorerAgentId, …)` so the restorer's
+  // `ReputationRegistry.giveFeedback(harnessAgentId, …)` so the harness's
   // agent NFT accrues a rating (DR §4.3). This requires:
   //
   //   1. A `ReputationRegistryClient` for the active chain. We use the
   //      canonical 0x8004… deployment; writes route through the operator's
   //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
   //      identity.
-  //   2. An agentId resolver — looks up the restorer's agentId from the
+  //   2. An agentId resolver — looks up the harness's agentId from the
   //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
   //      is unconfigured the resolver returns null cleanly and the hook
   //      becomes a no-op (defensive: feedback is non-fatal).
@@ -1180,7 +1155,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   // Skipped when the operator hasn't minted an agent NFT yet (matches the
   // IdentityPublisher gating above).
   let reputationFeedback:
-    | NonNullable<import('./restorer/engine/engine.js').RestorationEngineOptions['reputationFeedback']>
+    | NonNullable<import('./harnesses/engine/engine.js').RestorationEngineOptions['reputationFeedback']>
     | undefined;
   if (agentId) {
     const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
@@ -1241,8 +1216,8 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   }
   const intentSources = [
     new StaticConfiguredIntentSource(config.desiredStates),
-    ...autoIntentGenerators.map(({ kind, generator }) =>
-      new GeneratedIntentSource(`generated:${kind}`, generator)),
+    ...autoIntentGenerators.map(({ solverType, generator }) =>
+      new GeneratedIntentSource(`generated:${solverType}`, generator)),
   ];
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────

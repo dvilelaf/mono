@@ -5,7 +5,7 @@ import { computeGenesisHash, computePrevSpanHash } from '../../src/trajectory/ha
 describe('TrajectoryCollector', () => {
   let c: TrajectoryCollector;
   beforeEach(() => {
-    c = new TrajectoryCollector({ intentCid: 'bafy-intent', runId: 'run-1' });
+    c = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-1' });
   });
 
   it('starts with empty spans and zero redactions', () => {

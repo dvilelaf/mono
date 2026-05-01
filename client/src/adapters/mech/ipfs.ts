@@ -1,19 +1,20 @@
 import type { Hex } from 'viem';
-import type { RestorationJob, RestorationResult } from '../../types/index.js';
+import type { Task, TaskResult } from '../../types/index.js';
 import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
-import { canonicalJson } from '../../restorer/engine/canonical-json.js';
+import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 
-export interface RestorationJobPayload {
+export interface TaskPayload {
   desiredStateId: string;
   description: string;
   context?: Record<string, unknown>;
-  type?: 'restoration' | 'evaluation';
+  role?: 'restoration' | 'evaluation';
   attemptId?: string;
   attemptNumber?: number;
   restorationRequestId?: string;
-  // portfolio.v0 additions — optional on both read and write for backward compat
-  spec?: { kind: string } & Record<string, unknown>;
+  solverType?: string;
+  // typed solver payload — optional on both read and write for backward compat
+  spec?: Record<string, unknown>;
   window?: { startTs: number; endTs: number };
   eligibility?: Record<string, unknown>;
 }
@@ -24,12 +25,13 @@ export interface RestorationResultPayload {
   artifacts?: string[];
 }
 
-export function buildRestorationJobPayload(state: RestorationJob): RestorationJobPayload {
+export function buildTaskPayload(state: Task): TaskPayload {
   return {
     desiredStateId: state.id,
     description: state.description,
     context: state.context,
-    type: state.type,
+    solverType: state.solverType,
+    role: state.role,
     attemptId: state.attemptId,
     attemptNumber: state.attemptNumber,
     restorationRequestId: state.restorationRequestId,
@@ -39,8 +41,8 @@ export function buildRestorationJobPayload(state: RestorationJob): RestorationJo
   };
 }
 
-export function parseRestorationJobFromPayload(payload: Record<string, unknown>): RestorationJob {
-  const spec = payload.spec as RestorationJob['spec'] | undefined;
+export function parseTaskFromPayload(payload: Record<string, unknown>): Task {
+  const spec = payload.spec as Task['spec'] | undefined;
   const rawWindow = payload.window as { startTs?: unknown; endTs?: unknown } | undefined;
   const window =
     rawWindow && typeof rawWindow.startTs === 'number' && typeof rawWindow.endTs === 'number'
@@ -52,7 +54,8 @@ export function parseRestorationJobFromPayload(payload: Record<string, unknown>)
     id: (payload.desiredStateId as string) ?? '',
     description: (payload.description as string) ?? '',
     context: payload.context as Record<string, unknown> | undefined,
-    type: payload.type as 'restoration' | 'evaluation' | undefined,
+    solverType: (payload.solverType ?? (spec as { kind?: string } | undefined)?.kind) as string | undefined,
+    role: (payload.role ?? payload.type) as 'restoration' | 'evaluation' | undefined,
     attemptId: payload.attemptId as string | undefined,
     attemptNumber: payload.attemptNumber as number | undefined,
     restorationRequestId: payload.restorationRequestId as string | undefined,
@@ -62,7 +65,7 @@ export function parseRestorationJobFromPayload(payload: Record<string, unknown>)
   };
 }
 
-export function buildResultPayload(requestId: string, result: RestorationResult): RestorationResultPayload {
+export function buildResultPayload(requestId: string, result: TaskResult): RestorationResultPayload {
   return {
     requestId,
     data: result.data,

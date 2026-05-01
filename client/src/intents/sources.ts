@@ -1,7 +1,7 @@
-import type { RestorationJob } from '../types/desired-state.js';
+import type { Task } from '../types/desired-state.js';
 
-/** Returns a freshly-built RestorationJob for this tick, or null to skip. */
-export type IntentGenerator = () => Promise<RestorationJob | null>;
+/** Returns a freshly-built Task for this tick, or null to skip. */
+export type IntentGenerator = () => Promise<Task | null>;
 
 export type IntentPostingPolicy =
   | { kind: 'once_per_safe' }
@@ -9,7 +9,7 @@ export type IntentPostingPolicy =
   | { kind: 'interval'; intervalMs: number; scopeKey?: string };
 
 export interface IntentCandidate {
-  restorationJob: RestorationJob;
+  task: Task;
   sourceKey: string;
   postingPolicy: IntentPostingPolicy;
   /**
@@ -18,9 +18,9 @@ export interface IntentCandidate {
    * uses it to register the intent on the ERC-8004 Identity Registry after a
    * successful on-chain post (best-effort, Plan E).
    */
-  intentCid?: string;
+  taskCid?: string;
   sourceMeta?: {
-    kind?: string;
+    solverType?: string;
     bucketKey?: string;
     note?: string;
   };
@@ -34,14 +34,14 @@ export interface IntentSource {
 export class StaticConfiguredIntentSource implements IntentSource {
   readonly sourceKey = 'configured';
 
-  constructor(private readonly desiredStates: RestorationJob[]) {}
+  constructor(private readonly desiredStates: Task[]) {}
 
   async collect(_now: Date): Promise<IntentCandidate[]> {
-    return this.desiredStates.map((restorationJob) => ({
-      restorationJob,
-      sourceKey: `${this.sourceKey}:${restorationJob.id}`,
+    return this.desiredStates.map((task) => ({
+      task,
+      sourceKey: `${this.sourceKey}:${task.id}`,
       postingPolicy: { kind: 'once_per_safe' },
-      sourceMeta: { kind: restorationJob.spec?.kind, note: 'configured' },
+      sourceMeta: { solverType: task.solverType, note: 'configured' },
     }));
   }
 }
@@ -53,17 +53,17 @@ export class GeneratedIntentSource implements IntentSource {
   ) {}
 
   async collect(_now: Date): Promise<IntentCandidate[]> {
-    const restorationJob = await this.generator();
-    if (!restorationJob) return [];
-    const bucketKey = restorationJob.window
-      ? `${restorationJob.window.startTs}:${restorationJob.window.endTs}`
-      : restorationJob.id;
+    const task = await this.generator();
+    if (!task) return [];
+    const bucketKey = task.window
+      ? `${task.window.startTs}:${task.window.endTs}`
+      : task.id;
     return [{
-      restorationJob,
+      task,
       sourceKey: this.sourceKey,
       postingPolicy: { kind: 'once_per_bucket', bucketKey },
       sourceMeta: {
-        kind: restorationJob.spec?.kind,
+        solverType: task.solverType,
         bucketKey,
         note: 'generated',
       },

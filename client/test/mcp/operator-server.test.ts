@@ -266,31 +266,31 @@ describe('jinn_intents_list / status / enable / disable tools', () => {
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_status requires kind arg', async () => {
+  it('jinn_intents_status requires solverType arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
     const result = await server._registeredTools.jinn_intents_status.handler(
-      { kind: 'portfolio.v0' },
+      { solverType: 'portfolio.v0' },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_enable requires kind arg', async () => {
+  it('jinn_intents_enable requires solverType arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
     const result = await server._registeredTools.jinn_intents_enable.handler(
-      { kind: 'portfolio.v0', extra_args: undefined },
+      { solverType: 'portfolio.v0', extra_args: undefined },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_disable requires kind arg', async () => {
+  it('jinn_intents_disable requires solverType arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
     const result = await server._registeredTools.jinn_intents_disable.handler(
-      { kind: 'portfolio.v0' },
+      { solverType: 'portfolio.v0' },
       {},
     );
     expect(result).toHaveProperty('content');

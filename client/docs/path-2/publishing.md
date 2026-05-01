@@ -67,7 +67,7 @@ Start from the scaffold:
   "name": "@yourname/your-package",
   "version": "0.1.0",
   "description": "...",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": { "cid": "...", "hash": "sha256:..." },
   "capabilities": {
@@ -78,13 +78,13 @@ Start from the scaffold:
 }
 ```
 
-Fill in `package.cid`, `package.hash`, your `supportedKinds`, your `capabilities` allow-list, and `signature.publicKey` (the base64 from step 1). Leave `signature.sig` empty for the sign step.
+Fill in `package.cid`, `package.hash`, your `supportedSolverTypes`, your `capabilities` allow-list, and `signature.publicKey` (the base64 from step 1). Leave `signature.sig` empty for the sign step.
 
 The capability allow-list is a **ceiling**: the daemon enforces it at runtime. Declare the minimum you need; broader allow-lists earn operator suspicion and slower install decisions.
 
 ## 4. Sign the manifest
 
-The signing algorithm matches `client/src/restorer/manifest/` (the Phase A.2 verifier):
+The signing algorithm matches `client/src/harnesses/manifest/` (the Phase A.2 verifier):
 
 1. Strip the `signature` field from the manifest.
 2. Canonicalise: sorted keys, no whitespace, UTF-8 bytes.
@@ -93,7 +93,7 @@ The signing algorithm matches `client/src/restorer/manifest/` (the Phase A.2 ver
 
 ```ts
 import { sign } from '@noble/ed25519';
-import { canonicalize } from './canonical.js';   // from packages/restorer-sdk
+import { canonicalize } from './canonical.js';   // from packages/harness-sdk
 
 const manifest = JSON.parse(readFileSync('jinn.manifest.json', 'utf8'));
 const { signature, ...payload } = manifest;

@@ -11,9 +11,9 @@ import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import type { RestorationJob } from '../../types/desired-state.js';
+import type { Task } from '../../types/desired-state.js';
 import type { IntentV1 } from '../../types/intent.js';
-import { SPEC_KINDS, unknownKindMessage } from '../../intents/kinds/index.js';
+import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../intents/kinds/index.js';
 import { signIntentV1 } from '../../intents/signing.js';
 import { IntentPostingService } from '../../intents/posting-service.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../venues/chainlink/client.js';
@@ -81,7 +81,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
   // ── spec-file loading ───────────────────────────────────────────────────────
   const specFilePath = parsed.values['spec-file'] as string | undefined;
-  let specOverlay: { window?: any; spec?: any; eligibility?: any } | undefined;
+  let specOverlay: { solverType?: string; window?: any; spec?: any; eligibility?: any } | undefined;
   if (specFilePath) {
     let raw: Record<string, unknown>;
     try {
@@ -98,26 +98,40 @@ async function run(ctx: CommandContext): Promise<void> {
       );
       return;
     }
-    const kind = (raw['spec'] as { kind?: unknown } | undefined)?.kind;
-    const kindStr = typeof kind === 'string' ? kind : undefined;
-    const specKind = kindStr !== undefined ? SPEC_KINDS[kindStr] : undefined;
-    if (!specKind) {
+    const rawSolverType = raw['solverType'];
+    const legacyKind = (raw['spec'] as { kind?: unknown } | undefined)?.kind;
+    const solverTypeStr =
+      typeof rawSolverType === 'string'
+        ? rawSolverType
+        : typeof legacyKind === 'string'
+          ? legacyKind
+          : undefined;
+    const solverType = solverTypeStr !== undefined ? SOLVER_TYPES[solverTypeStr] : undefined;
+    if (!solverType) {
       emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: unknownKindMessage(kindStr),
+          message: unknownSolverTypeMessage(solverTypeStr),
           exampleCli:
             'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run',
-          details: { field: 'spec-file', expected: 'spec.kind must be a registered intent kind' },
+          details: { field: 'spec-file', expected: 'solverType must be a registered SolverType' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
       return;
     }
 
-    const stub: Record<string, unknown> = { id: id!, description: description!, ...raw };
+    const rawSpec = (raw['spec'] && typeof raw['spec'] === 'object' && !Array.isArray(raw['spec']))
+      ? (raw['spec'] as Record<string, unknown>)
+      : {};
+    const parserInput: Record<string, unknown> = {
+      id: id!,
+      description: description!,
+      ...raw,
+      spec: { kind: solverTypeStr, ...rawSpec },
+    };
     try {
-      const parsedOverlay = await specKind.parseSpec(stub, {
+      const parsedOverlay = await solverType.parseSpec(parserInput, {
         readCurrent: async ({ feed, venue }) => {
           const chain = venue === 'chainlink-base' ? base : baseSepolia;
           const rpcUrl = ctx.env[venue === 'chainlink-base' ? 'BASE_RPC_URL' : 'BASE_SEPOLIA_RPC_URL']
@@ -128,21 +142,24 @@ async function run(ctx: CommandContext): Promise<void> {
         },
       });
       specOverlay = {
+        solverType: solverTypeStr,
         window: parsedOverlay.window,
-        spec: parsedOverlay.spec,
+        spec: Object.fromEntries(
+          Object.entries((parsedOverlay.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+        ),
         eligibility: parsedOverlay.eligibility,
       };
     } catch (err) {
       const exampleCli =
-        kindStr === 'prediction.apy.v0'
+        solverTypeStr === 'prediction.apy.v0'
           ? 'jinn submit-intent --id my-apy-1 --description "..." --spec-file fixtures/prediction-apy-v0-intent.example.json --dry-run'
-          : kindStr === 'portfolio.v0'
+          : solverTypeStr === 'portfolio.v0'
             ? 'jinn submit-intent --id pf-1 --description "..." --spec-file <portfolio-fixture.json> --dry-run'
             : 'jinn submit-intent --id my-1 --description "..." --spec-file fixtures/prediction-v0-intent.example.json --dry-run';
       emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: `Invalid ${kindStr} intent: ${err instanceof Error ? err.message : String(err)}`,
+          message: `Invalid ${solverTypeStr} intent: ${err instanceof Error ? err.message : String(err)}`,
           exampleCli,
           details: { field: 'spec-file' },
         },
@@ -173,7 +190,16 @@ async function run(ctx: CommandContext): Promise<void> {
     emitDryRun(ctx, {
       verb: 'submit-intent',
       description: `Would post intent '${id}' from ${creatorMultisig}`,
-      plan: [{ id, description, creatorMultisig, asset: 'native', txCount: 1, ...(specOverlay ? { spec: specOverlay.spec } : {}) }],
+      plan: [
+        {
+          id,
+          description,
+          creatorMultisig,
+          asset: 'native',
+          txCount: 1,
+          ...(specOverlay ? { solverType: specOverlay.solverType, spec: specOverlay.spec } : {}),
+        },
+      ],
     });
     return;
   }
@@ -191,11 +217,11 @@ async function run(ctx: CommandContext): Promise<void> {
   const postingService = new IntentPostingService(adapter, jinnStore);
   try {
     // Build and sign a SignedIntentV1 so the IPFS-uploaded document is the
-    // canonical intent envelope rather than a loose RestorationJobPayload.
+    // canonical intent envelope rather than a loose TaskPayload.
     const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
     const agentEoaAddress = privateKeyToAccount(agentEoaPrivateKey).address;
     const overlay = specOverlay ?? {};
-    const intentKind = (overlay.spec as { kind?: string } | undefined)?.kind ?? 'restoration.v0';
+    const intentKind = overlay.solverType ?? 'restoration.v0';
     const intentWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
     const intent: IntentV1 = {
       schemaVersion: 'intent.v1',
@@ -203,7 +229,7 @@ async function run(ctx: CommandContext): Promise<void> {
       kind: intentKind,
       description,
       window: intentWindow,
-      spec: (overlay.spec as IntentV1['spec']) ?? { kind: intentKind },
+      spec: { kind: intentKind, ...((overlay.spec as Record<string, unknown> | undefined) ?? {}) } as IntentV1['spec'],
       eligibility: overlay.eligibility ?? {},
       creator: {
         safeAddress: getAddress(safe),
@@ -212,18 +238,19 @@ async function run(ctx: CommandContext): Promise<void> {
       createdAt: Date.now(),
     };
     const signedIntent = await signIntentV1(intent, agentEoaPrivateKey);
-    const restorationJob: RestorationJob = {
+    const task: Task = {
       id,
       description,
       ...(specOverlay ?? {}),
+      solverType: intentKind,
       intent: signedIntent,
     };
     const postResult = await postingService.postCandidate(
       {
-        restorationJob,
+        task,
         sourceKey: `manual:${id}`,
         postingPolicy: { kind: 'once_per_safe' },
-        sourceMeta: { kind: restorationJob.spec?.kind, note: 'manual' },
+        sourceMeta: { solverType: task.solverType, note: 'manual' },
       },
       {
         creatorSafeAddress: safe,

@@ -417,33 +417,33 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
 
   server.tool(
     'jinn_intents_list',
-    'List all registered intent kinds with their enabled/ready state. Read-only. Fast (<2s).',
+    'List all registered SolverTypes with their enabled/ready state. Read-only. Fast (<2s).',
     {},
     async () => runToolCommand(intentsCommand, ['list', '--json'], process.env),
   );
 
   server.tool(
     'jinn_intents_status',
-    'Detailed status for one intent kind: impl, enabled, ready, nextStep. Read-only. Fast (<2s).',
+    'Detailed status for one SolverType: impl, enabled, ready, nextStep. Read-only. Fast (<2s).',
     {
-      kind: z.string().describe('Intent kind identifier, e.g. portfolio.v0 or prediction.v0'),
+      solverType: z.string().describe('SolverType identifier, e.g. portfolio.v0 or prediction.v0'),
     },
-    async ({ kind }) => runToolCommand(intentsCommand, ['status', kind, '--json'], process.env),
+    async ({ solverType }) => runToolCommand(intentsCommand, ['status', solverType, '--json'], process.env),
   );
 
   server.tool(
     'jinn_intents_enable',
     [
-      'MUTATING: Opt in to restoring a specific intent kind. Idempotent.',
+      'MUTATING: Opt in to restoring a specific SolverType. Idempotent.',
       'Calls impl.onEnable which may write config. Fast unless impl requires external action.',
       'Pass extra_args as space-separated "--key=value" pairs for impl-specific options (e.g. "--hl-master=0x...").',
     ].join(' '),
     {
-      kind: z.string().describe('Intent kind to enable, e.g. portfolio.v0'),
+      solverType: z.string().describe('SolverType to enable, e.g. portfolio.v0'),
       extra_args: z.string().optional().describe('Extra --key=value pairs forwarded to the impl (space-separated)'),
     },
-    async ({ kind, extra_args }) => {
-      const argv = ['enable', kind, '--json'];
+    async ({ solverType, extra_args }) => {
+      const argv = ['enable', solverType, '--json'];
       if (extra_args) argv.push(...extra_args.split(' ').filter(Boolean));
       return runToolCommand(intentsCommand, argv, process.env);
     },
@@ -451,11 +451,11 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
 
   server.tool(
     'jinn_intents_disable',
-    'MUTATING: Opt out of restoring a specific intent kind. Writes config. Idempotent. Fast (<1s).',
+    'MUTATING: Opt out of restoring a specific SolverType. Writes config. Idempotent. Fast (<1s).',
     {
-      kind: z.string().describe('Intent kind to disable'),
+      solverType: z.string().describe('SolverType to disable'),
     },
-    async ({ kind }) => runToolCommand(intentsCommand, ['disable', kind, '--json'], process.env),
+    async ({ solverType }) => runToolCommand(intentsCommand, ['disable', solverType, '--json'], process.env),
   );
 
   // ━━ Write (mutating) tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

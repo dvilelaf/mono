@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import createRestorer from '../src/index.js';
+import createHarness from '../src/index.js';
 import type {
-  ExternalRestorerEnv,
-  RestorationContext,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+  HarnessContext,
+} from '@jinn-network/harness-sdk';
 
-const env: ExternalRestorerEnv = {
+const env: ExternalHarnessEnv = {
   implName: '@jinn-examples/alternative-harness',
   implVersion: '0.1.0',
   network: 'base-sepolia',
@@ -15,21 +15,27 @@ const env: ExternalRestorerEnv = {
   stub: false,
 };
 
-function makeCtx(intentId: string): RestorationContext {
+function makeCtx(taskId: string): HarnessContext {
   return {
-    intent: { id: intentId, spec: { kind: 'prediction.v0' } },
-    intentCid: undefined,
+    task: {
+      id: taskId,
+      description: taskId,
+      solverType: 'prediction.v0',
+      spec: {},
+    },
+    taskCid: undefined,
     implStateDir: '/tmp/alt-harness',
     workingDir: '/tmp/alt-harness-work',
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 60_000,
+    trajectory: { addSpan: () => ({}) },
   };
 }
 
 describe('@jinn-examples/alternative-harness', () => {
   it('runs all seven phases against the mock harness', async () => {
-    const impl = createRestorer(env);
+    const impl = createHarness(env);
     const out = await impl.run(makeCtx('test-1'));
     expect(out.venueRef.name).toBe('mock-harness');
     expect(out.gating.executeReturnReason).toBe('all-steps-completed');
@@ -37,13 +43,13 @@ describe('@jinn-examples/alternative-harness', () => {
   });
 
   it('threads the strategy timingPosture into gating', async () => {
-    const impl = createRestorer(env);
+    const impl = createHarness(env);
     const out = await impl.run(makeCtx('test-2'));
     expect(out.gating.timingPosture).toBe('early-return');
   });
 
   it('exposes plan + execute counts in informational', async () => {
-    const impl = createRestorer(env);
+    const impl = createHarness(env);
     const out = await impl.run(makeCtx('test-3'));
     expect(out.informational?.planSteps).toBe(1);
     expect(out.informational?.stepsCompleted).toBe(1);
@@ -51,25 +57,25 @@ describe('@jinn-examples/alternative-harness', () => {
   });
 
   it('declines evaluation intents', () => {
-    const impl = createRestorer(env);
+    const impl = createHarness(env);
     expect(
-      impl.supports({ kind: 'prediction.v0', type: 'evaluation' }),
+      impl.supports({ solverType: 'prediction.v0', role: 'evaluation' }),
     ).toBe(false);
     expect(
-      impl.supports({ kind: 'prediction.v0', type: 'restoration' }),
+      impl.supports({ solverType: 'prediction.v0', role: 'restoration' }),
     ).toBe(true);
-    expect(impl.supports({ kind: 'other.v0' })).toBe(false);
+    expect(impl.supports({ solverType: '' })).toBe(false);
   });
 
   it('reports stub readiness when env.stub=true', async () => {
-    const impl = createRestorer({ ...env, stub: true });
+    const impl = createHarness({ ...env, stub: true });
     const ready = await impl.isReady?.();
     expect(ready?.ready).toBe(false);
     expect(ready?.reason).toBe('stub mode');
   });
 
   it('honours a custom harnessFactory', async () => {
-    const impl = createRestorer(env, {
+    const impl = createHarness(env, {
       harnessFactory: () => ({
         name: 'custom-harness',
         async promptForJson<T>(): Promise<T> {

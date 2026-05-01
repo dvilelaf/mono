@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import createEvaluator from '../src/index.js';
 import type {
-  ExternalRestorerEnv,
-  RestorationContext,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+  HarnessContext,
+} from '@jinn-network/harness-sdk';
 
-const env: ExternalRestorerEnv = {
+const env: ExternalHarnessEnv = {
   implName: '@jinn-examples/prediction-evaluator',
   implVersion: '0.1.0',
   network: 'base-sepolia',
@@ -16,40 +16,42 @@ const env: ExternalRestorerEnv = {
 };
 
 function makeCtx(
-  intentId: string,
+  taskId: string,
   forecastP: number | undefined,
-): RestorationContext {
+): HarnessContext {
   return {
-    intent: {
-      id: intentId,
-      type: 'evaluation',
+    task: {
+      id: taskId,
+      description: taskId,
+      solverType: 'prediction.v0',
+      role: 'evaluation',
       spec: {
-        kind: 'prediction.v0',
         restorationUnderEvaluation:
           forecastP === undefined
             ? undefined
             : { forecastProbability: forecastP },
       },
     },
-    intentCid: undefined,
+    taskCid: undefined,
     implStateDir: '/tmp/eval',
     workingDir: '/tmp/eval-work',
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 60_000,
+    trajectory: { addSpan: () => ({}) },
   };
 }
 
 describe('@jinn-examples/prediction-evaluator', () => {
   it('supports prediction.v0 only as evaluation', () => {
     const impl = createEvaluator(env);
-    expect(impl.supports({ kind: 'prediction.v0', type: 'evaluation' })).toBe(
+    expect(impl.supports({ solverType: 'prediction.v0', role: 'evaluation' })).toBe(
       true,
     );
-    expect(impl.supports({ kind: 'prediction.v0', type: 'restoration' })).toBe(
+    expect(impl.supports({ solverType: 'prediction.v0', role: 'restoration' })).toBe(
       false,
     );
-    expect(impl.supports({ kind: 'other.v0', type: 'evaluation' })).toBe(false);
+    expect(impl.supports({ solverType: 'other.v0', role: 'evaluation' })).toBe(false);
   });
 
   it('returns a numeric brier.v1 score for any forecast probability', async () => {

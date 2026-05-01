@@ -12,12 +12,12 @@
  */
 
 import { keccak256, toBytes, type Hex } from 'viem';
-import { canonicalJson } from '../restorer/engine/canonical-json.js';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import type { Span } from './schema.js';
 
-/** Genesis value for the chain — keccak256(JCS({runStart: intentCid})). */
-export function computeGenesisHash(intentCid: string): Hex {
-  return keccak256(toBytes(canonicalJson({ runStart: intentCid })));
+/** Genesis value for the chain — keccak256(JCS({runStart: taskCid})). */
+export function computeGenesisHash(taskCid: string): Hex {
+  return keccak256(toBytes(canonicalJson({ runStart: taskCid })));
 }
 
 /** Hash of a finalized span, to be set as jinn.prevSpanHash on the next one. */

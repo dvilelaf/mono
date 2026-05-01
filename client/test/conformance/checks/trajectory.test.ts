@@ -10,17 +10,17 @@ import type { ConformanceContext } from '../../../src/conformance/types.js';
 
 // Helpers to build a minimal context
 function trajCtx(
-  intentCid: string,
+  taskCid: string,
   trajectoryOverride?: unknown,
   envelopeOverride?: unknown,
 ): Pick<ConformanceContext, 'trajectory' | 'envelope' | 'envelopeCid' | 'options'> {
   const traj =
     trajectoryOverride === undefined
-      ? buildGoodTrajectoryFixture(intentCid)
+      ? buildGoodTrajectoryFixture(taskCid)
       : trajectoryOverride;
   const env = envelopeOverride ?? {
     trajectory: { cid: 'bafy-traj', sha256: 'a'.repeat(64) },
-    intent: { cid: intentCid },
+    task: { cid: taskCid },
   };
   return {
     trajectory: traj as unknown,
@@ -87,7 +87,7 @@ describe('checkHashChainIntegrity', () => {
   it('skips when trajectory is absent', () => {
     const ctx: ConformanceContext = {
       trajectory: null as unknown,
-      envelope: { trajectory: null, intent: { cid: 'bafy-intent' } } as any,
+      envelope: { trajectory: null, task: { cid: 'bafy-intent' } } as any,
       envelopeCid: 'bafy-test',
       options: {},
     };
@@ -106,7 +106,7 @@ describe('checkHashChainIntegrity', () => {
     expect(result.detail).toMatch(/span\[2\]/);
   });
 
-  it("fails when first span's prevSpanHash doesn't match genesis(envelope.intent.cid)", () => {
+  it("fails when first span's prevSpanHash doesn't match genesis(envelope.task.cid)", () => {
     const traj = buildGoodTrajectoryFixture('bafy-intent');
     traj.spans[0].attributes['jinn.prevSpanHash'] = '0x' + 'ab'.repeat(32);
     const ctx = trajCtx('bafy-intent', traj);
@@ -116,7 +116,7 @@ describe('checkHashChainIntegrity', () => {
     expect(result.detail).toMatch(/genesis|span\[0\]/);
   });
 
-  it('fails when envelope.intent.cid is missing', () => {
+  it('fails when envelope.task.cid is missing', () => {
     const traj = buildGoodTrajectoryFixture('bafy-intent');
     const ctx: ConformanceContext = {
       trajectory: traj as unknown,
@@ -126,7 +126,7 @@ describe('checkHashChainIntegrity', () => {
     };
     const result = checkHashChainIntegrity(ctx);
     expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/intent\.cid/);
+    expect(result.detail).toMatch(/task\.cid/);
   });
 });
 

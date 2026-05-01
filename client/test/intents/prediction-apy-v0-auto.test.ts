@@ -11,12 +11,13 @@ describe('makePredictionApyV0Generator', () => {
     vi.useRealTimers();
   });
 
-  it('produces a valid prediction.apy.v0 RestorationJob', async () => {
+  it('produces a valid prediction.apy.v0 Task', async () => {
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z'));
     const gen = makePredictionApyV0Generator({});
     const state = await gen();
     expect(state).not.toBeNull();
-    expect(state!.spec?.kind).toBe('prediction.apy.v0');
+    expect(state!.solverType).toBe('prediction.apy.v0');
+    expect(state!.spec?.kind).toBeUndefined();
     expect(state!.window).toBeDefined();
     expect(state!.window!.endTs - state!.window!.startTs).toBe(600_000);
   });

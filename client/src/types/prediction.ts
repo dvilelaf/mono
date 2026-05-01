@@ -31,7 +31,6 @@ const RangeQuestionSchema = z.object({
 // ── Spec + eligibility + intent ────────────────────────────────────────────────
 
 export const PredictionV0SpecSchema = z.object({
-  kind: z.literal('prediction.v0'),
   oracle: z.object({
     venue: z.enum(['chainlink-base-sepolia', 'chainlink-base']),
     feed: HexStringSchema,
@@ -52,6 +51,7 @@ export const PredictionV0IntentSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
+    solverType: z.literal('prediction.v0').optional(),
     window: WindowSchema,
     spec: PredictionV0SpecSchema,
     eligibility: PredictionV0EligibilitySchema.default({}),

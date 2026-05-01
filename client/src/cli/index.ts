@@ -40,8 +40,8 @@ import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import conformanceCommand from './commands/conformance.js';
 import createCommand from './commands/create.js';
 import implsCommand from './commands/impls.js';
-import plugInsCommand from './commands/plug-ins.js';
 import uiCommand from './commands/ui.js';
+import pluginsCommand from './commands/plugins.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -71,8 +71,8 @@ const COMMANDS: CommandModule[] = [
   conformanceCommand,
   createCommand,
   implsCommand,
-  plugInsCommand,
   uiCommand,
+  pluginsCommand,
 ];
 
 /**

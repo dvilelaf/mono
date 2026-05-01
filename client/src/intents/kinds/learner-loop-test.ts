@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { SpecKind } from './spec-kind.js';
+import type { SolverTypeDefinition } from './solver-type.js';
 
 /**
- * Synthetic intent kind for verifying the claude-code-learner full cycle
+ * Synthetic SolverType for verifying the claude-code-learner full cycle
  * end-to-end. NO venue dependencies, NO real money. The intent describes
  * a trivial deterministic task: write a JSON output file with N named
  * fields each containing a fixed value.
@@ -30,8 +30,8 @@ const LearnerLoopTestIntentSchema = z.object({
   eligibility: z.unknown().optional(),
 });
 
-export const learnerLoopTest: SpecKind = {
-  kind: 'learner-loop-test',
+export const learnerLoopTest: SolverTypeDefinition = {
+  solverType: 'learner-loop-test',
   async parseSpec(raw) {
     const intent = LearnerLoopTestIntentSchema.parse(raw);
     return { window: intent.window, spec: intent.spec, eligibility: intent.eligibility };

@@ -1,11 +1,11 @@
 /**
- * jinn intents — operator entrypoint for opting in/out of specific intent kinds.
+ * jinn intents — operator entrypoint for opting in/out of specific SolverTypes.
  *
  * Four subverbs:
- *   list    — every known (kind → impl) pair with enable state + readiness
- *   status  — detailed envelope for one kind
+ *   list    — every known (solverType → impl) pair with enable state + readiness
+ *   status  — detailed envelope for one SolverType
  *   enable  — idempotent opt-in; dispatches to impl.onEnable
- *   disable — opt-out; removes impl from restorers.disabled in user config
+ *   disable — opt-out; removes impl from harnesses.disabled in user config
  *
  * JSON by default (agent-friendly). `--human` gives a readable table / prose.
  * Never blocks on TTY input — opt-in flows that need external operator action
@@ -18,30 +18,30 @@ import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
-import type { RestorerImpl, EnableResult, ReadyStatus, ImplIntentPeek } from '../../restorer/types.js';
+import type { Harness, EnableResult, ReadyStatus, ImplIntentPeek } from '../../harnesses/types.js';
 import {
   buildIntentsCliRegistry,
   isImplDisabled,
   resetImplForKindInConfig,
   resolveConfigPath,
-  resolveEffectiveByKind,
+  resolveEffectiveBySolverType,
   setImplForKindInConfig,
   setImplEnabledInConfig,
 } from '../intent-registry-access.js';
 
-// ── Kind/impl surface helpers ─────────────────────────────────────────────────
+// ── SolverType/impl surface helpers ───────────────────────────────────────────
 
 function implFor(
   kind: string,
   registry: ReturnType<typeof buildIntentsCliRegistry>,
-  byKind: Record<string, string>,
-): RestorerImpl | null {
-  const implName = byKind[kind];
+  bySolverType: Record<string, string>,
+): Harness | null {
+  const implName = bySolverType[kind];
   if (!implName) return null;
   return registry.list().find((i) => i.name === implName) ?? null;
 }
 
-async function readinessOrDefault(impl: RestorerImpl, spec?: ImplIntentPeek): Promise<ReadyStatus> {
+async function readinessOrDefault(impl: Harness, spec?: ImplIntentPeek): Promise<ReadyStatus> {
   if (!impl.isReady) return { ready: true };
   try {
     return await impl.isReady(spec);
@@ -55,7 +55,7 @@ async function readinessOrDefault(impl: RestorerImpl, spec?: ImplIntentPeek): Pr
 /**
  * Parse `--key=value` / `--flag` positional-free args into a string record.
  * Known CLI flags (`--json`, `--human`, `--config`) are stripped before
- * parsing, and the kind is captured as the first positional.
+ * parsing, and the SolverType is captured as the first positional.
  */
 function splitSubverbArgs(argv: string[]): { kind?: string; rawArgs: Record<string, string | undefined>; flags: { json: boolean; human: boolean; configPath?: string } } {
   const flags = { json: false, human: false, configPath: undefined as string | undefined };
@@ -93,7 +93,7 @@ function splitSubverbArgs(argv: string[]): { kind?: string; rawArgs: Record<stri
 // ── Subverbs ──────────────────────────────────────────────────────────────────
 
 interface KindRow {
-  kind: string;
+  solverType: string;
   impl: string;
   enabled: boolean;
   ready: boolean;
@@ -105,18 +105,18 @@ async function runList(ctx: CommandContext, rest: string[]): Promise<void> {
   const { flags } = splitSubverbArgs(rest);
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
-  const byKind = resolveEffectiveByKind(config);
+  const bySolverType = resolveEffectiveBySolverType(config);
 
   const rows: KindRow[] = [];
-  for (const kind of Object.keys(byKind)) {
-    const impl = implFor(kind, registry, byKind);
+  for (const kind of Object.keys(bySolverType)) {
+    const impl = implFor(kind, registry, bySolverType);
     if (!impl) continue;
     const enabled = !isImplDisabled(impl.name, config);
     const restorationCtx: ImplIntentPeek = { kind, type: 'restoration' };
     const readyStatus = await readinessOrDefault(impl, restorationCtx);
     const description = impl.enableMetadata?.(restorationCtx)?.description;
     rows.push({
-      kind,
+      solverType: kind,
       impl: impl.name,
       enabled,
       ready: readyStatus.ready,
@@ -144,13 +144,13 @@ async function runList(ctx: CommandContext, rest: string[]): Promise<void> {
 }
 
 function renderListHuman(rows: KindRow[]): string {
-  if (rows.length === 0) return 'No intent kinds registered.';
+  if (rows.length === 0) return 'No SolverTypes registered.';
   const lines: string[] = [];
-  const maxKindLen = Math.max(...rows.map((r) => r.kind.length));
-  lines.push(`${'kind'.padEnd(maxKindLen + 2)}${'enabled'.padEnd(10)}${'ready'.padEnd(8)}notes`);
+  const maxSolverTypeLen = Math.max(...rows.map((r) => r.solverType.length));
+  lines.push(`${'solverType'.padEnd(maxSolverTypeLen + 2)}${'enabled'.padEnd(10)}${'ready'.padEnd(8)}notes`);
   for (const r of rows) {
-    const note = r.ready ? (r.enabled ? '' : 'disabled — run `jinn intents enable <kind>` to opt in') : (r.reason ?? 'not ready');
-    lines.push(`${r.kind.padEnd(maxKindLen + 2)}${(r.enabled ? 'yes' : 'no').padEnd(10)}${(r.ready ? 'yes' : 'no').padEnd(8)}${note}`);
+    const note = r.ready ? (r.enabled ? '' : 'disabled — run `jinn intents enable <solverType>` to opt in') : (r.reason ?? 'not ready');
+    lines.push(`${r.solverType.padEnd(maxSolverTypeLen + 2)}${(r.enabled ? 'yes' : 'no').padEnd(10)}${(r.ready ? 'yes' : 'no').padEnd(8)}${note}`);
   }
   return lines.join('\n');
 }
@@ -158,15 +158,15 @@ function renderListHuman(rows: KindRow[]): string {
 async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, flags } = splitSubverbArgs(rest);
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const byKind = resolveEffectiveByKind(config);
-  const expectedKinds = Object.keys(byKind);
+  const bySolverType = resolveEffectiveBySolverType(config);
+  const expectedKinds = Object.keys(bySolverType);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn intents status requires a kind argument.',
+        message: 'jinn intents status requires a solverType argument.',
         exampleCli: 'jinn intents status portfolio.v0',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -174,14 +174,14 @@ async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const registry = buildIntentsCliRegistry(config);
-  const impl = implFor(kind, registry, byKind);
+  const impl = implFor(kind, registry, bySolverType);
   if (!impl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: `Unknown intent kind: ${kind}`,
+        message: `Unknown SolverType: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -198,7 +198,7 @@ async function runStatus(ctx: CommandContext, rest: string[]): Promise<void> {
       schemaVersion: 1 as const,
       generatedAt: new Date().toISOString(),
       verb: 'intents status',
-      kind,
+      solverType: kind,
       impl: impl.name,
       enabled,
       ready: readyStatus.ready,
@@ -221,15 +221,15 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, rawArgs, flags } = splitSubverbArgs(rest);
   const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const byKind = resolveEffectiveByKind(config);
-  const expectedKinds = Object.keys(byKind);
+  const bySolverType = resolveEffectiveBySolverType(config);
+  const expectedKinds = Object.keys(bySolverType);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn intents enable requires a kind argument.',
+        message: 'jinn intents enable requires a solverType argument.',
         exampleCli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -237,14 +237,14 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const registry = buildIntentsCliRegistry(config);
-  const currentImpl = implFor(kind, registry, byKind);
+  const currentImpl = implFor(kind, registry, bySolverType);
   if (!currentImpl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: `Unknown intent kind: ${kind}`,
+        message: `Unknown SolverType: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -258,18 +258,18 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
 
   if (requestedImplName && requestedImplName !== currentImpl.name) {
     const requested = registry.list().find((i) => i.name === requestedImplName) ?? null;
-    if (!requested || !requested.supports({ kind, type: 'restoration' })) {
+    if (!requested || !requested.supports({ solverType: kind, role: 'restoration' })) {
       emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: `Impl '${requestedImplName}' is not registered or does not support '${kind}'.`,
+          message: `Impl '${requestedImplName}' is not registered or does not support SolverType '${kind}'.`,
           exampleCli: `jinn intents enable ${kind}`,
           details: {
             field: 'impl',
             impl: requestedImplName,
             expected: registry
               .list()
-              .filter((candidate) => candidate.supports({ kind, type: 'restoration' }))
+              .filter((candidate) => candidate.supports({ solverType: kind, role: 'restoration' }))
               .map((candidate) => candidate.name)
               .join('|'),
           },
@@ -279,7 +279,7 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
       return;
     }
 
-    // Prepare the swap but do NOT persist `restorers.byKind` yet. We only
+    // Prepare the swap but do NOT persist `harnesses.bySolverType` yet. We only
     // commit the mapping after the new impl's `onEnable` completes without
     // throwing — otherwise a transient failure would leave the operator with
     // a rewritten config pointing at an impl they never successfully opted
@@ -313,7 +313,7 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
         exampleCli: `jinn intents status ${kind}`,
         details: {
           impl: impl.name,
-          kind,
+          solverType: kind,
           ...(swapPrepared ? { previousImpl, swapRolledBack: true } : {}),
         },
       },
@@ -323,21 +323,21 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   // onEnable succeeded (ready OR waiting_for_external_action). Commit the
-  // byKind swap now so that subsequent invocations (including the operator
+  // bySolverType swap now so that subsequent invocations (including the operator
   // following `nextInvocation` from a waiting result) keep using the new
   // impl without needing to re-pass --impl.
-  let byKindUpdated = false;
+  let bySolverTypeUpdated = false;
   if (swapPrepared) {
     try {
       setImplForKindInConfig(kind, impl.name, configPath);
-      byKindUpdated = true;
+      bySolverTypeUpdated = true;
     } catch (err) {
       emitEnvelope(
         {
           code: 'fatal',
           message: `Failed to persist impl swap to config: ${err instanceof Error ? err.message : String(err)}`,
           exampleCli: `jinn intents status ${kind}`,
-          details: { impl: impl.name, kind, previousImpl, swapRolledBack: true },
+          details: { impl: impl.name, solverType: kind, previousImpl, swapRolledBack: true },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -356,12 +356,12 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
         schemaVersion: 1 as const,
         generatedAt: new Date().toISOString(),
         verb: 'intents enable',
-        kind,
+        solverType: kind,
         impl: impl.name,
         status: 'ready',
-        configUpdated: wasDisabled || byKindUpdated,
+        configUpdated: wasDisabled || bySolverTypeUpdated,
         ...(previousImpl ? { previousImpl } : {}),
-        ...(byKindUpdated ? { byKindUpdated: true } : {}),
+        ...(bySolverTypeUpdated ? { bySolverTypeUpdated: true } : {}),
         ...(result.details ? { details: result.details } : {}),
       },
       (v) => JSON.stringify(v, null, 2),
@@ -377,16 +377,16 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   // Non-ready: emit the impl's result verbatim under the envelope. Include
-  // swap bookkeeping so agents following `nextInvocation` know the byKind
+  // swap bookkeeping so agents following `nextInvocation` know the bySolverType
   // mapping already changed.
   ctx.writer.write(JSON.stringify({
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     verb: 'intents enable',
-    kind,
+    solverType: kind,
     impl: impl.name,
     ...(previousImpl ? { previousImpl } : {}),
-    ...(byKindUpdated ? { byKindUpdated: true, configUpdated: true } : {}),
+    ...(bySolverTypeUpdated ? { bySolverTypeUpdated: true, configUpdated: true } : {}),
     ...result,
   }) + '\n');
 }
@@ -394,15 +394,15 @@ async function runEnable(ctx: CommandContext, rest: string[]): Promise<void> {
 async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, flags } = splitSubverbArgs(rest);
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const byKind = resolveEffectiveByKind(config);
-  const expectedKinds = Object.keys(byKind);
+  const bySolverType = resolveEffectiveBySolverType(config);
+  const expectedKinds = Object.keys(bySolverType);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn intents disable requires a kind argument.',
+        message: 'jinn intents disable requires a solverType argument.',
         exampleCli: 'jinn intents disable portfolio.v0',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -411,14 +411,14 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
 
   const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const registry = buildIntentsCliRegistry(config);
-  const impl = implFor(kind, registry, byKind);
+  const impl = implFor(kind, registry, bySolverType);
   if (!impl) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: `Unknown intent kind: ${kind}`,
+        message: `Unknown SolverType: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -443,7 +443,7 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
       schemaVersion: 1 as const,
       generatedAt: new Date().toISOString(),
       verb: 'intents disable',
-      kind,
+      solverType: kind,
       impl: impl.name,
       status: 'disabled',
       configUpdated: wasEnabled,
@@ -462,15 +462,15 @@ async function runDisable(ctx: CommandContext, rest: string[]): Promise<void> {
 async function runReset(ctx: CommandContext, rest: string[]): Promise<void> {
   const { kind, flags } = splitSubverbArgs(rest);
   const config = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const byKind = resolveEffectiveByKind(config);
-  const expectedKinds = Object.keys(byKind);
+  const bySolverType = resolveEffectiveBySolverType(config);
+  const expectedKinds = Object.keys(bySolverType);
   if (!kind) {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: 'jinn intents reset requires a kind argument.',
+        message: 'jinn intents reset requires a solverType argument.',
         exampleCli: 'jinn intents reset prediction.v0',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -480,9 +480,9 @@ async function runReset(ctx: CommandContext, rest: string[]): Promise<void> {
     emitEnvelope(
       {
         code: 'invalid_invocation',
-        message: `Unknown intent kind: ${kind}`,
+        message: `Unknown SolverType: ${kind}`,
         exampleCli: 'jinn intents list',
-        details: { field: 'kind', expected: expectedKinds.join('|') },
+        details: { field: 'solverType', expected: expectedKinds.join('|') },
       },
       { writer: ctx.writer, exit: ctx.exit },
     );
@@ -491,21 +491,21 @@ async function runReset(ctx: CommandContext, rest: string[]): Promise<void> {
 
   const configPath = resolveConfigPath(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
   const hadOverride = Boolean(
-    config.restorers?.byKind && Object.prototype.hasOwnProperty.call(config.restorers.byKind, kind),
+    config.harnesses?.bySolverType && Object.prototype.hasOwnProperty.call(config.harnesses.bySolverType, kind),
   );
-  const previousImpl = hadOverride ? (config.restorers?.byKind as Record<string, string>)[kind] : null;
+  const previousImpl = hadOverride ? (config.harnesses?.bySolverType as Record<string, string>)[kind] : null;
   if (hadOverride) {
     resetImplForKindInConfig(kind, configPath);
   }
   const reloaded = loadConfig(flags.configPath ?? getConfigPathFromArgs(ctx.argv));
-  const nextByKind = resolveEffectiveByKind(reloaded);
+  const nextByKind = resolveEffectiveBySolverType(reloaded);
 
   emitResult(
     {
       schemaVersion: 1 as const,
       generatedAt: new Date().toISOString(),
       verb: 'intents reset',
-      kind,
+      solverType: kind,
       previousImpl,
       impl: nextByKind[kind] ?? null,
       configUpdated: hadOverride,
@@ -568,18 +568,18 @@ async function run(ctx: CommandContext): Promise<void> {
 
 const command: CommandModule = {
   name: 'intents',
-  summary: 'List, enable, or disable restoration of specific intent kinds.',
+  summary: 'List, enable, or disable restoration of specific SolverTypes.',
   helpText: `Usage:
-  jinn intents list                          Show every intent kind and its enable/ready state
-  jinn intents status <kind>                 Detailed status for one kind
-  jinn intents enable <kind> [--impl <name>] [--key=value…]
+  jinn intents list                          Show every SolverType and its enable/ready state
+  jinn intents status <solverType>           Detailed status for one SolverType
+  jinn intents enable <solverType> [--impl <name>] [--key=value…]
                                               Idempotent opt-in flow; dispatches to impl.onEnable
-  jinn intents disable <kind>                Opt out; preserves any generated state
-  jinn intents reset <kind>                  Reset kind->impl override to ship default
+  jinn intents disable <solverType>          Opt out; preserves any generated state
+  jinn intents reset <solverType>            Reset solverType->impl override to ship default
 
-Intent kinds are resolved to impls via ship defaults merged with config.restorers.byKind.
+SolverTypes are resolved to impls via ship defaults merged with config.harnesses.bySolverType.
 Each impl controls its own enable flow — see \`jinn intents list\` for
-kind-specific arg requirements.
+solverType-specific arg requirements.
 
 Examples:
   jinn intents list --human

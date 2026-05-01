@@ -27,7 +27,7 @@ import {
   checkRpcNetwork as defaultCheckRpcNetwork,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
 } from '../../preflight/rpc-network.js';
-import { SPEC_KINDS } from '../../intents/kinds/index.js';
+import { SOLVER_TYPES } from '../../intents/kinds/index.js';
 
 export interface DoctorDeps extends BaseCommandDeps {
   checkClaudeBinary: typeof defaultCheckClaudeBinary;
@@ -172,7 +172,7 @@ function checkDaemonRuntimeReady(): CheckResult {
   // Under tsx (dev), __dirname is src/cli/commands; the check then looks for a sibling
   // built artifact under dist/, which will only exist after `yarn build`.
   const thisDir = dirname(fileURLToPath(import.meta.url));
-  const mcpToolsJsDist = join(thisDir, '..', '..', 'restorer', 'impls', 'claude-mcp-hyperliquid', 'mcp-tools.js');
+  const mcpToolsJsDist = join(thisDir, '..', '..', 'harness', 'impls', 'claude-mcp-hyperliquid', 'mcp-tools.js');
   if (existsSync(mcpToolsJsDist)) {
     return {
       name: 'daemon_runtime_ready',
@@ -358,8 +358,8 @@ Examples:
       // on a fresh operator who hasn't submitted an HL intent is false-alarm
       // noise. Operators who want the HL-specific preflight in isolation can
       // run those checks under a dedicated verb once one exists.
-      const portfolioKind = SPEC_KINDS['portfolio.v0']!.kind;
-      const hasPortfolioV0 = config.desiredStates.some((d) => d.spec?.kind === portfolioKind);
+      const portfolioKind = SOLVER_TYPES['portfolio.v0']!.solverType;
+      const hasPortfolioV0 = config.desiredStates.some((d) => d.solverType === portfolioKind);
       if (hasPortfolioV0) {
         const implStateDirRoot = config.engine.implStateDirRoot;
         const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');

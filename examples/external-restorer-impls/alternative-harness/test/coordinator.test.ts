@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { runCoordinator } from '../src/coordinator.js';
 import { createMockHarness } from '../src/mock-harness.js';
 import type {
-  ExternalRestorerEnv,
-  RestorationContext,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+  HarnessContext,
+} from '@jinn-network/harness-sdk';
 import type { HarnessAdapter, HarnessPromptArgs } from '../src/harness.js';
 
-const env: ExternalRestorerEnv = {
+const env: ExternalHarnessEnv = {
   implName: '@jinn-examples/alternative-harness',
   implVersion: '0.1.0',
   network: 'base-sepolia',
@@ -17,14 +17,20 @@ const env: ExternalRestorerEnv = {
   stub: false,
 };
 
-const ctx: RestorationContext = {
-  intent: { id: 'phase-order-1', spec: { kind: 'prediction.v0' } },
-  intentCid: undefined,
+const ctx: HarnessContext = {
+  task: {
+    id: 'phase-order-1',
+    description: 'phase order test',
+    solverType: 'prediction.v0',
+    spec: {},
+  },
+  taskCid: undefined,
   implStateDir: '/tmp/x',
   workingDir: '/tmp/x-work',
   log: () => {},
   abort: new AbortController().signal,
   msUntilEndTs: () => 60_000,
+    trajectory: { addSpan: () => ({}) },
 };
 
 describe('runCoordinator', () => {
@@ -50,7 +56,7 @@ describe('runCoordinator', () => {
     ]);
   });
 
-  it('passes harness.name into RestorationOutput.venueRef', async () => {
+  it('passes harness.name into Solution.venueRef', async () => {
     const harness = createMockHarness(env);
     const out = await runCoordinator({ ctx, harness });
     expect(out.venueRef.name).toBe('mock-harness');

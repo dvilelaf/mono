@@ -2,13 +2,13 @@ import {
   RestorationEngine,
   NotImplementedError,
   type RestorationEngineOptions,
-} from '@/restorer/engine/engine.js';
+} from '@/harnesses/engine/engine.js';
 import {
   IntentPersistence,
   type PersistedIntent,
   type PersistedIntentInput,
-} from '@/restorer/engine/persistence.js';
-import { IntentState } from '@/restorer/engine/state.js';
+} from '@/harnesses/engine/persistence.js';
+import { IntentState } from '@/harnesses/engine/state.js';
 import type { Store } from '@/store/store.js';
 
 import { randomBytes } from 'node:crypto';
@@ -27,13 +27,13 @@ export function makeIntentInput(
   const now = Date.now();
   return {
     requestId: id,
-    intentCid: `bafycid-${id}`,
+    taskCid: `bafycid-${id}`,
     onchainCreationTx: '0xdeadbeef',
     onchainCreationBlock: 1000,
-    specKind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     windowStartTs: now + 60_000,
     windowEndTs: now + 60_000 + 86_400_000,
-    desiredState: { id, description: 'test' },
+    task: { id, description: 'test', solverType: 'portfolio.v0', role: 'restoration' },
     ...overrides,
   };
 }

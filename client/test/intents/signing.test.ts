@@ -57,7 +57,7 @@ describe('signIntentV1', () => {
 
   it('produces hash = keccak256(JCS(intent without signature))', async () => {
     const { keccak256, toBytes } = await import('viem');
-    const { canonicalJson } = await import('../../src/restorer/engine/canonical-json.js');
+    const { canonicalJson } = await import('../../src/harnesses/engine/canonical-json.js');
 
     const pk = generatePrivateKey();
     const account = privateKeyToAccount(pk);

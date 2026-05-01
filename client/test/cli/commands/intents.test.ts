@@ -26,6 +26,8 @@ describe('jinn intents command', () => {
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       desiredStates: [],
+      solverPlugins: ['bundled:jinn-prediction-plugin'],
+      solverNets: [{ solverType: 'prediction.v0', plugin: 'jinn-prediction-plugin' }],
     }, null, 2));
   });
 
@@ -33,7 +35,7 @@ describe('jinn intents command', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('lists all kinds as not ready with requires live daemon in stub CLI registry', async () => {
+  it('lists all SolverTypes as not ready with requires live daemon in stub CLI registry', async () => {
     const io = captureIo();
     await runCli(
       ['intents', 'list', '--config', configPath],
@@ -42,11 +44,11 @@ describe('jinn intents command', () => {
     expect(io.exits).toEqual([]);
     const listPayload = JSON.parse(io.writes.at(-1) ?? '{}');
     expect(listPayload.verb).toBe('intents list');
-    const rows = listPayload.intents as Array<{ kind: string; ready: boolean; reason?: string }>;
+    const rows = listPayload.intents as Array<{ solverType: string; ready: boolean; reason?: string }>;
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
-      expect(row.ready, `kind ${row.kind}`).toBe(false);
-      expect(row.reason, `kind ${row.kind}`).toBe('requires live daemon');
+      expect(row.ready, `solverType ${row.solverType}`).toBe(false);
+      expect(row.reason, `solverType ${row.solverType}`).toBe('requires live daemon');
     }
   });
 
@@ -61,10 +63,10 @@ describe('jinn intents command', () => {
     expect(enabledPayload.verb).toBe('intents enable');
     expect(enabledPayload.impl).toBe('claude-mcp-prediction');
     expect(enabledPayload.previousImpl).toBe('prediction-v0-baseline');
-    expect(enabledPayload.byKindUpdated).toBe(true);
+    expect(enabledPayload.bySolverTypeUpdated).toBe(true);
 
     const writtenConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(writtenConfig.restorers.byKind['prediction.v0']).toBe('claude-mcp-prediction');
+    expect(writtenConfig.harnesses.bySolverType['prediction.v0']).toBe('claude-mcp-prediction');
 
     const ioList = captureIo();
     await runCli(
@@ -72,7 +74,7 @@ describe('jinn intents command', () => {
       { writer: ioList.writer, exit: ioList.exit, stdoutIsTty: false },
     );
     const listPayload = JSON.parse(ioList.writes.at(-1) ?? '{}');
-    const row = (listPayload.intents as Array<{ kind: string; impl: string }>).find((r) => r.kind === 'prediction.v0');
+    const row = (listPayload.intents as Array<{ solverType: string; impl: string }>).find((r) => r.solverType === 'prediction.v0');
     expect(row?.impl).toBe('claude-mcp-prediction');
   });
 
@@ -81,7 +83,7 @@ describe('jinn intents command', () => {
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       desiredStates: [],
-      restorers: { byKind: { 'prediction.v0': 'claude-mcp-prediction' } },
+      harnesses: { bySolverType: { 'prediction.v0': 'claude-mcp-prediction' } },
     }, null, 2));
 
     const io = captureIo();
@@ -108,7 +110,7 @@ describe('jinn intents command', () => {
     expect(String(envelope.details?.expected)).toContain('prediction-v0-baseline');
   });
 
-  it('rejects impls that do not support the target kind', async () => {
+  it('rejects impls that do not support the target SolverType', async () => {
     const io = captureIo();
     await runCli(
       ['intents', 'enable', 'prediction.v0', '--impl', 'claude-mcp-hyperliquid', '--config', configPath],
@@ -119,7 +121,7 @@ describe('jinn intents command', () => {
     expect(envelope.code).toBe('invalid_invocation');
   });
 
-  it('reset on a kind with no override is a no-op that does not rewrite config', async () => {
+  it('reset on a SolverType with no override is a no-op that does not rewrite config', async () => {
     const originalBytes = readFileSync(configPath, 'utf-8');
 
     const io = captureIo();
@@ -147,11 +149,11 @@ describe('jinn intents command', () => {
     const payload = JSON.parse(io.writes.at(-1) ?? '{}');
     expect(payload.impl).toBe('prediction-v0-baseline');
     expect(payload.previousImpl).toBeUndefined();
-    expect(payload.byKindUpdated).toBeUndefined();
+    expect(payload.bySolverTypeUpdated).toBeUndefined();
 
-    // Config should not gain a restorers.byKind mapping for prediction.v0
+    // Config should not gain a harnesses.bySolverType mapping for prediction.v0
     // just because the user passed --impl naming the current impl.
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.restorers?.byKind?.['prediction.v0']).toBeUndefined();
+    expect(written.harnesses?.bySolverType?.['prediction.v0']).toBeUndefined();
   });
 });

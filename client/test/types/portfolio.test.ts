@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRestorationJob } from '../../src/types/desired-state.js';
+import { parseTask } from '../../src/types/desired-state.js';
 import {
   PortfolioV0IntentSchema,
 } from '../../src/types/portfolio.js';
@@ -12,9 +12,9 @@ const END_TS = START_TS + 86_400_000; // exactly 24h later
 const portfolioV0Intent = {
   id: 'intent-1',
   description: 'Increase HL portfolio over 24h with bounded drawdown.',
+  solverType: 'portfolio.v0',
   window: { startTs: START_TS, endTs: END_TS },
   spec: {
-    kind: 'portfolio.v0',
     account: {
       venue: 'hyperliquid-testnet',
       masterAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
@@ -35,9 +35,9 @@ const portfolioV0Intent = {
 
 // ── Legacy backwards compat ───────────────────────────────────────────────────
 
-describe('RestorationJob legacy backwards compat', () => {
+describe('Task legacy backwards compat', () => {
   it('parses {id, description} (minimal legacy)', () => {
-    const result = parseRestorationJob({ id: 'abc', description: 'Check health.' });
+    const result = parseTask({ id: 'abc', description: 'Check health.' });
     expect(result.id).toBe('abc');
     expect(result.description).toBe('Check health.');
     expect(result.context).toBeUndefined();
@@ -47,7 +47,7 @@ describe('RestorationJob legacy backwards compat', () => {
   });
 
   it('parses {id, description, context} (legacy with context)', () => {
-    const result = parseRestorationJob({
+    const result = parseTask({
       id: 'def',
       description: 'API health check.',
       context: { endpoint: 'https://api.example.com/health' },
@@ -57,23 +57,24 @@ describe('RestorationJob legacy backwards compat', () => {
   });
 
   it('assigns a UUID when id is omitted', () => {
-    const result = parseRestorationJob({ description: 'No id provided.' });
+    const result = parseTask({ description: 'No id provided.' });
     expect(typeof result.id).toBe('string');
     expect(result.id.length).toBeGreaterThan(0);
   });
 
   it('rejects a missing description', () => {
-    expect(() => parseRestorationJob({ id: 'x' })).toThrow();
+    expect(() => parseTask({ id: 'x' })).toThrow();
   });
 });
 
-// ── RestorationJob with new optional fields ─────────────────────────────────────
+// ── Task with new optional fields ─────────────────────────────────────
 
-describe('RestorationJob with window / spec / eligibility', () => {
+describe('Task with window / spec / eligibility', () => {
   it('parses a portfolio.v0 desired state', () => {
-    const result = parseRestorationJob(portfolioV0Intent);
+    const result = parseTask(portfolioV0Intent);
     expect(result.window).toEqual({ startTs: START_TS, endTs: END_TS });
-    expect(result.spec?.kind).toBe('portfolio.v0');
+    expect(result.solverType).toBe('portfolio.v0');
+    expect(result.spec?.kind).toBeUndefined();
     expect(result.eligibility).toBeDefined();
   });
 });
@@ -83,7 +84,8 @@ describe('RestorationJob with window / spec / eligibility', () => {
 describe('PortfolioV0IntentSchema', () => {
   it('parses a fully-specified portfolio.v0 intent', () => {
     const result = PortfolioV0IntentSchema.parse(portfolioV0Intent);
-    expect(result.spec.kind).toBe('portfolio.v0');
+    expect(result.solverType).toBe('portfolio.v0');
+    expect(result.spec.kind).toBeUndefined();
     expect(result.spec.account.venue).toBe('hyperliquid-testnet');
     expect(result.eligibility?.minClosedTrades).toBe(25);
   });

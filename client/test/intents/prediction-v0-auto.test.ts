@@ -26,7 +26,7 @@ describe('makePredictionV0Generator', () => {
     vi.useRealTimers();
   });
 
-  it('produces a valid prediction.v0 RestorationJob with sentinel-resolved threshold', async () => {
+  it('produces a valid prediction.v0 Task with sentinel-resolved threshold', async () => {
     vi.setSystemTime(new Date('2026-04-21T18:23:45Z')); // mid-hour
     const gen = makePredictionV0Generator({
       feed: '0x000000000000000000000000000000000000feed',
@@ -36,7 +36,8 @@ describe('makePredictionV0Generator', () => {
     });
     const state = await gen();
     expect(state).not.toBeNull();
-    expect(state!.spec?.kind).toBe('prediction.v0');
+    expect(state!.solverType).toBe('prediction.v0');
+    expect(state!.spec?.kind).toBeUndefined();
     const q = (state!.spec as any).question;
     expect(q.kind).toBe('threshold');
     expect(q.operator).toBe('GT');

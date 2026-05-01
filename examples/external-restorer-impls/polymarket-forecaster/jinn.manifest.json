@@ -3,7 +3,7 @@
   "name": "@jinn-examples/polymarket-forecaster",
   "version": "0.1.0",
   "description": "Path 2 worked example — Polymarket forecaster for prediction.v0 on Base.",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": {
     "cid": "bafybeiplaceholderplaceholderplaceholderplaceholderplaceholder",

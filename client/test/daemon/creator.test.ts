@@ -3,21 +3,21 @@ import { CreatorLoop } from '../../src/daemon/creator.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { GeneratedIntentSource, StaticConfiguredIntentSource } from '../../src/intents/sources.js';
 import { Store } from '../../src/store/store.js';
-import { PermanentError, type RestorationJob } from '../../src/types/index.js';
+import { PermanentError, type Task } from '../../src/types/index.js';
 
 const SAFE = '0x00112233445566778899aabbccddeeff00112233';
 
 describe('CreatorLoop', () => {
-  it('posts desired states with type and attemptId', async () => {
+  it('posts desired states with role and attemptId', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: RestorationJob[] = [
+    const states: Task[] = [
       { id: 'ds-1', description: 'API returns 200' },
     ];
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
 
     await loop.tick();
@@ -26,7 +26,7 @@ describe('CreatorLoop', () => {
       expect.objectContaining({
         id: 'ds-1',
         description: 'API returns 200',
-        type: 'restoration',
+        role: 'restoration',
         attemptId: 'ds-1/1',
         attemptNumber: 1,
       }),
@@ -40,11 +40,11 @@ describe('CreatorLoop', () => {
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: RestorationJob[] = [
+    const states: Task[] = [
       { id: 'ds-1', description: 'API returns 200' },
     ];
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
 
     await loop.tick();
@@ -60,14 +60,14 @@ describe('CreatorLoop', () => {
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const generated: RestorationJob = {
+    const generated: Task = {
       id: 'auto-1',
       description: 'auto-generated',
       window: { startTs: 0, endTs: 3_600_000 },
     };
     const generator = vi.fn(async () => generated);
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
       [new GeneratedIntentSource('generated:prediction.v0', generator)],
@@ -76,7 +76,7 @@ describe('CreatorLoop', () => {
 
     await loop.tick();
     expect(generator).toHaveBeenCalledTimes(1);
-    expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'auto-1', type: 'restoration' }));
+    expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'auto-1', role: 'restoration' }));
 
     store.close();
     await adapter.stop();
@@ -88,7 +88,7 @@ describe('CreatorLoop', () => {
     const store = new Store(':memory:');
 
     const generator = vi.fn(async () => null);
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
       [new GeneratedIntentSource('generated:prediction.v0', generator)],
@@ -108,9 +108,9 @@ describe('CreatorLoop', () => {
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: RestorationJob[] = [{ id: 'ds-restart', description: 'survives restart' }];
+    const states: Task[] = [{ id: 'ds-restart', description: 'survives restart' }];
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
 
     // First loop instance posts.
     const source = new StaticConfiguredIntentSource(states);
@@ -136,10 +136,10 @@ describe('CreatorLoop', () => {
     const generator = vi.fn(async () => {
       attempts++;
       if (attempts === 1) throw new Error('transient read failure');
-      return { id: 'auto-retry', description: 'after retry' } as RestorationJob;
+      return { id: 'auto-retry', description: 'after retry' } as Task;
     });
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
       [new GeneratedIntentSource('generated:prediction.v0', generator)],
@@ -161,9 +161,9 @@ describe('CreatorLoop', () => {
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: RestorationJob[] = [{ id: 'gated', description: 'router-gated' }];
+    const states: Task[] = [{ id: 'gated', description: 'router-gated' }];
     const postSpy = vi
-      .spyOn(adapter, 'postRestorationJob')
+      .spyOn(adapter, 'postTask')
       .mockRejectedValue(new PermanentError('No request IDs returned from router'));
     const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store, SAFE);
 
@@ -185,9 +185,9 @@ describe('CreatorLoop', () => {
       id: `auto-${bucketStart}`,
       description: 'bucketed',
       window: { startTs: bucketStart, endTs: bucketStart + 600_000 },
-    } satisfies RestorationJob));
+    } satisfies Task));
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
       [new GeneratedIntentSource('generated:prediction.v0', generator)],

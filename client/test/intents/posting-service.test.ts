@@ -15,9 +15,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const candidate = {
-      restorationJob: { id: 'manual-1', description: 'test manual submission' },
+      task: { id: 'manual-1', description: 'test manual submission' },
       sourceKey: 'manual:manual-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -42,10 +42,10 @@ describe('IntentPostingService', () => {
 
     store.setConfigValue(`cli_intent:${SAFE_A}:manual-legacy`, 'legacy-request-id');
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const result = await service.postCandidate(
       {
-        restorationJob: { id: 'manual-legacy', description: 'legacy' },
+        task: { id: 'manual-legacy', description: 'legacy' },
         sourceKey: 'manual:manual-legacy',
         postingPolicy: { kind: 'once_per_safe' },
       },
@@ -75,9 +75,9 @@ describe('IntentPostingService', () => {
     const store = new Store(':memory:');
     const service = new IntentPostingService(adapter, store);
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const candidate = {
-      restorationJob: { id: 'shared-id', description: 'same logical id' },
+      task: { id: 'shared-id', description: 'same logical id' },
       sourceKey: 'manual:shared-id',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -103,13 +103,13 @@ describe('IntentPostingService', () => {
       releasePost = resolve;
     });
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob').mockImplementation(async (state) => {
+    const postSpy = vi.spyOn(adapter, 'postTask').mockImplementation(async (state) => {
       await postingGate;
       return `req-${state.id}`;
     });
 
     const candidate = {
-      restorationJob: { id: 'race-1', description: 'race test' },
+      task: { id: 'race-1', description: 'race test' },
       sourceKey: 'manual:race-1',
       postingPolicy: { kind: 'once_per_safe' } as const,
     };
@@ -131,7 +131,7 @@ describe('IntentPostingService', () => {
     await adapter.stop();
   });
 
-  it('propagates SignedIntentV1 on RestorationJob through to the adapter unchanged', async () => {
+  it('propagates SignedIntentV1 on Task through to the adapter unchanged', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -158,9 +158,9 @@ describe('IntentPostingService', () => {
       },
     };
 
-    const postSpy = vi.spyOn(adapter, 'postRestorationJob');
+    const postSpy = vi.spyOn(adapter, 'postTask');
     const candidate = {
-      restorationJob: {
+      task: {
         id: 'intent-propagation-test',
         description: 'propagation test',
         intent: stubIntent,
@@ -172,7 +172,7 @@ describe('IntentPostingService', () => {
     const result = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
 
     expect(result.idempotent).toBe(false);
-    expect(result.restorationJob.intent).toBe(stubIntent);
+    expect(result.task.intent).toBe(stubIntent);
     expect(postSpy).toHaveBeenCalledOnce();
     const posted = postSpy.mock.calls[0][0];
     expect(posted.intent).toBe(stubIntent);

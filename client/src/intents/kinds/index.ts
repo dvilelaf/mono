@@ -1,5 +1,5 @@
 /**
- * Single dispatch table for in-repo intent kinds — jinn-mono-6q1.1.
+ * Single dispatch table for in-repo SolverTypes — jinn-mono-6q1.1.
  */
 
 import type { IntentGenerator } from '../sources.js';
@@ -7,32 +7,32 @@ import { portfolioV0 } from './portfolio-v0.js';
 import { predictionV0 } from './prediction-v0.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
-import type { SpecKind, TestnetAutoContext } from './spec-kind.js';
+import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
 
-export type { ParsedSpecOverlay, ParseDeps, SpecKind, TestnetAutoContext } from './spec-kind.js';
+export type { ParsedSpecOverlay, ParseDeps, SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
 export { PREDICTION_V0_KIND } from './constants.js';
 
 /** Insertion order is stable for error messages and tests. */
-export const SPEC_KINDS: Record<string, SpecKind<any>> = {
+export const SOLVER_TYPES: Record<string, SolverTypeDefinition<any>> = {
   'portfolio.v0': portfolioV0,
   'prediction.v0': predictionV0,
   'prediction.apy.v0': predictionApyV0,
   'learner-loop-test': learnerLoopTest,
 };
 
-export function knownKinds(): string[] {
-  return Object.keys(SPEC_KINDS);
+export function knownSolverTypes(): string[] {
+  return Object.keys(SOLVER_TYPES);
 }
 
-export function unknownKindMessage(kind: string | undefined): string {
+export function unknownSolverTypeMessage(kind: string | undefined): string {
   const k = kind === undefined || kind === '' ? 'missing' : kind;
-  return `unknown intent kind: ${k}; known kinds: ${knownKinds().join(', ')}`;
+  return `unknown SolverType: ${k}; known SolverTypes: ${knownSolverTypes().join(', ')}`;
 }
 
 /**
- * Testnet auto-intent generators: every registered kind with both
+ * Testnet auto-intent generators: every registered SolverType with both
  * `getTestnetAutoConfig` and `buildGenerator` is included when config is non-undefined.
- * Add a new in-repo auto kind by implementing those on the kind module — no `main.ts` edit.
+ * Add a new in-repo auto SolverType by implementing those on the SolverType module — no `main.ts` edit.
  */
 export function collectTestnetAutoIntentGenerators(opts: {
   network: 'mainnet' | 'testnet';
@@ -49,8 +49,8 @@ export function collectTestnetAutoIntentGenerators(opts: {
   predictionV0WindowMs?: number;
   /** Override prediction.v0 window→resolveTs gap (ms). */
   predictionV0ResolveGapMs?: number;
-}): { generators: Array<{ kind: string; generator: IntentGenerator }>; logLines: string[] } {
-  const generators: Array<{ kind: string; generator: IntentGenerator }> = [];
+}): { generators: Array<{ solverType: string; generator: IntentGenerator }>; logLines: string[] } {
+  const generators: Array<{ solverType: string; generator: IntentGenerator }> = [];
   const logLines: string[] = [];
   if (opts.autoIntentsDisabled || opts.network !== 'testnet') {
     return { generators, logLines };
@@ -65,14 +65,14 @@ export function collectTestnetAutoIntentGenerators(opts: {
     predictionV0WindowMs: opts.predictionV0WindowMs,
     predictionV0ResolveGapMs: opts.predictionV0ResolveGapMs,
   };
-  for (const kind of knownKinds()) {
-    const entry = SPEC_KINDS[kind] as SpecKind;
+  for (const kind of knownSolverTypes()) {
+    const entry = SOLVER_TYPES[kind] as SolverTypeDefinition;
     const genConfig = entry.getTestnetAutoConfig?.(ctx);
     if (genConfig === undefined) continue;
     const g = entry.buildGenerator?.(genConfig as never);
     if (g) {
-      generators.push({ kind: entry.kind, generator: g });
-      logLines.push(`[main] auto-intent generator enabled: ${entry.kind} (testnet)`);
+      generators.push({ solverType: entry.solverType, generator: g });
+      logLines.push(`[main] auto-intent generator enabled: ${entry.solverType} (testnet)`);
     }
   }
   return { generators, logLines };

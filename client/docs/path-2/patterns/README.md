@@ -4,8 +4,8 @@ Three patterns cover the vast majority of Phase A.2 recruit shapes. Each is a co
 
 | Walkthrough | Pattern | Example package | Recruit shape | In-repo anchor |
 |---|---|---|---|---|
-| [forecaster.md](./forecaster.md) | `forecaster` | [`examples/external-restorer-impls/polymarket-forecaster`](../../../../examples/external-restorer-impls/polymarket-forecaster) | Polymarket / Kalshi bot operator with a working forecasting pipeline. | [`client/src/restorer/impls/prediction-v0-baseline/`](../../../../client/src/restorer/impls/prediction-v0-baseline) |
-| [evaluator.md](./evaluator.md) | `evaluator` | [`examples/external-restorer-impls/prediction-evaluator`](../../../../examples/external-restorer-impls/prediction-evaluator) | Evaluator-builder with a custom scoring rule. | [`client/src/restorer/impls/prediction-v0-evaluator/`](../../../../client/src/restorer/impls/prediction-v0-evaluator) |
+| [forecaster.md](./forecaster.md) | `forecaster` | [`examples/external-restorer-impls/polymarket-forecaster`](../../../../examples/external-restorer-impls/polymarket-forecaster) | Polymarket / Kalshi bot operator with a working forecasting pipeline. | [`client/src/harnesses/impls/prediction-v0-baseline/`](../../../../client/src/harnesses/impls/prediction-v0-baseline) |
+| [evaluator.md](./evaluator.md) | `evaluator` | [`examples/external-restorer-impls/prediction-evaluator`](../../../../examples/external-restorer-impls/prediction-evaluator) | Evaluator-builder with a custom scoring rule. | [`client/src/harnesses/impls/prediction-v0-evaluator/`](../../../../client/src/harnesses/impls/prediction-v0-evaluator) |
 | [alternative-harness.md](./alternative-harness.md) | `alternative-harness` | [`examples/external-restorer-impls/alternative-harness`](../../../../examples/external-restorer-impls/alternative-harness) | Harness builder running Pi.dev, Codex, Gemini CLI, or a custom runtime. | [`client/plugins/claude-code-learner/`](../../../../client/plugins/claude-code-learner) |
 
 Each walkthrough follows the same shape: recruit shape → what the pattern does → manifest → entry walkthrough → test → publish → replace-the-stub.

@@ -1,11 +1,11 @@
 # Pattern: forecaster
 
 **Example package:** [`examples/external-restorer-impls/polymarket-forecaster`](../../../../examples/external-restorer-impls/polymarket-forecaster)
-**In-repo anchor:** [`client/src/restorer/impls/prediction-v0-baseline/`](../../../../client/src/restorer/impls/prediction-v0-baseline)
+**In-repo anchor:** [`client/src/harnesses/impls/prediction-v0-baseline/`](../../../../client/src/harnesses/impls/prediction-v0-baseline)
 
 ## Recruit shape
 
-You're a Polymarket / Kalshi / Manifold bot operator. You have a working forecasting pipeline — a function that takes a market and returns a probability — and you want it dispatched against Jinn `prediction.v0` intents. The forecaster pattern wraps your pipeline as a `RestorerImpl` whose `run()` calls into your existing code.
+You're a Polymarket / Kalshi / Manifold bot operator. You have a working forecasting pipeline — a function that takes a market and returns a probability — and you want it dispatched against Jinn `prediction.v0` intents. The forecaster pattern wraps your pipeline as a `Harness` whose `run()` calls into your existing code.
 
 This is by far the most common Phase A.2 recruit shape: a working monolith that wants Jinn intents pointed at it.
 
@@ -22,7 +22,7 @@ The in-repo `prediction-v0-baseline` is the working reference implementation; re
   "schemaVersion": "1.0.0",
   "name": "@jinn-examples/polymarket-forecaster",
   "version": "0.1.0",
-  "supportedKinds": ["prediction.v0>=1.0.0"],
+  "supportedSolverTypes": ["prediction.v0>=1.0.0"],
   "entry": "./dist/index.js",
   "package": {
     "cid": "bafybei...",
@@ -46,18 +46,18 @@ The `capabilities.rpc` allow-list is narrow: the forecaster only reads chain sta
 
 ```ts
 import type {
-  RestorerImpl,
+  Harness,
   RestorationContext,
   RestorationOutput,
-  ExternalRestorerEnv,
-} from '@jinn-network/restorer-sdk';
+  ExternalHarnessEnv,
+} from '@jinn-network/harness-sdk';
 
-export default function createRestorer(env: ExternalRestorerEnv): RestorerImpl {
+export default function createRestorer(env: ExternalHarnessEnv): Harness {
   return {
     name: env.implName,
     version: env.implVersion,
-    supports({ kind, type }) {
-      return kind === 'prediction.v0' && type !== 'evaluation';
+    supports({ solverType, type }) {
+      return solverType === 'prediction.v0' && type !== 'evaluation';
     },
     async isReady() {
       return env.stub

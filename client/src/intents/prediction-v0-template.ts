@@ -17,7 +17,7 @@
  *        "current-50"      → current - 50
  *
  *      The on-chain intent always carries an absolute decimal string; the
- *      sentinel is ONLY resolved at post time. Evaluator + restorer impls
+ *      sentinel is ONLY resolved at post time. Evaluator + harness impls
  *      never see the sentinel form.
  *
  * Exported as a pure function with a `readCurrent` dep so it's trivially

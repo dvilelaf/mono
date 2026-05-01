@@ -17,7 +17,7 @@ function makeRaw(): GatheredStatusRaw {
         requestId: 'req_0xBBB',
         serviceIndex: null,
         txHash: null,
-        specKind: null,
+        solverType: null,
         outcome: 'ok',
       },
       {
@@ -27,7 +27,7 @@ function makeRaw(): GatheredStatusRaw {
         requestId: 'req_0xAAA',
         serviceIndex: null,
         txHash: null,
-        specKind: null,
+        solverType: null,
         outcome: 'ok',
       },
     ],

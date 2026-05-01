@@ -21,7 +21,7 @@ export interface LifecycleEvent {
   requestId?: string;
   serviceIndex?: number;
   txHash?: string;
-  specKind?: string;
+  solverType?: string;
   outcome?: 'ok' | 'failed' | 'warn';
   detail?: string;
 }
@@ -38,7 +38,7 @@ export function emitEvent(
     requestId: event.requestId ?? null,
     serviceIndex: event.serviceIndex ?? null,
     txHash: event.txHash ?? null,
-    specKind: event.specKind ?? null,
+    solverType: event.solverType ?? null,
     outcome: event.outcome ?? null,
     detail: event.detail ?? null,
   });
@@ -51,7 +51,7 @@ export function emitEvent(
     requestId: event.requestId ?? null,
     txHash: event.txHash ?? null,
     serviceIndex: event.serviceIndex ?? null,
-    specKind: event.specKind ?? null,
+    solverType: event.solverType ?? null,
     outcome: event.outcome ?? 'ok',
     kind: event.kind,
   };

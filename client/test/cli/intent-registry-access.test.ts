@@ -2,19 +2,17 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeMcpHyperliquidImpl } from '../../src/restorer/impls/claude-mcp-hyperliquid/index.js';
-import { buildRestorerImpls, type RestorerEnv } from '../../src/restorer/impls/index.js';
+import { ClaudeMcpHyperliquidImpl } from '../../src/harnesses/impls/claude-mcp-hyperliquid/index.js';
+import { buildHarnesses, type HarnessEnv } from '../../src/harnesses/impls/index.js';
 
 import {
   buildIntentsCliRegistry,
-  DEFAULT_BY_KIND,
+  DEFAULT_BY_SOLVER_TYPE,
   DEFAULT_DISABLED_IMPLS,
-  DEFAULT_WRAP_WITH,
   isImplDisabled,
   resetImplForKindInConfig,
-  resolveEffectiveByKind,
+  resolveEffectiveBySolverType,
   resolveEffectiveDisabled,
-  resolveEffectiveWrapWith,
   setImplEnabledInConfig,
   setImplForKindInConfig,
 } from '../../src/cli/intent-registry-access.js';
@@ -35,7 +33,7 @@ describe('setImplEnabledInConfig', () => {
     const result = setImplEnabledInConfig('claude-mcp-hyperliquid', false, configPath);
     expect(result).toEqual(expect.arrayContaining([...DEFAULT_DISABLED_IMPLS]));
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.restorers.disabled).toEqual(expect.arrayContaining([...DEFAULT_DISABLED_IMPLS]));
+    expect(written.harnesses.disabled).toEqual(expect.arrayContaining([...DEFAULT_DISABLED_IMPLS]));
   });
 
   it('removes impl from disabled[] when enabled=true', () => {
@@ -56,7 +54,7 @@ describe('setImplEnabledInConfig', () => {
     writeFileSync(
       configPath,
       JSON.stringify({
-        restorers: { disabled: ['claude-mcp-hyperliquid', 'custom-evil-impl'] },
+        harnesses: { disabled: ['claude-mcp-hyperliquid', 'custom-evil-impl'] },
       }),
     );
     const result = setImplEnabledInConfig('claude-mcp-hyperliquid', true, configPath);
@@ -66,7 +64,7 @@ describe('setImplEnabledInConfig', () => {
 
   it("rebuilds from defaults, not from the user's last list, so future default-disables stay off", () => {
     // Operator had previously enabled the one default impl.
-    writeFileSync(configPath, JSON.stringify({ restorers: { disabled: [] } }));
+    writeFileSync(configPath, JSON.stringify({ harnesses: { disabled: [] } }));
     // Suppose we add a new default-disabled impl in code. We simulate by
     // re-invoking setImplEnabledInConfig for a DIFFERENT impl — the rebuild
     // path must include every current default.
@@ -80,7 +78,7 @@ describe('setImplEnabledInConfig', () => {
       JSON.stringify({
         network: 'testnet',
         rpcUrl: 'http://example.com',
-        restorers: { disabled: [...DEFAULT_DISABLED_IMPLS] },
+        harnesses: { disabled: [...DEFAULT_DISABLED_IMPLS] },
       }),
     );
     setImplEnabledInConfig('claude-mcp-hyperliquid', true, configPath);
@@ -91,38 +89,14 @@ describe('setImplEnabledInConfig', () => {
 });
 
 describe('resolveEffectiveDisabled', () => {
-  it('returns defaults when user has not set restorers.disabled', () => {
+  it('returns defaults when user has not set harnesses.disabled', () => {
     const config = {} as JinnConfig;
     expect(resolveEffectiveDisabled(config)).toEqual([...DEFAULT_DISABLED_IMPLS]);
   });
 
-  it('returns user list when restorers.disabled is set (full replace)', () => {
-    const config = { restorers: { disabled: [] } } as unknown as JinnConfig;
+  it('returns user list when harnesses.disabled is set (full replace)', () => {
+    const config = { harnesses: { disabled: [] } } as unknown as JinnConfig;
     expect(resolveEffectiveDisabled(config)).toEqual([]);
-  });
-});
-
-describe('resolveEffectiveWrapWith', () => {
-  it('returns the ship default when restorers.wrapWith is unset (key absent)', () => {
-    expect(resolveEffectiveWrapWith({} as JinnConfig)).toBe(DEFAULT_WRAP_WITH);
-    const config = { restorers: { byKind: {} } } as unknown as JinnConfig;
-    expect(resolveEffectiveWrapWith(config)).toBe(DEFAULT_WRAP_WITH);
-  });
-
-  it('returns operator override when restorers.wrapWith is a non-empty string', () => {
-    const config = { restorers: { wrapWith: 'custom-wrapper' } } as unknown as JinnConfig;
-    expect(resolveEffectiveWrapWith(config)).toBe('custom-wrapper');
-  });
-
-  it('returns undefined when restorers.wrapWith is null (explicit opt-out)', () => {
-    const config = { restorers: { wrapWith: null } } as unknown as JinnConfig;
-    expect(resolveEffectiveWrapWith(config)).toBeUndefined();
-  });
-
-  it('returns undefined when restorers.wrapWith is explicitly undefined', () => {
-    // Operator wrote `wrapWith: undefined` in code (rare, but a valid opt-out).
-    const config = { restorers: { wrapWith: undefined } } as unknown as JinnConfig;
-    expect(resolveEffectiveWrapWith(config)).toBeUndefined();
   });
 });
 
@@ -132,12 +106,12 @@ describe('isImplDisabled', () => {
   });
 
   it('returns false after operator enables impl via config', () => {
-    const config = { restorers: { disabled: [] } } as unknown as JinnConfig;
+    const config = { harnesses: { disabled: [] } } as unknown as JinnConfig;
     expect(isImplDisabled('claude-mcp-hyperliquid', config)).toBe(false);
   });
 });
 
-describe('byKind config helpers', () => {
+describe('bySolverType config helpers', () => {
   let dir: string;
   let configPath: string;
 
@@ -148,34 +122,34 @@ describe('byKind config helpers', () => {
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('writes and resets a byKind override', () => {
+  it('writes and resets a bySolverType override', () => {
     setImplForKindInConfig('prediction.v0', 'claude-mcp-prediction', configPath);
     let written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.restorers.byKind['prediction.v0']).toBe('claude-mcp-prediction');
+    expect(written.harnesses.bySolverType['prediction.v0']).toBe('claude-mcp-prediction');
 
     resetImplForKindInConfig('prediction.v0', configPath);
     written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.restorers.byKind['prediction.v0']).toBeUndefined();
+    expect(written.harnesses.bySolverType['prediction.v0']).toBeUndefined();
   });
 
-  it('merges user byKind over defaults', () => {
+  it('merges user bySolverType over defaults', () => {
     const config = {
-      restorers: {
-        byKind: {
+      harnesses: {
+        bySolverType: {
           'prediction.v0': 'claude-mcp-prediction',
         },
       },
     } as unknown as JinnConfig;
-    const byKind = resolveEffectiveByKind(config);
-    expect(byKind['portfolio.v0']).toBe(DEFAULT_BY_KIND['portfolio.v0']);
-    expect(byKind['prediction.v0']).toBe('claude-mcp-prediction');
+    const bySolverType = resolveEffectiveBySolverType(config);
+    expect(bySolverType['portfolio.v0']).toBe(DEFAULT_BY_SOLVER_TYPE['portfolio.v0']);
+    expect(bySolverType['prediction.v0']).toBe('claude-mcp-prediction');
   });
 });
 
 describe('buildIntentsCliRegistry', () => {
   let dir: string;
   let configPath: string;
-  let capturedEnv: RestorerEnv | null;
+  let capturedEnv: HarnessEnv | null;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'jinn-intent-reg-'));
@@ -210,9 +184,9 @@ describe('buildIntentsCliRegistry', () => {
     expect(config.engine.implStateDirRoot).toBe(customImplRoot);
 
     // Inject a spy that captures the env arg and delegates to the real impl.
-    const buildImpls = vi.fn((env: RestorerEnv) => {
+    const buildImpls = vi.fn((env: HarnessEnv) => {
       capturedEnv = env;
-      return buildRestorerImpls(env);
+      return buildHarnesses(env);
     });
 
     const registry = buildIntentsCliRegistry(config, buildImpls);

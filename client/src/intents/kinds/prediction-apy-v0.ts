@@ -3,10 +3,10 @@ import {
   makePredictionApyV0Generator,
   type PredictionApyV0AutoConfig,
 } from '../prediction-apy-v0-auto.js';
-import type { SpecKind } from './spec-kind.js';
+import type { SolverTypeDefinition } from './solver-type.js';
 
-export const predictionApyV0: SpecKind<PredictionApyV0AutoConfig | undefined> = {
-  kind: 'prediction.apy.v0',
+export const predictionApyV0: SolverTypeDefinition<PredictionApyV0AutoConfig | undefined> = {
+  solverType: 'prediction.apy.v0',
   async parseSpec(raw) {
     const intent = await resolvePredictionApyV0Template(raw);
     return { window: intent.window, spec: intent.spec, eligibility: intent.eligibility };

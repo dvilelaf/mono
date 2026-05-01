@@ -6,7 +6,7 @@
  *
  *  1. Skips cleanly if `anvil` or `claude` are not in PATH (desired CI behavior
  *     where neither tool is available).
- *  2. Verifies that {@link buildRestorerImpls} registers the
+ *  2. Verifies that {@link buildHarnesses} registers the
  *     {@link ClaudeCodeLearnerWrapper} at index 0 and that it claims support for
  *     `portfolio.v0` — this is the most important new behavior from Plan 3 T2
  *     and can be asserted without external dependencies.
@@ -25,7 +25,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildRestorerImpls } from '../../src/restorer/impls/index.js';
+import { buildHarnesses } from '../../src/harnesses/impls/index.js';
 
 async function main(): Promise<void> {
   // Pre-flight: skip if Anvil not available.
@@ -58,29 +58,29 @@ async function main(): Promise<void> {
   let exitCode = 0;
   try {
     // Verify wrapper is registered FIRST.
-    console.log('Verifying buildRestorerImpls wrapper registration...');
-    const impls = buildRestorerImpls({
+    console.log('Verifying buildHarnesses wrapper registration...');
+    const impls = buildHarnesses({
       stub: true,
       rpcUrl: 'http://127.0.0.1:8545',
       claudePath: 'claude',
       claudeModel: 'claude-haiku-4-5-20251001',
     });
     if (impls.length === 0) {
-      throw new Error('buildRestorerImpls returned empty array');
+      throw new Error('buildHarnesses returned empty array');
     }
     const first = impls[0];
     if (!first) {
-      throw new Error('buildRestorerImpls returned empty array');
+      throw new Error('buildHarnesses returned empty array');
     }
     if (first.name !== 'claude-code-learner') {
       throw new Error(
-        `wrapper not registered first: index 0 is "${first.name}" (expected "claude-code-learner")`,
+        `default harness not registered first: index 0 is "${first.name}" (expected "claude-code-learner")`,
       );
     }
-    if (!first.supports({ kind: 'portfolio.v0' })) {
-      throw new Error('wrapper.supports(portfolio.v0) returned false');
+    if (!first.supports({ solverType: 'portfolio.v0' })) {
+      throw new Error('claude-code-learner.supports(portfolio.v0) returned false');
     }
-    console.log('  ✓ wrapper at index 0; supports portfolio.v0');
+    console.log('  ✓ claude-code-learner at index 0; supports portfolio.v0');
 
     // Run one daemon cycle. (Reuse e2e-portfolio-v0's harness; here we
     // just inline the minimal version.)

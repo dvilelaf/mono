@@ -21,7 +21,13 @@ const validThresholdSpec = {
 
 describe('PredictionV0SpecSchema', () => {
   it('accepts a threshold spec', () => {
-    expect(PredictionV0SpecSchema.parse(validThresholdSpec)).toEqual(validThresholdSpec);
+    const parsed = PredictionV0SpecSchema.parse(validThresholdSpec);
+
+    expect(parsed).toEqual({
+      oracle: validThresholdSpec.oracle,
+      question: validThresholdSpec.question,
+    });
+    expect(parsed).not.toHaveProperty('kind');
   });
 
   it('accepts a range spec', () => {
@@ -29,7 +35,13 @@ describe('PredictionV0SpecSchema', () => {
       ...validThresholdSpec,
       question: { kind: 'range' as const, lowerBound: '3000', upperBound: '3500', resolveTs: 4_500_000 },
     };
-    expect(PredictionV0SpecSchema.parse(range)).toEqual(range);
+    const parsed = PredictionV0SpecSchema.parse(range);
+
+    expect(parsed).toEqual({
+      oracle: range.oracle,
+      question: range.question,
+    });
+    expect(parsed).not.toHaveProperty('kind');
   });
 
   it('rejects unknown operators', () => {

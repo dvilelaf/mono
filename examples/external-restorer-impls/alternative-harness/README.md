@@ -1,6 +1,6 @@
 # @jinn-examples/alternative-harness
 
-Path 2 worked example: a Jinn restorer for `prediction.v0` running the
+Path 2 worked example: a Jinn harness for `prediction.v0` running the
 **seven-phase learning pipeline** (Orient → Strategize → Plan → Execute
 → Debrief → Improve → Memory) against a non-Claude-Code harness.
 
@@ -13,8 +13,8 @@ underlying agent runtime is swappable.
 ## What this shows
 
 - Default-export factory shape per
-  `spec/2026-05-external-restorer-impls.md` §3.2.
-- `supports({ kind: 'prediction.v0', type: 'restoration' })` —
+  `spec/2026-05-external-harness-impls.md` §3.2.
+- `supports({ solverType: 'prediction.v0', role: 'restoration' })` —
   declines evaluation intents.
 - A clean `HarnessAdapter` contract (`src/harness.ts`) — one method
   (`promptForJson<T>`) plus an optional `closePhase`. Easy to wrap any
@@ -52,12 +52,12 @@ export const myHarness: HarnessAdapter = {
 };
 ```
 
-Then construct the restorer with your factory:
+Then construct the harness with your factory:
 
 ```ts
-import createRestorer from '@jinn-examples/alternative-harness';
+import createHarness from '@jinn-examples/alternative-harness';
 
-const impl = createRestorer(env, { harnessFactory: () => myHarness });
+const impl = createHarness(env, { harnessFactory: () => myHarness });
 ```
 
 ## Phase shape reference
@@ -79,6 +79,6 @@ state across calls.
 ## Spec
 
 - `spec/2026-04-30-plug-in-surface.md` §3.3.3 — alternative-harness pattern.
-- `docs/superpowers/specs/2026-04-23-default-learning-restorer-design.md` §2 — phase pipeline definition.
-- `spec/2026-05-external-restorer-impls.md` §3 — loader contract.
+- `docs/superpowers/specs/2026-04-23-default-learning-harness-design.md` §2 — phase pipeline definition.
+- `spec/2026-05-external-harness-impls.md` §3 — loader contract.
 - `spec/2026-05-executor-trust-boundary.md` §5 — manifest signing.

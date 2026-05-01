@@ -204,8 +204,9 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   const intent = {
     id: params.intentId,
     description: params.intentDescription,
+    solverType: 'smoke-test',
     window: { startTs, endTs },
-    spec: { kind: 'smoke-test', fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
+    spec: { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },
   };
 
   const prompt = [

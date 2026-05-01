@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { withTempStore } from '@test/store.js';
-import { IntentPersistence } from '../../src/restorer/engine/persistence.js';
+import { IntentPersistence } from '../../src/harnesses/engine/persistence.js';
 import { gatherPortfolioV0Status } from '../../src/api/portfolio-v0-build.js';
 
 function seedIntent(
@@ -11,13 +11,13 @@ function seedIntent(
 ) {
   persistence.insertDiscovered({
     requestId,
-    intentCid: `bafytest${requestId}`,
+    taskCid: `bafytest${requestId}`,
     onchainCreationTx: `0xtx${requestId}`,
     onchainCreationBlock: 1,
-    specKind: 'portfolio.v0',
+    solverType: 'portfolio.v0',
     windowStartTs,
     windowEndTs,
-    restorationJob: { id: requestId, description: 'test' },
+    task: { id: requestId, description: 'test' },
   });
 }
 
@@ -61,13 +61,13 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('includes specKind and implName in in-flight summaries', async () => {
+  it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
       const persistence = new IntentPersistence(store.db);
       seedIntent(persistence, 'req-spec');
 
       const result = gatherPortfolioV0Status(store);
-      expect(result.inFlight[0].specKind).toBe('portfolio.v0');
+      expect(result.inFlight[0].solverType).toBe('portfolio.v0');
       expect(result.inFlight[0].implName).toBeNull(); // not yet assigned
     });
   });

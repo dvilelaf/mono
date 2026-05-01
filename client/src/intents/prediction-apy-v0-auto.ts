@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { RestorationJob } from '../types/desired-state.js';
+import type { Task } from '../types/desired-state.js';
 import type { IntentV1, SignedIntentV1 } from '../types/intent.js';
 import { resolvePredictionApyV0Template } from './prediction-apy-v0-template.js';
 import { signIntentV1 } from './signing.js';
@@ -15,7 +15,7 @@ export interface PredictionApyV0AutoConfig {
   /**
    * Agent EOA address. When provided alongside `safeAddress` and
    * `agentPrivateKey`, the generator produces a `SignedIntentV1` embedded in
-   * the returned RestorationJob's `intent` field.
+   * the returned Task's `intent` field.
    */
   agentEoa?: `0x${string}`;
   /** Safe address — embedded in `intent.creator.safeAddress`. */
@@ -24,7 +24,7 @@ export interface PredictionApyV0AutoConfig {
   agentPrivateKey?: `0x${string}`;
 }
 
-export type PredictionApyV0Generator = () => Promise<RestorationJob | null>;
+export type PredictionApyV0Generator = () => Promise<Task | null>;
 
 export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig = {}): PredictionApyV0Generator {
   const venue = config.venue ?? 'aave-v3-base-sepolia';
@@ -35,7 +35,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
   const sampleCount = config.sampleCount ?? 12;
   const toleranceBps = config.toleranceBps ?? 50;
 
-  return async (): Promise<RestorationJob | null> => {
+  return async (): Promise<Task | null> => {
     const now = Date.now();
     const startTs = Math.floor(now / windowDurationMs) * windowDurationMs;
     const endTs = startTs + windowDurationMs;
@@ -65,8 +65,8 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
       });
 
       // When signing credentials are available, produce a SignedIntentV1 and
-      // embed it in the RestorationJob's `intent` field so MechAdapter's
-      // `state.intent ?? buildRestorationJobPayload(...)` path picks it up.
+      // embed it in the Task's `intent` field so MechAdapter's
+      // `state.intent ?? buildTaskPayload(...)` path picks it up.
       if (config.agentEoa && config.safeAddress && config.agentPrivateKey) {
         const intentDoc: IntentV1 = {
           schemaVersion: 'intent.v1',
@@ -74,7 +74,7 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
           kind: 'prediction.apy.v0',
           description: resolved.description,
           window: resolved.window,
-          spec: resolved.spec as IntentV1['spec'],
+          spec: { kind: 'prediction.apy.v0', ...(resolved.spec as Record<string, unknown>) } as IntentV1['spec'],
           eligibility: resolved.eligibility ?? {},
           creator: {
             safeAddress: config.safeAddress,
@@ -83,12 +83,24 @@ export function makePredictionApyV0Generator(config: PredictionApyV0AutoConfig =
           createdAt: Date.now(),
         };
         const signed: SignedIntentV1 = await signIntentV1(intentDoc, config.agentPrivateKey);
-        const job: RestorationJob = resolved as unknown as RestorationJob;
-        return { ...job, intent: signed };
+        const task: Task = {
+          ...(resolved as unknown as Task),
+          solverType: 'prediction.apy.v0',
+          spec: Object.fromEntries(
+            Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+          ),
+        };
+        return { ...task, intent: signed };
       }
 
       // No signing credentials — return the resolved shape without a signed intent.
-      return resolved as unknown as RestorationJob;
+      return {
+        ...(resolved as unknown as Task),
+        solverType: 'prediction.apy.v0',
+        spec: Object.fromEntries(
+          Object.entries((resolved.spec ?? {}) as Record<string, unknown>).filter(([key]) => key !== 'kind'),
+        ),
+      };
     } catch {
       return null;
     }

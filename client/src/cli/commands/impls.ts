@@ -1,10 +1,10 @@
 /**
  * `jinn impls list|add|remove` — operator-facing CLI for managing
- * config-declared external restorer impls (Path 2 plug-in surface).
+ * config-declared external harness impls (Path 2 plug-in surface).
  *
  * `add <manifest-uri-or-path>`: verifies the package's `jinn.manifest.json`
  * against the operator's `trustedImplSigners`, and appends an
- * `ExternalImplEntry` to `restorers.externalImpls` in the config file.
+ * `ExternalImplEntry` to `harnesses.externalImpls` in the config file.
  *
  * `list`: prints the configured entries.
  * `remove <name>`: drops the named entry from the config file.
@@ -27,8 +27,8 @@ import type { CommandContext, CommandModule } from '../command.js';
 import {
   loadManifest,
   verifyManifestSignature,
-} from '../../restorer/manifest/index.js';
-import { verifyPackageHash } from '../../restorer/external-impls/package-hash.js';
+} from '../../harnesses/manifest/index.js';
+import { verifyPackageHash } from '../../harnesses/external-impls/package-hash.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -45,7 +45,7 @@ interface SignerTrust {
 }
 
 interface ConfigShape {
-  restorers?: { externalImpls?: ExternalImplEntry[]; [k: string]: unknown };
+  harnesses?: { externalImpls?: ExternalImplEntry[]; [k: string]: unknown };
   trustedImplSigners?: SignerTrust[];
   [k: string]: unknown;
 }
@@ -84,7 +84,7 @@ function emitError(
 
 function runList(ctx: CommandContext, configPath: string): void {
   const cfg = readConfigFile(configPath);
-  const entries = cfg.restorers?.externalImpls ?? [];
+  const entries = cfg.harnesses?.externalImpls ?? [];
   emitJson(ctx, { verb: 'impls list', configPath, entries });
 }
 
@@ -146,7 +146,7 @@ async function runAdd(
     return;
   }
 
-  const list: ExternalImplEntry[] = [...(cfg.restorers?.externalImpls ?? [])];
+  const list: ExternalImplEntry[] = [...(cfg.harnesses?.externalImpls ?? [])];
   if (list.some((e) => e.name === manifest.name)) {
     emitError(ctx, 'already_added', `Entry ${manifest.name} already present`, {
       name: manifest.name,
@@ -154,7 +154,7 @@ async function runAdd(
     return;
   }
   list.push({ name: manifest.name, entry: absPkg });
-  cfg.restorers = { ...(cfg.restorers ?? {}), externalImpls: list };
+  cfg.harnesses = { ...(cfg.harnesses ?? {}), externalImpls: list };
   writeConfigFile(configPath, cfg);
   emitJson(ctx, {
     verb: 'impls add',
@@ -169,7 +169,7 @@ async function runAdd(
 
 function runRemove(ctx: CommandContext, configPath: string, name: string): void {
   const cfg = readConfigFile(configPath);
-  const list = cfg.restorers?.externalImpls ?? [];
+  const list = cfg.harnesses?.externalImpls ?? [];
   const idx = list.findIndex((e) => e.name === name);
   if (idx < 0) {
     emitError(ctx, 'not_found', `No external impl named ${name} in config`, {
@@ -178,7 +178,7 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
     return;
   }
   const next = list.filter((_, i) => i !== idx);
-  cfg.restorers = { ...(cfg.restorers ?? {}), externalImpls: next };
+  cfg.harnesses = { ...(cfg.harnesses ?? {}), externalImpls: next };
   writeConfigFile(configPath, cfg);
   emitJson(ctx, { verb: 'impls remove', removed: name, configPath });
 }
@@ -190,13 +190,13 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
 const HELP_TEXT = `\
 jinn impls <list|add|remove> [options]
 
-Manage operator-supplied external restorer impls (Path 2 plug-in surface).
+Manage operator-supplied external harness impls (Path 2 plug-in surface).
 
 Subcommands:
   list                   Print configured external impls
   add <pkg-path>         Verify a package's jinn.manifest.json against
                          trustedImplSigners[] and append the entry to
-                         restorers.externalImpls in the config file
+                         harnesses.externalImpls in the config file
   remove <name>          Drop the named entry from the config file
 
 Options:
@@ -270,7 +270,7 @@ async function run(ctx: CommandContext): Promise<void> {
 
 const command: CommandModule = {
   name: 'impls',
-  summary: 'Manage operator-supplied external restorer impls',
+  summary: 'Manage operator-supplied external harness impls',
   helpText: HELP_TEXT,
   run,
 };

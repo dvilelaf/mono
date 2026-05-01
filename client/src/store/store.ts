@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RESTORATION_INTENTS_SCHEMA } from '../restorer/engine/persistence.js';
+import { RESTORATION_INTENTS_SCHEMA } from '../harnesses/engine/persistence.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -9,7 +9,7 @@ export interface ActivityEventInput {
   requestId?: string | null;
   serviceIndex?: number | null;
   txHash?: string | null;
-  specKind?: string | null;
+  solverType?: string | null;
   outcome?: string | null;
   detail?: string | null;
 }
@@ -21,7 +21,7 @@ export interface ActivityEventRow {
   requestId: string | null;
   serviceIndex: number | null;
   txHash: string | null;
-  specKind: string | null;
+  solverType: string | null;
   outcome: string | null;
   detail: string | null;
 }
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS activity_events (
   request_id TEXT,
   service_index INTEGER,
   tx_hash TEXT,
-  spec_kind TEXT,
+  solver_type TEXT,
   outcome TEXT,
   detail TEXT
 );
@@ -256,6 +256,7 @@ export class Store {
     this.db.exec(RESTORATION_INTENTS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
+    this.ensureActivityEventsSolverType();
     this.backfillActivityEvents();
   }
 
@@ -275,6 +276,20 @@ export class Store {
     this.db.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_reward_claims_tx ON reward_claims (tx_hash)`,
     );
+  }
+
+  /** Older on-disk DBs used `activity_events.spec_kind` before SolverType naming. */
+  private ensureActivityEventsSolverType(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(activity_events)`).all() as Array<{ name: string }>;
+    const hasSpecKind = cols.some((c) => c.name === 'spec_kind');
+    const hasSolverType = cols.some((c) => c.name === 'solver_type');
+    if (hasSpecKind && !hasSolverType) {
+      this.db.exec(`ALTER TABLE activity_events RENAME COLUMN spec_kind TO solver_type`);
+      return;
+    }
+    if (!hasSolverType) {
+      this.db.exec(`ALTER TABLE activity_events ADD COLUMN solver_type TEXT`);
+    }
   }
 
   recordOwnActivity(requestId: string, role: 'created' | 'claimed' | 'delivered' | 'evaluated'): void {
@@ -467,15 +482,15 @@ export class Store {
 
   recordActivityEvent(event: ActivityEventInput): void {
     this.db.prepare(
-      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail)
-       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @specKind, @outcome, @detail)`,
+      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail)
+       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail)`,
     ).run({
       ts: event.ts ?? null,
       kind: event.kind,
       requestId: event.requestId ?? null,
       serviceIndex: event.serviceIndex ?? null,
       txHash: event.txHash ?? null,
-      specKind: event.specKind ?? null,
+      solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
       detail: event.detail ?? null,
     });
@@ -498,7 +513,7 @@ export class Store {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -510,7 +525,7 @@ export class Store {
       request_id: string | null;
       service_index: number | null;
       tx_hash: string | null;
-      spec_kind: string | null;
+      solver_type: string | null;
       outcome: string | null;
       detail: string | null;
     }>;
@@ -521,7 +536,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));
@@ -532,7 +547,7 @@ export class Store {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
     const rows = this.db
       .prepare(
-        `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+        `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
          FROM activity_events
          WHERE id > @afterId
          ORDER BY id ASC
@@ -545,7 +560,7 @@ export class Store {
         request_id: string | null;
         service_index: number | null;
         tx_hash: string | null;
-        spec_kind: string | null;
+        solver_type: string | null;
         outcome: string | null;
         detail: string | null;
       }>;
@@ -556,7 +571,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));

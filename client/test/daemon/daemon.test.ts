@@ -5,11 +5,11 @@ import { describe, it, expect } from 'vitest';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { RestorerImplRegistry } from '../../src/restorer/engine/registry.js';
+import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 
 function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
   const root = mkdtempSync(join(tmpdir(), 'jinn-daemon-test-'));
-  const implRegistry = new RestorerImplRegistry({ default: 'legacy-claude' });
+  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
   return {
     implRegistry,
     paths: {

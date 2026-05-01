@@ -8,12 +8,12 @@ offline.
 ## What this shows
 
 - Default-export factory shape per
-  `spec/2026-05-external-restorer-impls.md` §3.2.
-- `supports({ kind: 'prediction.v0', type: 'evaluation' })` — claims
+  `spec/2026-05-external-harness-impls.md` §3.2.
+- `supports({ solverType: 'prediction.v0', role: 'evaluation' })` — claims
   evaluation, declines restoration. Mirror image of the forecaster
   pattern.
 - `run(ctx)` reads the restoration envelope under evaluation
-  (`ctx.intent.spec.restorationUnderEvaluation.forecastProbability`),
+  (`ctx.task.spec.restorationUnderEvaluation.forecastProbability`),
   fetches the resolved outcome, computes a Brier score, and emits a
   `verdictPayload` shaped like `{ score, scoringRule, resolvedOutcome,
   resolvedAt }`.
@@ -38,16 +38,16 @@ yarn build          # produces dist/
 
 If your evaluator targets `prediction.v0` and there is already an
 in-repo evaluator for that kind
-(`client/src/restorer/impls/prediction-v0-evaluator/`), the daemon
+(`client/src/harnesses/impls/prediction-v0-evaluator/`), the daemon
 registers the in-repo one by default and excludes yours per
-`spec/2026-05-external-restorer-impls.md` §3.4 step 8
+`spec/2026-05-external-harness-impls.md` §3.4 step 8
 (`impl-name-collision` resolution).
 
 To run your evaluator instead of the in-repo one, add to your daemon
 config:
 
 ```jsonc
-{ "restorers": { "disabled": ["prediction-v0-evaluator"] } }
+{ "harnesses": { "disabled": ["prediction-v0-evaluator"] } }
 ```
 
 ## Oracle stub
@@ -65,7 +65,7 @@ return { intentId, resolvedOutcome: outcome, resolvedAt };
 ## Spec
 
 - `spec/2026-04-30-plug-in-surface.md` §3.3.2 — evaluator pattern.
-- `spec/2026-05-external-restorer-impls.md` §3 — loader contract.
+- `spec/2026-05-external-harness-impls.md` §3 — loader contract.
 - `spec/2026-05-executor-trust-boundary.md` §5 — manifest signing.
 - Murphy, A. H. (1973). A new vector partition of the probability score.
   *Journal of Applied Meteorology*, 12(4), 595-600.
