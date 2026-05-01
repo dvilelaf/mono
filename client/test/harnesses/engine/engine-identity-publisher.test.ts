@@ -19,11 +19,11 @@ import { tmpdir } from 'node:os';
 import type { Hex } from 'viem';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
-  type RestorationEngineOptions,
+  TaskEngine,
+  type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence, type PersistedIntentInput } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskRunPersistence, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { IdentityPublisher } from '../../../src/erc8004/index.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ function makeOpts(
   store: Store,
   tmp: string,
   identityPublisher?: IdentityPublisher,
-): RestorationEngineOptions {
+): TaskEngineOptions {
   return {
     store,
     paths: {
@@ -109,13 +109,13 @@ function provisionWorkDir(tmp: string, requestId: string): string {
   return workingDir;
 }
 
-class TestEngine extends RestorationEngine {
-  get testPersistence(): IntentPersistence {
+class TestEngine extends TaskEngine {
+  get testPersistence(): TaskRunPersistence {
     return this.persistence;
   }
 }
 
-function makeIntentInput(requestId: string): PersistedIntentInput {
+function makeIntentInput(requestId: string): PersistedTaskRunInput {
   const now = Date.now() - 1000;
   return {
     requestId,
@@ -133,16 +133,16 @@ async function drivePackTransition(engine: TestEngine, requestId: string, workin
   await engine.observe(makeIntentInput(requestId));
   const p = engine.testPersistence;
   const now = Date.now();
-  p.transition(requestId, IntentState.CLAIMED);
-  p.transition(requestId, IntentState.WAITING);
-  p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.CLAIMED);
+  p.transition(requestId, TaskRunState.WAITING);
+  p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
     workingDir,
     implStateDir: join(workingDir, '..', '..', 'impls', 'test'),
     preSnapshotCapturedAt: now,
     preSnapshotPayload: { equity: '1000', capturedAt: now, hlTime: 0 },
   });
-  p.transition(requestId, IntentState.RUNNING);
-  p.transition(requestId, IntentState.POST_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.RUNNING);
+  p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
     postSnapshotCapturedAt: now,
     postSnapshotPayload: { equity: '1100', capturedAt: now, hlTime: 0 },
     fillsPayload: [],
@@ -154,7 +154,7 @@ async function drivePackTransition(engine: TestEngine, requestId: string, workin
       tradedNotionalMultiple: '8',
     },
   });
-  p.transition(requestId, IntentState.PACKAGING);
+  p.transition(requestId, TaskRunState.PACKAGING);
   await engine.process(requestId);
 }
 
@@ -171,27 +171,27 @@ async function seedDelivering(
   const now = Date.now() - 1000;
   await engine.observe(makeIntentInput(requestId));
   const p = engine.testPersistence;
-  p.transition(requestId, IntentState.CLAIMED);
-  p.transition(requestId, IntentState.WAITING);
-  p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.CLAIMED);
+  p.transition(requestId, TaskRunState.WAITING);
+  p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
     workingDir: '/tmp/wd',
     implStateDir: '/tmp/impl',
     preSnapshotCapturedAt: now,
     preSnapshotPayload: { capturedAt: now, hlTime: 0 },
   });
-  p.transition(requestId, IntentState.RUNNING);
-  p.transition(requestId, IntentState.POST_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.RUNNING);
+  p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
     postSnapshotCapturedAt: now,
     postSnapshotPayload: { capturedAt: now, hlTime: 0 },
     fillsPayload: [],
     gatingClaim: {},
   });
-  p.transition(requestId, IntentState.PACKAGING, {
+  p.transition(requestId, TaskRunState.PACKAGING, {
     manifestCid,
     artifactCids: {},
     evidenceHash,
   });
-  p.transition(requestId, IntentState.DELIVERING);
+  p.transition(requestId, TaskRunState.DELIVERING);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -224,7 +224,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     await drivePackTransition(engine, requestId, workingDir);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.DELIVERING);
+    expect(intent.state).toBe(TaskRunState.DELIVERING);
     // publishContent must NOT have been called during pack()
     expect(publishContentMock).not.toHaveBeenCalled();
   });
@@ -237,7 +237,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     await drivePackTransition(engine, requestId, workingDir);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.DELIVERING);
+    expect(intent.state).toBe(TaskRunState.DELIVERING);
   });
 
   // ── deliver() calls publishContent AFTER claimDelivery succeeds ─────────────
@@ -254,7 +254,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
 
     // publishContent called exactly once after claimDelivery
     expect(publishContentMock).toHaveBeenCalledTimes(1);
@@ -284,7 +284,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     expect(publishContentMock).toHaveBeenCalledTimes(1);
   });
 
@@ -297,7 +297,7 @@ describe('Engine IdentityPublisher wiring (PR#37 review2 must-fix #2)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
   });
 
   it('setMetadata is idempotent on retry — publishContent called with same evidenceHash on repeated deliver()', async () => {

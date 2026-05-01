@@ -3,8 +3,8 @@
  * Claude Code session with two MCP tools (read_chainlink_price +
  * submit_prediction) and harvests the model's probability + rationale.
  *
- * Feature-flagged in main.ts via config.harnesses.bySolverType['prediction.v0'];
- * baseline (prediction-v0-baseline) remains the default. Flip once the
+ * Selected through SolverNet `harness` config; baseline
+ * (prediction-v0-baseline) remains available as a deterministic override. Flip once the
  * isolation test (test/harnesses/impls/claude-mcp-prediction/isolation.test.ts)
  * is green on ≥3 separate runs.
  *
@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/desired-state.js';
-import { PredictionV0IntentSchema } from '../../../types/prediction.js';
+import { PredictionV0TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
 import { spawnSession } from './session-orchestrator.js';
@@ -43,10 +43,10 @@ export class ClaudeMcpPredictionImpl implements Harness {
   }
 
   async canAttempt(
-    intent: Task,
+    task: Task,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const parsed = PredictionV0IntentSchema.safeParse(intent);
-    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 intent: ${parsed.error.message}` };
+    const parsed = PredictionV0TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false, reason: 'window already closed' };
     return { ok: true };
   }
@@ -55,8 +55,8 @@ export class ClaudeMcpPredictionImpl implements Harness {
     if (this.config.stub) {
       throw new Error('claude-mcp-prediction: stub registry cannot run (requires live daemon)');
     }
-    const { task: intent, workingDir, log } = ctx;
-    const parsed = PredictionV0IntentSchema.parse(intent);
+    const { task: task, workingDir, log } = ctx;
+    const parsed = PredictionV0TaskSchema.parse(task);
     const testDeps = this.config._testDeps;
 
     // Shared submission state. The wrapper-subprocess writes to a JSONL file
@@ -168,7 +168,7 @@ export class ClaudeMcpPredictionImpl implements Harness {
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   private _finalize(
-    intent: import('../../../types/prediction.js').PredictionV0Intent,
+    task: import('../../../types/prediction.js').PredictionV0Task,
     sessionId: string,
     transcriptPath: string,
     submission: SubmissionState,
@@ -207,8 +207,8 @@ export class ClaudeMcpPredictionImpl implements Harness {
         rationale: submission.rationale,
         sessionId,
         transcriptPath,
-        feed: intent.spec.oracle.feed,
-        venue: intent.spec.oracle.venue,
+        feed: task.spec.oracle.feed,
+        venue: task.spec.oracle.venue,
         sessionDurationMs: endedAt - startedAt,
       },
       solutionPayload: {

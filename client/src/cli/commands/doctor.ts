@@ -27,7 +27,7 @@ import {
   checkRpcNetwork as defaultCheckRpcNetwork,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
 } from '../../preflight/rpc-network.js';
-import { SOLVER_TYPES } from '../../intents/kinds/index.js';
+import { SOLVER_TYPES } from '../../solver-types/index.js';
 
 export interface DoctorDeps extends BaseCommandDeps {
   checkClaudeBinary: typeof defaultCheckClaudeBinary;
@@ -355,11 +355,11 @@ Examples:
 
       // portfolio.v0 checks — only run if the operator has configured a
       // portfolio.v0 desired state. Otherwise, reporting `hl_api_wallet: fail`
-      // on a fresh operator who hasn't submitted an HL intent is false-alarm
+      // on a fresh operator who hasn't submitted an HL task is false-alarm
       // noise. Operators who want the HL-specific preflight in isolation can
       // run those checks under a dedicated verb once one exists.
       const portfolioKind = SOLVER_TYPES['portfolio.v0']!.solverType;
-      const hasPortfolioV0 = config.desiredStates.some((d) => d.solverType === portfolioKind);
+      const hasPortfolioV0 = config.tasks.some((d) => d.solverType === portfolioKind);
       if (hasPortfolioV0) {
         const implStateDirRoot = config.engine.implStateDirRoot;
         const hlImplStateDir = join(implStateDirRoot, 'claude-mcp-hyperliquid');

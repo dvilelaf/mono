@@ -4,16 +4,16 @@
  * Kept intentionally static (no branching) so tests can snapshot deterministically.
  */
 
-import type { PredictionApyV0Intent } from '../../../types/prediction-apy.js';
+import type { PredictionApyV0Task } from '../../../types/prediction-apy.js';
 
-export function buildSessionPrompt(intent: PredictionApyV0Intent, sessionId: string): string {
-  const { oracle, metric, question } = intent.spec;
-  const { window } = intent;
+export function buildSessionPrompt(task: PredictionApyV0Task, sessionId: string): string {
+  const { oracle, metric, question } = task.spec;
+  const { window } = task;
 
   return [
     `Session: ${sessionId}`,
     '',
-    'You are evaluating a Jinn prediction.apy.v0 intent. Predict the time-weighted-average (TWA) supply APY for the reserve, expressed as an integer in basis points (bps), and submit it via submit_apy_prediction.',
+    'You are evaluating a Jinn prediction.apy.v0 task. Predict the time-weighted-average (TWA) supply APY for the reserve, expressed as an integer in basis points (bps), and submit it via submit_apy_prediction.',
     '',
     'Ground truth (for scoring) is computed at resolution as follows:',
     '  - Take sampleCount evenly spaced timestamps in [resolveTs - twaWindowSeconds, resolveTs].',
@@ -26,7 +26,7 @@ export function buildSessionPrompt(intent: PredictionApyV0Intent, sessionId: str
     `TWA window:     ${metric.twaWindowSeconds}s with ${metric.sampleCount} samples`,
     `Tolerance:      ±${metric.toleranceBps} bps (for scoring)`,
     '',
-    `Intent window:  [${new Date(window.startTs).toISOString()}, ${new Date(window.endTs).toISOString()}]`,
+    `Task window:  [${new Date(window.startTs).toISOString()}, ${new Date(window.endTs).toISOString()}]`,
     `Resolve at:     ${new Date(question.resolveTs).toISOString()}`,
     '',
     'You have exactly two tools:',

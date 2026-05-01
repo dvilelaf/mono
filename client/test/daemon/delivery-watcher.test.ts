@@ -13,7 +13,7 @@ function makeSignedEnvelopeJson(overrides?: Partial<Record<string, unknown>>): s
     role: 'restoration',
     generatedAt: 1700000000000,
     task: {
-      cid: 'bafy-intent',
+      cid: 'bafy-task',
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 100,
       requestId: '0x' + 'cd'.repeat(32),

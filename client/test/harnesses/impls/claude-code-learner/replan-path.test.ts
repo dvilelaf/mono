@@ -49,7 +49,7 @@ describe('claude-code-learner replan path', () => {
       const wd = inputs.workingDir;
 
       // Outer phases (Orient, Strategize, Plan v1).
-      fakeOrientSummary(wd, inputs.intentId, inputs.intentKind ?? 'unknown.kind');
+      fakeOrientSummary(wd, inputs.signedTaskId, inputs.signedTaskKind ?? 'unknown.kind');
       fakeStrategy(wd, 'early-return');
       fakePlan(wd, 1);
 

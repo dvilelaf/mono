@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { withTempStore } from '@test/store.js';
-import { IntentPersistence } from '../../src/harnesses/engine/persistence.js';
+import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { gatherPortfolioV0Status } from '../../src/api/portfolio-v0-build.js';
 
 function seedIntent(
-  persistence: IntentPersistence,
+  persistence: TaskRunPersistence,
   requestId: string,
   windowStartTs = Date.now(),
   windowEndTs = Date.now() + 3600_000,
@@ -22,7 +22,7 @@ function seedIntent(
 }
 
 describe('gatherPortfolioV0Status', () => {
-  it('returns empty lists when no intents exist', async () => {
+  it('returns empty lists when no tasks exist', async () => {
     await withTempStore(async (store) => {
       const result = gatherPortfolioV0Status(store);
       expect(result.inFlight).toEqual([]);
@@ -31,9 +31,9 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('lists in-flight intents in DISCOVERED state', async () => {
+  it('lists in-flight tasks in DISCOVERED state', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-1');
       seedIntent(persistence, 'req-2');
 
@@ -46,9 +46,9 @@ describe('gatherPortfolioV0Status', () => {
     });
   });
 
-  it('moves intent to recentVerdicts once FAILED', async () => {
+  it('moves task to recentVerdicts once FAILED', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-fail');
       persistence.markFailed('req-fail', 'test failure reason');
 
@@ -63,7 +63,7 @@ describe('gatherPortfolioV0Status', () => {
 
   it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
-      const persistence = new IntentPersistence(store.db);
+      const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-spec');
 
       const result = gatherPortfolioV0Status(store);

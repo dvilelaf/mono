@@ -4,7 +4,7 @@
  * §6.6 workdir layout, §5.3 artifact artifactType conventions.
  *
  * Responsibilities:
- *   1. Provision workingDir at PRE_SNAPSHOT time: write intent.json, env/ files,
+ *   1. Provision workingDir at PRE_SNAPSHOT time: write task.json, env/ files,
  *      sessions/ dir.
  *   2. After impl returns: walk workingDir, read OUTPUTS.json (if present),
  *      compute sha256, upload each artifact to IPFS, return structured list.
@@ -98,19 +98,19 @@ export interface PackagingDeps {
  * Provision the working directory at PRE_SNAPSHOT time.
  *
  * Creates:
- *   <workingDir>/intent.json     — canonical Task JSON
+ *   <workingDir>/task.json     — canonical Task JSON
  *   <workingDir>/env/<VAR>       — one file per env var (mode 0600)
  *   <workingDir>/sessions/       — directory for session transcripts
  */
 export function provisionWorkingDir(
   workingDir: string,
-  intent: Task,
+  task: Task,
   envVars: Record<string, string> = {},
 ): void {
   mkdirSync(workingDir, { recursive: true, mode: 0o755 });
 
-  // intent.json
-  writeFileSync(join(workingDir, 'intent.json'), JSON.stringify(intent, null, 2), 'utf-8');
+  // task.json
+  writeFileSync(join(workingDir, 'task.json'), JSON.stringify(task, null, 2), 'utf-8');
 
   // env/ directory — one file per var, mode 0600
   const envDir = join(workingDir, 'env');

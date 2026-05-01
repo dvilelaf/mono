@@ -8,11 +8,11 @@ import type {
   Solution,
   ReadyStatus,
   EnableResult,
-  IntentEnableMetadata,
+  HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { PublicClient } from 'viem';
-import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
+import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
 import { persistencePredict } from './strategy.js';
 
@@ -52,19 +52,19 @@ export class PredictionApyV0BaselineImpl implements Harness {
     return { ready: true };
   }
 
-  enableMetadata(): IntentEnableMetadata {
+  enableMetadata(): HarnessEnableMetadata {
     return {
       description: 'prediction.apy.v0 — submit APY prediction in bps from Aave v3 reserve data.',
     };
   }
 
-  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(_ctx: { args: Record<string, string | undefined> }): Promise<EnableResult> {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: import('../../../types/desired-state.js').Task) {
-    const parsed = PredictionApyV0IntentSchema.safeParse(intent);
-    if (!parsed.success) return { ok: false as const, reason: `Invalid prediction.apy.v0 intent: ${parsed.error.message}` };
+  async canAttempt(task: import('../../../types/desired-state.js').Task) {
+    const parsed = PredictionApyV0TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false as const, reason: `Invalid prediction.apy.v0 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false as const, reason: 'window already closed' };
     return { ok: true as const };
   }
@@ -73,7 +73,7 @@ export class PredictionApyV0BaselineImpl implements Harness {
     if (this.config.stub) {
       throw new Error('prediction-apy-v0-baseline: stub registry cannot run (requires live daemon)');
     }
-    const parsed = PredictionApyV0IntentSchema.parse(ctx.task);
+    const parsed = PredictionApyV0TaskSchema.parse(ctx.task);
     const { venue, pool, reserve } = parsed.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
     const rpcUrl = this.config.archiveRpcUrl ?? this.config.rpcUrl;

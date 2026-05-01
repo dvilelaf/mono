@@ -1,12 +1,12 @@
 /**
- * legacy-claude — Harness fallback for spec=undefined (health-check) intents.
+ * legacy-claude — Harness fallback for health-check Tasks with no solverType.
  *
- * Wraps the existing ClaudeRunner so that intents with no solverType continue to
- * work via the RestorationEngine. Registered as the default fallback in the impl
+ * Wraps the existing ClaudeRunner so that Tasks with no solverType continue to
+ * work via the TaskEngine. Registered as the default fallback in the Harness
  * registry (supports solverType === '').
  *
- * The engine calls findFor({ kind: '' }) for legacy intents because
- * PersistedIntent.solverType is null → coerced to '' in runImpl().
+ * The engine calls findFor({ solverType: '' }) for these Tasks because
+ * PersistedTaskRun.solverType is null → coerced to '' in runImpl().
  */
 
 import { type Runner, type RunnerContext } from '../../../runner/runner.js';
@@ -16,7 +16,7 @@ import type {
   Solution,
   ReadyStatus,
   EnableResult,
-  IntentEnableMetadata,
+  HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { TaskResult } from '../../../types/index.js';
@@ -62,8 +62,8 @@ export class LegacyClaudeImpl implements Harness {
   constructor(private readonly config: LegacyClaudeConfig) {}
 
   /**
-   * Supports the empty-string kind produced by the engine for intents with no spec.
-   * Legacy release-acceptance jobs use no spec for both restoration and evaluation,
+   * Supports the empty-string solverType produced by the engine for Tasks with no solverType.
+   * Legacy release-acceptance jobs use no SolverType for both restoration and evaluation,
    * so both phases route through the Claude runner.
    */
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -79,24 +79,24 @@ export class LegacyClaudeImpl implements Harness {
     return { ready: true };
   }
 
-  enableMetadata(): IntentEnableMetadata {
+  enableMetadata(): HarnessEnableMetadata {
     return {
       description:
-        'legacy-claude — handles health-check intents (no solverType). Always enabled.',
+        'legacy-claude — handles health-check tasks (no solverType). Always enabled.',
     };
   }
 
-  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(_ctx: { args: Record<string, string | undefined> }): Promise<EnableResult> {
     return { status: 'ready' };
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {
-    const { task: intent, workingDir, log } = ctx;
+    const { task: task, workingDir, log } = ctx;
 
-    log({ level: 'info', msg: 'legacy-claude: starting', data: { requestId: intent.id } });
+    log({ level: 'info', msg: 'legacy-claude: starting', data: { requestId: task.id } });
 
     const runnerCtx: RunnerContext = {
-      requestId: intent.id,
+      requestId: task.id,
       workingDirectory: workingDir ?? this.config.workingDirectory ?? '/tmp',
       timeoutMs: this.config.timeoutMs ?? 300_000,
       storePath: this.config.storePath,
@@ -107,7 +107,7 @@ export class LegacyClaudeImpl implements Harness {
 
     let result: TaskResult;
     try {
-      result = await this.config.runner.run(intent, runnerCtx);
+      result = await this.config.runner.run(task, runnerCtx);
     } catch (err) {
       if (isClaudeUnavailableError(err)) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -116,8 +116,8 @@ export class LegacyClaudeImpl implements Harness {
       throw err;
     }
 
-    const resultTag = intent.role === 'evaluation' ? 'evaluation-verdict' : 'restoration-result';
-    const recoveredData = result.data || await this.recoverPublishedArtifact(intent.id, resultTag);
+    const resultTag = task.role === 'evaluation' ? 'evaluation-verdict' : 'restoration-result';
+    const recoveredData = result.data || await this.recoverPublishedArtifact(task.id, resultTag);
     const artifactCount = result.artifacts?.length ?? (recoveredData ? 1 : 0);
 
     log({ level: 'info', msg: 'legacy-claude: runner completed', data: { hasData: !!recoveredData } });
@@ -134,8 +134,8 @@ export class LegacyClaudeImpl implements Harness {
 	      artifacts: [],
 	    };
 
-	    if (intent.role === 'evaluation') {
-	      output.verdictPayload = legacyVerdictPayload(intent, recoveredData);
+	    if (task.role === 'evaluation') {
+	      output.verdictPayload = legacyVerdictPayload(task, recoveredData);
 	    }
 
 	    return output;
@@ -168,7 +168,7 @@ export class LegacyClaudeImpl implements Harness {
 
 export default LegacyClaudeImpl;
 
-function legacyVerdictPayload(intent: { id: string; description: string }, recoveredData: string): Record<string, unknown> {
+function legacyVerdictPayload(task: { id: string; description: string }, recoveredData: string): Record<string, unknown> {
   if (recoveredData) {
     try {
       const parsed = JSON.parse(recoveredData) as unknown;
@@ -183,10 +183,10 @@ function legacyVerdictPayload(intent: { id: string; description: string }, recov
   return {
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
-    requestId: intent.id,
-    desiredStateId: intent.id,
+    requestId: task.id,
+    desiredStateId: task.id,
     success: Boolean(recoveredData),
-    reason: recoveredData || `Legacy evaluation completed for "${intent.description}"`,
+    reason: recoveredData || `Legacy evaluation completed for "${task.description}"`,
     data: recoveredData,
     evaluatedAt: new Date().toISOString(),
   };

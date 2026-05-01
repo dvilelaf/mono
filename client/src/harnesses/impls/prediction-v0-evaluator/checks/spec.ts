@@ -1,8 +1,8 @@
 import type { Check } from '../types.js';
-import type { PredictionV0Intent } from '../../../../types/prediction.js';
+import type { PredictionV0Task } from '../../../../types/prediction.js';
 
 export function checkQuestionKindSupported(
-  question: PredictionV0Intent['spec']['question'] | { kind: string },
+  question: PredictionV0Task['spec']['question'] | { kind: string },
 ): Check {
   if (question.kind === 'threshold') {
     const op = (question as any).operator;

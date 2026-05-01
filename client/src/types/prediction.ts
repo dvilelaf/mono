@@ -1,5 +1,5 @@
 /**
- * prediction.v0 — typed intent spec.
+ * prediction.v0 — typed task spec.
  *
  * §4 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  *
@@ -28,7 +28,7 @@ const RangeQuestionSchema = z.object({
   resolveTs: z.number().int(),
 });
 
-// ── Spec + eligibility + intent ────────────────────────────────────────────────
+// ── Spec + eligibility + task ────────────────────────────────────────────────
 
 export const PredictionV0SpecSchema = z.object({
   oracle: z.object({
@@ -47,7 +47,7 @@ export const PredictionV0EligibilitySchema = z.object({
 
 export type PredictionV0Eligibility = z.infer<typeof PredictionV0EligibilitySchema>;
 
-export const PredictionV0IntentSchema = z
+export const PredictionV0TaskSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
@@ -77,4 +77,4 @@ export const PredictionV0IntentSchema = z
     path: ['spec', 'question', 'resolveTs'],
   });
 
-export type PredictionV0Intent = z.infer<typeof PredictionV0IntentSchema>;
+export type PredictionV0Task = z.infer<typeof PredictionV0TaskSchema>;

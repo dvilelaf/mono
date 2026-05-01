@@ -14,7 +14,7 @@ import {
 import type { Role } from '../envelope.js';
 
 /**
- * Passthrough payload schema for legacy / untyped intents.
+ * Passthrough payload schema for legacy / untyped tasks.
  * Accepts any object — no structural validation.
  */
 const LegacyPassthroughSchema = z.record(z.unknown());

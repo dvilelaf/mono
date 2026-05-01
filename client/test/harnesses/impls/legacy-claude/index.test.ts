@@ -1,5 +1,5 @@
 /**
- * Tests for LegacyClaudeImpl — the Harness fallback for spec=undefined intents.
+ * Tests for LegacyClaudeImpl — the Harness fallback for Tasks with no solverType.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -13,7 +13,7 @@ import type { Task } from '../../../../src/types/desired-state.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function makeIntent(overrides: Partial<Task> = {}): Task {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'test-request-id',
     description: 'The service should be healthy.',
@@ -21,9 +21,9 @@ function makeIntent(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function makeContext(intent: Task, workingDir: string): HarnessContext {
+function makeContext(task: Task, workingDir: string): HarnessContext {
   return {
-    task: intent,
+    task,
     implStateDir: join(workingDir, 'impl-state'),
     workingDir,
     log: vi.fn(),
@@ -41,19 +41,19 @@ function makeContext(intent: Task, workingDir: string): HarnessContext {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('LegacyClaudeImpl', () => {
-  it('supports spec.kind="" (legacy intents from engine runImpl)', () => {
+  it('supports empty solverType for health-check Tasks', () => {
     const runner: Runner = { run: vi.fn() };
     const impl = new LegacyClaudeImpl({ runner });
     expect(impl.supports({ solverType: '' })).toBe(true);
   });
 
-  it('supports spec.kind="legacy"', () => {
+  it('supports solverType="legacy"', () => {
     const runner: Runner = { run: vi.fn() };
     const impl = new LegacyClaudeImpl({ runner });
     expect(impl.supports({ solverType: 'legacy' })).toBe(true);
   });
 
-  it('does not support other spec kinds', () => {
+  it('does not support other SolverTypes', () => {
     const runner: Runner = { run: vi.fn() };
     const impl = new LegacyClaudeImpl({ runner });
     expect(impl.supports({ solverType: 'portfolio.v0' })).toBe(false);
@@ -99,12 +99,12 @@ describe('LegacyClaudeImpl', () => {
         daemonApiUrl: 'http://127.0.0.1:7331',
       });
 
-      const intent = makeIntent();
-      const ctx = makeContext(intent, workingDir);
+      const task = makeTask();
+      const ctx = makeContext(task, workingDir);
 
       const output = await impl.run(ctx);
 
-      // Runner was called with the intent and a correct context
+      // Runner was called with the Task and a correct context.
       expect(runner.run).toHaveBeenCalledOnce();
       const [calledIntent, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [Task, RunnerContext];
       expect(calledIntent.id).toBe('test-request-id');
@@ -127,7 +127,7 @@ describe('LegacyClaudeImpl', () => {
       };
 
       const impl = new LegacyClaudeImpl({ runner });
-      const ctx = makeContext(makeIntent(), workingDir);
+      const ctx = makeContext(makeTask(), workingDir);
       const output = await impl.run(ctx);
 
       expect(output.gating['result']).toBe('custom result data');
@@ -145,7 +145,7 @@ describe('LegacyClaudeImpl', () => {
       };
 
       const impl = new LegacyClaudeImpl({ runner });
-      const ctx = makeContext(makeIntent({ role: 'evaluation' }), workingDir);
+      const ctx = makeContext(makeTask({ role: 'evaluation' }), workingDir);
       const output = await impl.run(ctx);
 
       expect(output.verdictPayload).toEqual(verdict);
@@ -157,7 +157,7 @@ describe('LegacyClaudeImpl', () => {
       };
 
       const impl = new LegacyClaudeImpl({ runner });
-      const ctx = makeContext(makeIntent(), workingDir);
+      const ctx = makeContext(makeTask(), workingDir);
       const output = await impl.run(ctx);
 
       expect(output.gating['result']).toBe('');
@@ -170,7 +170,7 @@ describe('LegacyClaudeImpl', () => {
       };
 
       const impl = new LegacyClaudeImpl({ runner, workingDirectory: '/default' });
-      const ctx = makeContext(makeIntent(), workingDir);
+      const ctx = makeContext(makeTask(), workingDir);
       await impl.run(ctx);
 
       const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [Task, RunnerContext];
@@ -184,7 +184,7 @@ describe('LegacyClaudeImpl', () => {
       };
 
       const impl = new LegacyClaudeImpl({ runner, workingDirectory: '/custom-default' });
-      const ctx = makeContext(makeIntent(), workingDir);
+      const ctx = makeContext(makeTask(), workingDir);
       // Override workingDir to simulate undefined
       const ctxNoDir = { ...ctx, workingDir: undefined as unknown as string };
       await impl.run(ctxNoDir);
@@ -202,7 +202,7 @@ describe('LegacyClaudeImpl', () => {
         selfSafeAddress: `0x${'b'.repeat(40)}`,
       };
       const impl = new LegacyClaudeImpl({ runner, corpusEnv });
-      await impl.run(makeContext(makeIntent(), workingDir));
+      await impl.run(makeContext(makeTask(), workingDir));
 
       const [, calledCtx] = (runner.run as ReturnType<typeof vi.fn>).mock.calls[0] as [Task, RunnerContext];
       expect(calledCtx.corpusEnv).toEqual(corpusEnv);
@@ -210,10 +210,10 @@ describe('LegacyClaudeImpl', () => {
   });
 });
 
-// ── Integration: engine dispatch by spec kind ──────────────────────────────────
+// ── Integration: engine dispatch by SolverType ────────────────────────────────
 
 describe('HarnessRegistry dispatch (integration)', () => {
-  it('routes spec=undefined intents to legacy-claude via default fallback', async () => {
+  it('routes Tasks with no solverType to legacy-claude via default fallback', async () => {
     const { HarnessRegistry } = await import('../../../../src/harnesses/engine/registry.js');
     const { LegacyClaudeImpl: LCI } = await import('../../../../src/harnesses/impls/legacy-claude/index.js');
 
@@ -221,20 +221,20 @@ describe('HarnessRegistry dispatch (integration)', () => {
     const registry = new HarnessRegistry({ default: 'legacy-claude' });
     registry.register(new LCI({ runner }));
 
-    // spec.kind='' is what the engine passes for solverType=null intents
+    // solverType='' is what the engine passes for solverType=null Tasks.
     const impl = registry.findFor({ solverType: '' });
     expect(impl).toBeDefined();
     expect(impl?.name).toBe('legacy-claude');
   });
 
-  it('routes portfolio.v0 to the correct impl by bySolverType config', async () => {
+  it('routes portfolio.v0 to the SolverNet-selected Harness', async () => {
     const { HarnessRegistry } = await import('../../../../src/harnesses/engine/registry.js');
     const { ClaudeMcpHyperliquidImpl } = await import('../../../../src/harnesses/impls/claude-mcp-hyperliquid/index.js');
     const { LegacyClaudeImpl: LCI } = await import('../../../../src/harnesses/impls/legacy-claude/index.js');
 
     const runner: Runner = { run: vi.fn() };
     const registry = new HarnessRegistry({
-      bySolverType: { 'portfolio.v0': 'claude-mcp-hyperliquid' },
+      solverTypeHarnesses: { 'portfolio.v0': 'claude-mcp-hyperliquid' },
       default: 'legacy-claude',
     });
 
@@ -246,15 +246,14 @@ describe('HarnessRegistry dispatch (integration)', () => {
   });
 
   it('routes portfolio.v0 + type=evaluation to portfolio-v0-evaluator via supports() first-match', async () => {
-    // In the unified-payload model, portfolio-v0-evaluator is no longer registered
-    // via bySolverType['portfolio.v0.eval']. It is selected via first-match supports() when
-    // kind='portfolio.v0' and type='evaluation'.
+    // Evaluation Tasks are selected via first-match supports() when
+    // solverType='portfolio.v0' and role='evaluation'.
     const { HarnessRegistry } = await import('../../../../src/harnesses/engine/registry.js');
     const { PortfolioV0Evaluator } = await import('../../../../src/harnesses/impls/portfolio-v0-evaluator/index.js');
     const { LegacyClaudeImpl: LCI } = await import('../../../../src/harnesses/impls/legacy-claude/index.js');
 
     const runner: Runner = { run: vi.fn() };
-    // No bySolverType entry for portfolio.v0 — evaluator is selected via supports()
+    // No SolverNet-selected Harness for portfolio.v0 — evaluator is selected via supports().
     const registry = new HarnessRegistry({
       default: 'legacy-claude',
     });
@@ -266,15 +265,15 @@ describe('HarnessRegistry dispatch (integration)', () => {
     expect(impl?.name).toBe('portfolio-v0-evaluator');
   });
 
-  it('returns undefined for unknown spec kind when no default matches', async () => {
+  it('returns undefined for unknown SolverType when no default matches', async () => {
     const { HarnessRegistry } = await import('../../../../src/harnesses/engine/registry.js');
     const { LegacyClaudeImpl: LCI } = await import('../../../../src/harnesses/impls/legacy-claude/index.js');
 
     const runner: Runner = { run: vi.fn() };
-    const registry = new HarnessRegistry({});  // no default, no bySolverType
+    const registry = new HarnessRegistry({});
     registry.register(new LCI({ runner }));
 
-    // 'unknown-kind' does not match legacy-claude.supports()
+    // Unknown SolverTypes do not match legacy-claude.supports().
     const impl = registry.findFor({ solverType: 'unknown-kind' });
     expect(impl).toBeUndefined();
   });

@@ -49,7 +49,7 @@ const fakeConfig = {
   peers: [],
   ipfsRegistryUrl: 'https://registry.autonolas.tech',
   ipfsGatewayUrl: 'https://gateway.autonolas.tech',
-  desiredStates: [],
+  tasks: [],
   stakingMode: 'standard' as const,
   targetServices: 1,
   debug: false,

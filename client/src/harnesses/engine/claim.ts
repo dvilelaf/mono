@@ -35,8 +35,8 @@ export interface MarketplaceClaimer {
 }
 
 /**
- * Parameters describing a single intent's timing window.
- * Extracted from PersistedIntent for testability (no DB dependency).
+ * Parameters describing a single task's timing window.
+ * Extracted from PersistedTaskRun for testability (no DB dependency).
  */
 export interface ClaimWindow {
   requestId: string;
@@ -53,7 +53,7 @@ export interface ClaimResult {
 // ── Two-layer claim ───────────────────────────────────────────────────────────
 
 /**
- * Execute the two-layer claim for a single intent.
+ * Execute the two-layer claim for a single task.
  *
  * // Claim ordering: ClaimRegistry FIRST (cheap coordination lock), marketplace SECOND.
  * // Spec §6.1 lists them in opposite order but doesn't enforce sequencing — registry-first
@@ -61,7 +61,7 @@ export interface ClaimResult {
  * // is on it" cleanly; (b) marketplace claim is more expensive (Safe tx + actual gas);
  * // (c) we release ClaimRegistry on marketplace failure to avoid leaking a stale claim.
  *
- * @param claimWindow - Timing data for the intent (requestId, windowStartTs).
+ * @param claimWindow - Timing data for the task (requestId, windowStartTs).
  * @param registryClient - ClaimRegistryClient for the deployed ClaimRegistry contract.
  * @param marketplaceClaimer - Adapter whose claimRequest() performs the marketplace claim.
  * @returns ClaimResult on success.
@@ -137,7 +137,7 @@ export async function executeTwoLayerClaim(
 // ── Graceful release ──────────────────────────────────────────────────────────
 
 /**
- * Release the ClaimRegistry claim for an intent that was CLAIMED but whose
+ * Release the ClaimRegistry claim for an task that was CLAIMED but whose
  * work window has not yet started (windowStartTs not reached).
  *
  * Used during graceful engine shutdown. No-op if we don't hold the claim.

@@ -18,15 +18,16 @@ describe('Task', () => {
   });
 });
 
-describe('parseTask intent hydration', () => {
-  it('hydrates loose fields from intent when loose fields are absent', () => {
-    const intent = {
-      schemaVersion: 'intent.v1' as const,
+describe('parseTask signedTask hydration', () => {
+  it('hydrates loose fields from signedTask when loose fields are absent', () => {
+    const signedTask = {
+      schemaVersion: 'task.v1' as const,
       id: 'abc',
-      kind: 'portfolio.v0',
+      solverType: 'portfolio.v0',
+      role: 'restoration' as const,
       description: 'trade',
       window: { startTs: 1, endTs: 86400001 },
-      spec: { kind: 'portfolio.v0' },
+      spec: {},
       eligibility: {},
       creator: { safeAddress: '0xaaa', agentEoa: '0xbbb' },
       createdAt: 1,
@@ -38,22 +39,23 @@ describe('parseTask intent hydration', () => {
       },
     };
 
-    const parsed = parseTask({ intent });
+    const parsed = parseTask({ signedTask });
     expect(parsed.description).toBe('trade');
     expect(parsed.window).toEqual({ startTs: 1, endTs: 86400001 });
     expect(parsed.solverType).toBe('portfolio.v0');
     expect(parsed.spec).toEqual({});
-    expect(parsed.intent).toBeDefined();
+    expect(parsed.signedTask).toBeDefined();
   });
 
-  it('loose fields override intent fields when both are present', () => {
-    const intent = {
-      schemaVersion: 'intent.v1' as const,
+  it('loose fields override signedTask fields when both are present', () => {
+    const signedTask = {
+      schemaVersion: 'task.v1' as const,
       id: 'abc',
-      kind: 'portfolio.v0',
-      description: 'from-intent',
+      solverType: 'portfolio.v0',
+      role: 'restoration' as const,
+      description: 'from-task',
       window: { startTs: 1, endTs: 86400001 },
-      spec: { kind: 'portfolio.v0' },
+      spec: {},
       eligibility: {},
       creator: { safeAddress: '0xaaa', agentEoa: '0xbbb' },
       createdAt: 1,
@@ -67,7 +69,7 @@ describe('parseTask intent hydration', () => {
 
     const parsed = parseTask({
       description: 'loose-wins',
-      intent,
+      signedTask,
     });
     expect(parsed.description).toBe('loose-wins');
   });

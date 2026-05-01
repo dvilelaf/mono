@@ -202,8 +202,8 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   const endTs = startedAt + 600_000; // 10-minute window per cycle
 
   const intent = {
-    id: params.intentId,
-    description: params.intentDescription,
+    id: params.signedTaskId,
+    description: params.signedTaskDescription,
     solverType: 'smoke-test',
     window: { startTs, endTs },
     spec: { fieldNames: ['foo', 'bar', 'baz'], fieldValue: params.fieldValue },

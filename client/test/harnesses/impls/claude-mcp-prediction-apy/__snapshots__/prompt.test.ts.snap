@@ -3,7 +3,7 @@
 exports[`buildSessionPrompt > matches snapshot (static template + fixed timestamps) 1`] = `
 "Session: apy-snap-session
 
-You are evaluating a Jinn prediction.apy.v0 intent. Predict the time-weighted-average (TWA) supply APY for the reserve, expressed as an integer in basis points (bps), and submit it via submit_apy_prediction.
+You are evaluating a Jinn prediction.apy.v0 task. Predict the time-weighted-average (TWA) supply APY for the reserve, expressed as an integer in basis points (bps), and submit it via submit_apy_prediction.
 
 Ground truth (for scoring) is computed at resolution as follows:
   - Take sampleCount evenly spaced timestamps in [resolveTs - twaWindowSeconds, resolveTs].
@@ -16,7 +16,7 @@ Venue:          aave-v3-base-sepolia
 TWA window:     3600s with 12 samples
 Tolerance:      ±50 bps (for scoring)
 
-Intent window:  [2023-11-14T22:13:20.000Z, 2023-11-14T22:23:20.000Z]
+Task window:  [2023-11-14T22:13:20.000Z, 2023-11-14T22:23:20.000Z]
 Resolve at:     2023-11-14T22:28:20.000Z
 
 You have exactly two tools:

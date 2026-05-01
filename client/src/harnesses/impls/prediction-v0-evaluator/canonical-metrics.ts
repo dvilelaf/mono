@@ -3,7 +3,7 @@
  *
  * §6 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  */
-import type { PredictionV0Intent } from '../../../types/prediction.js';
+import type { PredictionV0Task } from '../../../types/prediction.js';
 
 /** Compare two non-negative decimal strings. Returns negative/zero/positive. */
 export function decCmp(a: string, b: string): number {
@@ -23,7 +23,7 @@ export function decCmp(a: string, b: string): number {
 export type GroundTruth = 'YES' | 'NO';
 
 export function resolveGroundTruth(
-  question: PredictionV0Intent['spec']['question'],
+  question: PredictionV0Task['spec']['question'],
   price: string,
 ): GroundTruth {
   if (question.kind === 'threshold') {

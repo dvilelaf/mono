@@ -5,12 +5,12 @@
  *
  * Wraps the Store's underlying Database instance via the Store class — the
  * Store itself holds the DB handle; we extend it with engine-specific queries.
- * To keep concerns clean, this module exports a standalone `IntentPersistence`
+ * To keep concerns clean, this module exports a standalone `TaskRunPersistence`
  * class that is constructed with a `Database` instance (passed from Store).
  */
 
 import type Database from 'better-sqlite3';
-import { assertValidTransition, TERMINAL_STATES, type IntentState } from './state.js';
+import { assertValidTransition, TERMINAL_STATES, type TaskRunState } from './state.js';
 import type { Task } from '../../types/desired-state.js';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
@@ -20,14 +20,14 @@ import type { Task } from '../../types/desired-state.js';
  * updated by a concurrent call before the UPDATE could land.
  *
  * Callers should treat this as a signal to retry from the fresh DB state or
- * abandon the operation (the concurrent call has already advanced the intent).
+ * abandon the operation (the concurrent call has already advanced the task).
  */
 export class ConcurrentTransitionError extends Error {
   readonly requestId: string;
-  readonly expectedState: IntentState;
+  readonly expectedState: TaskRunState;
   readonly attemptedNewState: string;
 
-  constructor(requestId: string, expectedState: IntentState, attemptedNewState: string) {
+  constructor(requestId: string, expectedState: TaskRunState, attemptedNewState: string) {
     super(
       `ConcurrentTransitionError: ${requestId} expected state=${expectedState} but DB row has changed (attempted=${attemptedNewState})`,
     );
@@ -40,8 +40,8 @@ export class ConcurrentTransitionError extends Error {
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
-export const RESTORATION_INTENTS_SCHEMA = `
-CREATE TABLE IF NOT EXISTS restoration_intents (
+export const TASK_RUNS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS task_runs (
   request_id              TEXT PRIMARY KEY,
   task_cid              TEXT NOT NULL,
   onchain_creation_tx     TEXT NOT NULL,
@@ -89,22 +89,23 @@ CREATE TABLE IF NOT EXISTS restoration_intents (
   --   RUNNING → PACKAGING transition. Enables pack() to recover solution outputs
   --   after a crash without re-executing the impl. NULL once pack() succeeds.
   solution_outputs_json       TEXT,
+  runtime_plugins_json        TEXT,
 
   failure_reason          TEXT,
   failure_at              INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_restoration_intents_state
-  ON restoration_intents(state);
+CREATE INDEX IF NOT EXISTS idx_task_runs_state
+  ON task_runs(state);
 
-CREATE INDEX IF NOT EXISTS idx_restoration_intents_window_start_ts
-  ON restoration_intents(window_start_ts);
+CREATE INDEX IF NOT EXISTS idx_task_runs_window_start_ts
+  ON task_runs(window_start_ts);
 `;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-/** Input when first observing an intent from an on-chain event. */
-export interface PersistedIntentInput {
+/** Input when first observing an task from an on-chain event. */
+export interface PersistedTaskRunInput {
   requestId: string;
   taskCid: string;
   onchainCreationTx: string;
@@ -124,8 +125,8 @@ export interface PersistedIntentInput {
   task: Task;
 }
 
-/** Full persisted intent row (all columns). */
-export interface PersistedIntent {
+/** Full persisted task row (all columns). */
+export interface PersistedTaskRun {
   requestId: string;
   taskCid: string;
   onchainCreationTx: string;
@@ -134,7 +135,7 @@ export interface PersistedIntent {
   taskRole: 'restoration' | 'evaluation' | null;
   implName: string | null;
 
-  state: IntentState;
+  state: TaskRunState;
   stateUpdatedAt: number;
 
   workingDir: string | null;
@@ -167,10 +168,11 @@ export interface PersistedIntent {
    * Serialised Solution from runImpl, persisted before the
    * RUNNING → PACKAGING transition. Used by pack() to recover solution outputs
    * after a crash so the manifest CID remains deterministic. Null for
-   * pre-migration rows and intents that have already been packed.
+   * pre-migration rows and tasks that have already been packed.
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  runtimePluginsJson: string | null;
 
   failureReason: string | null;
   failureAt: number | null;
@@ -182,7 +184,7 @@ export interface PersistedIntent {
  * other fields (e.g. `solverType`, window timestamps) gives a compile-time error
  * instead of silently dropping the value.
  */
-export type IntentPatch = Partial<{
+export type TaskRunPatch = Partial<{
   implName: string | null;
   workingDir: string | null;
   implStateDir: string | null;
@@ -207,6 +209,7 @@ export type IntentPatch = Partial<{
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  runtimePluginsJson: string | null;
 }>;
 
 // ── Raw DB row (snake_case from SQLite) ───────────────────────────────────────
@@ -239,6 +242,7 @@ interface RawRow {
   evidence_hash: string | null;
   task_payload: string | null;
   solution_outputs_json: string | null;
+  runtime_plugins_json: string | null;
   failure_reason: string | null;
   failure_at: number | null;
 }
@@ -246,13 +250,21 @@ interface RawRow {
 // ── Migrations ────────────────────────────────────────────────────────────────
 
 /**
- * Idempotent additive migrations for `restoration_intents`.
+ * Idempotent additive migrations for `task_runs`.
  *
  * better-sqlite3 throws on duplicate column from ALTER TABLE ADD COLUMN; we
  * swallow that specific error so this is safe to invoke on every startup.
  * For new DBs the column already exists via CREATE TABLE; the ALTER is a no-op.
  */
 function runAdditiveMigrations(db: Database.Database): void {
+  const tables = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
+      .map((row) => row.name),
+  );
+  if (tables.has('restoration_intents') && !tables.has('task_runs')) {
+    db.exec('ALTER TABLE restoration_intents RENAME TO task_runs');
+  }
+
   const renamePairs: Array<{ oldName: string; newName: string }> = [
     { oldName: 'intent_cid', newName: 'task_cid' },
     { oldName: 'spec_kind', newName: 'solver_type' },
@@ -262,32 +274,33 @@ function runAdditiveMigrations(db: Database.Database): void {
   ];
 
   let existingColumns = new Set(
-    (db.pragma('table_info(restoration_intents)') as Array<{ name: string }>)
+    (db.pragma('table_info(task_runs)') as Array<{ name: string }>)
       .map(r => r.name),
   );
 
   for (const { oldName, newName } of renamePairs) {
     if (existingColumns.has(oldName) && !existingColumns.has(newName)) {
-      db.exec(`ALTER TABLE restoration_intents RENAME COLUMN ${oldName} TO ${newName}`);
+      db.exec(`ALTER TABLE task_runs RENAME COLUMN ${oldName} TO ${newName}`);
       existingColumns.delete(oldName);
       existingColumns.add(newName);
     }
   }
 
   const additions: Array<{ column: string; ddl: string }> = [
-    { column: 'task_payload', ddl: 'ALTER TABLE restoration_intents ADD COLUMN task_payload TEXT' },
-    { column: 'manifest_generated_at', ddl: 'ALTER TABLE restoration_intents ADD COLUMN manifest_generated_at TEXT NULL' },
-    { column: 'evidence_hash',         ddl: 'ALTER TABLE restoration_intents ADD COLUMN evidence_hash TEXT NULL' },
+    { column: 'task_payload', ddl: 'ALTER TABLE task_runs ADD COLUMN task_payload TEXT' },
+    { column: 'manifest_generated_at', ddl: 'ALTER TABLE task_runs ADD COLUMN manifest_generated_at TEXT NULL' },
+    { column: 'evidence_hash',         ddl: 'ALTER TABLE task_runs ADD COLUMN evidence_hash TEXT NULL' },
     // Persists solution outputs so pack() can recover a deterministic manifest CID
     // after a process restart (otherwise in-memory solutionOutputs is lost).
-    { column: 'solution_outputs_json',     ddl: 'ALTER TABLE restoration_intents ADD COLUMN solution_outputs_json TEXT' },
-    { column: 'task_role',           ddl: 'ALTER TABLE restoration_intents ADD COLUMN task_role TEXT' },
+    { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
+    { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
+    { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
   // already exists (avoids duplicate-column-name errors on newer DBs).
   existingColumns = new Set(
-    (db.pragma('table_info(restoration_intents)') as Array<{ name: string }>)
+    (db.pragma('table_info(task_runs)') as Array<{ name: string }>)
       .map(r => r.name),
   );
 
@@ -309,7 +322,7 @@ function parseJson<T>(raw: string | null): T | null {
   return JSON.parse(raw) as T;
 }
 
-function rowToIntent(row: RawRow): PersistedIntent {
+function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
     taskCid: row.task_cid,
@@ -318,7 +331,7 @@ function rowToIntent(row: RawRow): PersistedIntent {
     solverType: row.solver_type,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
     implName: row.impl_name,
-    state: row.state as IntentState,
+    state: row.state as TaskRunState,
     stateUpdatedAt: row.state_updated_at,
     workingDir: row.working_dir,
     implStateDir: row.impl_state_dir,
@@ -338,32 +351,33 @@ function rowToIntent(row: RawRow): PersistedIntent {
     evidenceHash: row.evidence_hash,
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
+    runtimePluginsJson: row.runtime_plugins_json,
     failureReason: row.failure_reason,
     failureAt: row.failure_at,
   };
 }
 
-// ── IntentPersistence ─────────────────────────────────────────────────────────
+// ── TaskRunPersistence ─────────────────────────────────────────────────────────
 
 /**
- * Low-level CRUD helpers for `restoration_intents`.
+ * Low-level CRUD helpers for `task_runs`.
  *
  * Constructed with the raw better-sqlite3 `Database` instance. The `Store`
  * class exposes it via `store.db` — callers that have a `Store` can pass
  * `store.db` here.
  */
-export class IntentPersistence {
+export class TaskRunPersistence {
   constructor(private readonly db: Database.Database) {
     runAdditiveMigrations(db);
   }
 
   /**
-   * Insert a DISCOVERED intent row. Idempotent: if a row with the same
+   * Insert a DISCOVERED task row. Idempotent: if a row with the same
    * `requestId` already exists, this is a no-op (INSERT OR IGNORE).
    */
-  insertDiscovered(input: PersistedIntentInput): void {
+  insertDiscovered(input: PersistedTaskRunInput): void {
     this.db.prepare(`
-      INSERT OR IGNORE INTO restoration_intents (
+      INSERT OR IGNORE INTO task_runs (
         request_id, task_cid, onchain_creation_tx, onchain_creation_block,
         solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts,
         task_payload
@@ -387,13 +401,13 @@ export class IntentPersistence {
   }
 
   /**
-   * Transition an intent to a new state. Validates the transition and writes
+   * Transition an task to a new state. Validates the transition and writes
    * the new state + optional patch fields atomically (persist-before-invoke).
    */
-  transition(requestId: string, toState: IntentState, patch: IntentPatch = {}): void {
+  transition(requestId: string, toState: TaskRunState, patch: TaskRunPatch = {}): void {
     const existing = this.getByRequestId(requestId);
     if (!existing) {
-      throw new Error(`Intent not found: ${requestId}`);
+      throw new Error(`Task run not found: ${requestId}`);
     }
     assertValidTransition(existing.state, toState);
 
@@ -474,12 +488,16 @@ export class IntentPersistence {
       setClauses.push('solution_outputs_json = @solutionOutputsJson');
       params['solutionOutputsJson'] = patch.solutionOutputsJson;
     }
+    if (patch.runtimePluginsJson !== undefined) {
+      setClauses.push('runtime_plugins_json = @runtimePluginsJson');
+      params['runtimePluginsJson'] = patch.runtimePluginsJson;
+    }
     // Optimistic concurrency: include AND state = @expectedState in the WHERE
     // clause so a concurrent call that already advanced the row results in 0
     // changed rows rather than a silent double-write.
     params['expectedState'] = existing.state;
     const result = this.db.prepare(`
-      UPDATE restoration_intents SET ${setClauses.join(', ')}
+      UPDATE task_runs SET ${setClauses.join(', ')}
       WHERE request_id = @requestId AND state = @expectedState
     `).run(params);
     if (result.changes === 0) {
@@ -487,43 +505,43 @@ export class IntentPersistence {
     }
   }
 
-  /** Fetch a single intent by request ID. Returns null if not found. */
-  getByRequestId(requestId: string): PersistedIntent | null {
+  /** Fetch a single task by request ID. Returns null if not found. */
+  getByRequestId(requestId: string): PersistedTaskRun | null {
     const row = this.db.prepare(
-      'SELECT * FROM restoration_intents WHERE request_id = ?',
+      'SELECT * FROM task_runs WHERE request_id = ?',
     ).get(requestId) as RawRow | undefined;
     if (!row) return null;
-    return rowToIntent(row);
+    return rowToTaskRun(row);
   }
 
   /**
-   * Fetch a single intent by request ID. Throws if not found.
-   * Use this in code paths where the intent is guaranteed to exist
+   * Fetch a single task by request ID. Throws if not found.
+   * Use this in code paths where the task is guaranteed to exist
    * (e.g. immediately after a successful `transition()` call).
    */
-  getOrThrow(requestId: string): PersistedIntent {
+  getOrThrow(requestId: string): PersistedTaskRun {
     const row = this.getByRequestId(requestId);
     if (!row) {
-      throw new Error(`No persisted intent for requestId ${requestId}`);
+      throw new Error(`No persisted task run for requestId ${requestId}`);
     }
     return row;
   }
 
-  /** Fetch all intents in a given state. */
-  getByState(state: IntentState): PersistedIntent[] {
+  /** Fetch all tasks in a given state. */
+  getByState(state: TaskRunState): PersistedTaskRun[] {
     const rows = this.db.prepare(
-      'SELECT * FROM restoration_intents WHERE state = ? ORDER BY window_start_ts ASC',
+      'SELECT * FROM task_runs WHERE state = ? ORDER BY window_start_ts ASC',
     ).all(state) as RawRow[];
-    return rows.map(rowToIntent);
+    return rows.map(rowToTaskRun);
   }
 
-  /** Fetch all in-flight intents (not in any terminal state). */
-  getInFlight(): PersistedIntent[] {
+  /** Fetch all in-flight tasks (not in any terminal state). */
+  getInFlight(): PersistedTaskRun[] {
     const terminalList = [...TERMINAL_STATES];
     const placeholders = terminalList.map(() => '?').join(', ');
-    const sql = `SELECT * FROM restoration_intents WHERE state NOT IN (${placeholders}) ORDER BY window_start_ts ASC`;
+    const sql = `SELECT * FROM task_runs WHERE state NOT IN (${placeholders}) ORDER BY window_start_ts ASC`;
     const rows = this.db.prepare(sql).all(...terminalList) as RawRow[];
-    return rows.map(rowToIntent);
+    return rows.map(rowToTaskRun);
   }
 
   /**
@@ -534,7 +552,7 @@ export class IntentPersistence {
    */
   setDeliveryTxHash(requestId: string, deliveryTxHash: string): void {
     this.db.prepare(
-      'UPDATE restoration_intents SET delivery_tx_hash = ? WHERE request_id = ?',
+      'UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?',
     ).run(deliveryTxHash, requestId);
   }
 
@@ -546,15 +564,15 @@ export class IntentPersistence {
    */
   setManifestGeneratedAt(requestId: string, generatedAt: number): void {
     this.db.prepare(
-      'UPDATE restoration_intents SET manifest_generated_at = ? WHERE request_id = ? AND manifest_generated_at IS NULL',
+      'UPDATE task_runs SET manifest_generated_at = ? WHERE request_id = ? AND manifest_generated_at IS NULL',
     ).run(generatedAt, requestId);
   }
 
-  /** Mark an intent FAILED with a reason (valid from any non-terminal state). */
+  /** Mark an task FAILED with a reason (valid from any non-terminal state). */
   markFailed(requestId: string, reason: string): void {
     const existing = this.getByRequestId(requestId);
     if (!existing) {
-      throw new Error(`Intent not found: ${requestId}`);
+      throw new Error(`Task run not found: ${requestId}`);
     }
     if (existing.state === 'COMPLETE' || existing.state === 'FAILED') {
       // Already terminal — no-op (idempotent)
@@ -565,7 +583,7 @@ export class IntentPersistence {
     // concurrent transition that has already advanced the row doesn't get
     // silently overwritten.
     const result = this.db.prepare(`
-      UPDATE restoration_intents
+      UPDATE task_runs
       SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, failure_at = ?
       WHERE request_id = ? AND state = ?
     `).run(now, reason, now, requestId, existing.state);

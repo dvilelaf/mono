@@ -1,6 +1,6 @@
 /**
  * Single construction site for all first-party {@link Harness} instances.
- * Used by the daemon entrypoint and `jinn intents` CLI (stub mode).
+ * Used by the daemon entrypoint and `jinn solver-nets` CLI (stub mode).
  */
 
 import type { Runner, RunnerContext } from '../../runner/runner.js';
@@ -78,7 +78,6 @@ export interface HarnessEnv {
    */
   disabledNames?: readonly string[];
   /** Resolved SolverPlugin package roots passed to plugin-aware Harnesses. */
-  solverPluginRoots?: readonly string[];
 }
 
 /**
@@ -180,20 +179,19 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   );
 
   // Operator-supplied external Harnesses are appended before the default learner
-  // so explicit bySolverType mappings can select them.
+  // so explicit SolverNet harness settings can select them.
   if (env.externalImpls && env.externalImpls.length > 0) {
     out.push(...env.externalImpls);
   }
 
   // Default Harness: handles any non-evaluation Task not claimed by a
-  // bySolverType specialist or evaluator.
+  // SolverNet specialist or evaluator.
   const learnerAdapter = new ClaudeCodeHarnessAdapter({
     claudePath: env.claudePath,
     claudeModel: env.claudeModel,
   });
   out.push(new ClaudeCodeLearnerImpl({
     adapter: learnerAdapter,
-    solverPluginRoots: env.solverPluginRoots ? [...env.solverPluginRoots] : undefined,
   }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {

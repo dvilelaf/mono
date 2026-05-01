@@ -46,7 +46,7 @@ describe('assembleHistoryV1', () => {
     const out = assembleHistoryV1(makeRaw(), { limit: 50 });
     expect(out.events).toHaveLength(2);
     const kinds = out.events.map(e => e.kind);
-    expect(kinds).toContain('intent_posted');
+    expect(kinds).toContain('task_posted');
     expect(kinds).toContain('delivery_submitted');
   });
 

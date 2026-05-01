@@ -61,27 +61,27 @@ describe('Store', () => {
     expect(noMatch).toHaveLength(0);
   });
 
-  it('stores durable intent post records', () => {
-    store.upsertIntentPostRecord({
+  it('stores durable task post records', () => {
+    store.upsertTaskPostRecord({
       creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
       sourceKey: 'manual:test-1',
       policyType: 'once_per_safe',
       scopeKey: '',
-      desiredStateId: 'test-1',
+      taskId: 'test-1',
       requestId: 'req-1',
       firstPostedAt: '2026-04-23T10:00:00.000Z',
       lastPostedAt: '2026-04-23T10:00:00.000Z',
       postCount: 1,
     });
 
-    expect(store.getIntentPostRecord({
+    expect(store.getTaskPostRecord({
       creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
       sourceKey: 'manual:test-1',
       policyType: 'once_per_safe',
       scopeKey: '',
     })).toMatchObject({
       requestId: 'req-1',
-      desiredStateId: 'test-1',
+      taskId: 'test-1',
       postCount: 1,
     });
   });

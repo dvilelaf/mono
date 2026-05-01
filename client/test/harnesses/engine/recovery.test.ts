@@ -1,21 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Store } from '../../../src/store/store.js';
-import { RestorationEngine, NotImplementedError, type RestorationEngineOptions, type RecoveryReport } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskEngine, NotImplementedError, type TaskEngineOptions, type RecoveryReport } from '../../../src/harnesses/engine/engine.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import { recoverInFlight } from '../../../src/harnesses/engine/recovery.js';
 import type { Solution } from '../../../src/harnesses/types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeOpts(store: Store): RestorationEngineOptions {
+function makeOpts(store: Store): TaskEngineOptions {
   return {
     store,
     paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
   };
 }
 
-function makeInput(id: string, overrides: Partial<PersistedIntentInput> = {}): PersistedIntentInput {
+function makeInput(id: string, overrides: Partial<PersistedTaskRunInput> = {}): PersistedTaskRunInput {
   const now = Date.now();
   return {
     requestId: id,
@@ -30,37 +30,37 @@ function makeInput(id: string, overrides: Partial<PersistedIntentInput> = {}): P
 }
 
 /** Engine subclass that records which stubs were invoked, keyed by requestId. */
-class SpyEngine extends RestorationEngine {
+class SpyEngine extends TaskEngine {
   readonly called: Map<string, string[]> = new Map();
 
-  private record(intent: PersistedIntent, name: string): void {
+  private record(intent: PersistedTaskRun, name: string): void {
     if (!this.called.has(intent.requestId)) this.called.set(intent.requestId, []);
     this.called.get(intent.requestId)!.push(name);
   }
 
-  get testPersistence(): IntentPersistence { return this.persistence; }
+  get testPersistence(): TaskRunPersistence { return this.persistence; }
 
-  override async claim(intent: PersistedIntent): Promise<void> {
+  override async claim(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'claim');
     throw new NotImplementedError('claim');
   }
-  override async takePreSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePreSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'takePreSnapshot');
     throw new NotImplementedError('takePreSnapshot');
   }
-  override async runImpl(intent: PersistedIntent): Promise<void> {
+  override async runImpl(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'runImpl');
     throw new NotImplementedError('runImpl');
   }
-  override async takePostSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePostSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'takePostSnapshot');
     throw new NotImplementedError('takePostSnapshot');
   }
-  override async pack(intent: PersistedIntent): Promise<void> {
+  override async pack(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'pack');
     throw new NotImplementedError('pack');
   }
-  override async deliver(intent: PersistedIntent): Promise<void> {
+  override async deliver(intent: PersistedTaskRun): Promise<void> {
     this.record(intent, 'deliver');
     throw new NotImplementedError('deliver');
   }
@@ -71,7 +71,7 @@ class SpyEngine extends RestorationEngine {
 describe('recoverInFlight', () => {
   let store: Store;
   let engine: SpyEngine;
-  let p: IntentPersistence;
+  let p: TaskRunPersistence;
 
   beforeEach(() => {
     store = new Store(':memory:');
@@ -93,50 +93,50 @@ describe('recoverInFlight', () => {
     await recoverInFlight(engine);
     expect(engine.called.get('r-disc')).toContain('claim');
     // Stub throws → intent marked FAILED
-    expect(p.getByRequestId('r-disc')!.state).toBe(IntentState.FAILED);
+    expect(p.getByRequestId('r-disc')!.state).toBe(TaskRunState.FAILED);
   });
 
   it('CLAIMED → advances to WAITING without stub call (future window)', async () => {
     p.insertDiscovered(makeInput('r-claimed'));
-    p.transition('r-claimed', IntentState.CLAIMED);
+    p.transition('r-claimed', TaskRunState.CLAIMED);
     await recoverInFlight(engine);
     // WAITING but startTs is in the future → no further dispatch
-    expect(p.getByRequestId('r-claimed')!.state).toBe(IntentState.WAITING);
+    expect(p.getByRequestId('r-claimed')!.state).toBe(TaskRunState.WAITING);
     expect(engine.called.has('r-claimed')).toBe(false);
   });
 
   it('WAITING (past start) → advances to PRE_SNAPSHOT and dispatches takePreSnapshot', async () => {
     const now = Date.now();
     p.insertDiscovered(makeInput('r-waiting', { windowStartTs: now - 1000, windowEndTs: now + 86_400_000 }));
-    p.transition('r-waiting', IntentState.CLAIMED);
-    p.transition('r-waiting', IntentState.WAITING);
+    p.transition('r-waiting', TaskRunState.CLAIMED);
+    p.transition('r-waiting', TaskRunState.WAITING);
     await recoverInFlight(engine);
     expect(engine.called.get('r-waiting')).toContain('takePreSnapshot');
   });
 
   it('WAITING (future start) → stays in WAITING, no stub', async () => {
     p.insertDiscovered(makeInput('r-waiting-future'));
-    p.transition('r-waiting-future', IntentState.CLAIMED);
-    p.transition('r-waiting-future', IntentState.WAITING);
+    p.transition('r-waiting-future', TaskRunState.CLAIMED);
+    p.transition('r-waiting-future', TaskRunState.WAITING);
     await recoverInFlight(engine);
-    expect(p.getByRequestId('r-waiting-future')!.state).toBe(IntentState.WAITING);
+    expect(p.getByRequestId('r-waiting-future')!.state).toBe(TaskRunState.WAITING);
     expect(engine.called.has('r-waiting-future')).toBe(false);
   });
 
   it('PRE_SNAPSHOT (no payload) → dispatches takePreSnapshot', async () => {
     p.insertDiscovered(makeInput('r-pre'));
-    p.transition('r-pre', IntentState.CLAIMED);
-    p.transition('r-pre', IntentState.WAITING);
-    p.transition('r-pre', IntentState.PRE_SNAPSHOT);
+    p.transition('r-pre', TaskRunState.CLAIMED);
+    p.transition('r-pre', TaskRunState.WAITING);
+    p.transition('r-pre', TaskRunState.PRE_SNAPSHOT);
     await recoverInFlight(engine);
     expect(engine.called.get('r-pre')).toContain('takePreSnapshot');
   });
 
   it('PRE_SNAPSHOT (payload present) → advances to RUNNING and dispatches runImpl', async () => {
     p.insertDiscovered(makeInput('r-pre-snap'));
-    p.transition('r-pre-snap', IntentState.CLAIMED);
-    p.transition('r-pre-snap', IntentState.WAITING);
-    p.transition('r-pre-snap', IntentState.PRE_SNAPSHOT, {
+    p.transition('r-pre-snap', TaskRunState.CLAIMED);
+    p.transition('r-pre-snap', TaskRunState.WAITING);
+    p.transition('r-pre-snap', TaskRunState.PRE_SNAPSHOT, {
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { equity: '1000' },
     });
@@ -146,32 +146,32 @@ describe('recoverInFlight', () => {
 
   it('RUNNING → dispatches runImpl', async () => {
     p.insertDiscovered(makeInput('r-run'));
-    p.transition('r-run', IntentState.CLAIMED);
-    p.transition('r-run', IntentState.WAITING);
-    p.transition('r-run', IntentState.PRE_SNAPSHOT);
-    p.transition('r-run', IntentState.RUNNING);
+    p.transition('r-run', TaskRunState.CLAIMED);
+    p.transition('r-run', TaskRunState.WAITING);
+    p.transition('r-run', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-run', TaskRunState.RUNNING);
     await recoverInFlight(engine);
     expect(engine.called.get('r-run')).toContain('runImpl');
   });
 
   it('POST_SNAPSHOT (no payload) → dispatches takePostSnapshot', async () => {
     p.insertDiscovered(makeInput('r-post'));
-    p.transition('r-post', IntentState.CLAIMED);
-    p.transition('r-post', IntentState.WAITING);
-    p.transition('r-post', IntentState.PRE_SNAPSHOT);
-    p.transition('r-post', IntentState.RUNNING);
-    p.transition('r-post', IntentState.POST_SNAPSHOT);
+    p.transition('r-post', TaskRunState.CLAIMED);
+    p.transition('r-post', TaskRunState.WAITING);
+    p.transition('r-post', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-post', TaskRunState.RUNNING);
+    p.transition('r-post', TaskRunState.POST_SNAPSHOT);
     await recoverInFlight(engine);
     expect(engine.called.get('r-post')).toContain('takePostSnapshot');
   });
 
   it('POST_SNAPSHOT (payload present) → advances to PACKAGING and dispatches pack', async () => {
     p.insertDiscovered(makeInput('r-post-snap'));
-    p.transition('r-post-snap', IntentState.CLAIMED);
-    p.transition('r-post-snap', IntentState.WAITING);
-    p.transition('r-post-snap', IntentState.PRE_SNAPSHOT);
-    p.transition('r-post-snap', IntentState.RUNNING);
-    p.transition('r-post-snap', IntentState.POST_SNAPSHOT, {
+    p.transition('r-post-snap', TaskRunState.CLAIMED);
+    p.transition('r-post-snap', TaskRunState.WAITING);
+    p.transition('r-post-snap', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-post-snap', TaskRunState.RUNNING);
+    p.transition('r-post-snap', TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { equity: '1100' },
     });
@@ -181,39 +181,39 @@ describe('recoverInFlight', () => {
 
   it('PACKAGING → dispatches pack', async () => {
     p.insertDiscovered(makeInput('r-pack'));
-    p.transition('r-pack', IntentState.CLAIMED);
-    p.transition('r-pack', IntentState.WAITING);
-    p.transition('r-pack', IntentState.PRE_SNAPSHOT);
-    p.transition('r-pack', IntentState.RUNNING);
-    p.transition('r-pack', IntentState.POST_SNAPSHOT);
-    p.transition('r-pack', IntentState.PACKAGING);
+    p.transition('r-pack', TaskRunState.CLAIMED);
+    p.transition('r-pack', TaskRunState.WAITING);
+    p.transition('r-pack', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-pack', TaskRunState.RUNNING);
+    p.transition('r-pack', TaskRunState.POST_SNAPSHOT);
+    p.transition('r-pack', TaskRunState.PACKAGING);
     await recoverInFlight(engine);
     expect(engine.called.get('r-pack')).toContain('pack');
   });
 
   it('DELIVERING → dispatches deliver', async () => {
     p.insertDiscovered(makeInput('r-deliver'));
-    p.transition('r-deliver', IntentState.CLAIMED);
-    p.transition('r-deliver', IntentState.WAITING);
-    p.transition('r-deliver', IntentState.PRE_SNAPSHOT);
-    p.transition('r-deliver', IntentState.RUNNING);
-    p.transition('r-deliver', IntentState.POST_SNAPSHOT);
-    p.transition('r-deliver', IntentState.PACKAGING);
-    p.transition('r-deliver', IntentState.DELIVERING);
+    p.transition('r-deliver', TaskRunState.CLAIMED);
+    p.transition('r-deliver', TaskRunState.WAITING);
+    p.transition('r-deliver', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-deliver', TaskRunState.RUNNING);
+    p.transition('r-deliver', TaskRunState.POST_SNAPSHOT);
+    p.transition('r-deliver', TaskRunState.PACKAGING);
+    p.transition('r-deliver', TaskRunState.DELIVERING);
     await recoverInFlight(engine);
     expect(engine.called.get('r-deliver')).toContain('deliver');
   });
 
   it('COMPLETE → no dispatch (terminal)', async () => {
     p.insertDiscovered(makeInput('r-complete'));
-    p.transition('r-complete', IntentState.CLAIMED);
-    p.transition('r-complete', IntentState.WAITING);
-    p.transition('r-complete', IntentState.PRE_SNAPSHOT);
-    p.transition('r-complete', IntentState.RUNNING);
-    p.transition('r-complete', IntentState.POST_SNAPSHOT);
-    p.transition('r-complete', IntentState.PACKAGING);
-    p.transition('r-complete', IntentState.DELIVERING);
-    p.transition('r-complete', IntentState.COMPLETE);
+    p.transition('r-complete', TaskRunState.CLAIMED);
+    p.transition('r-complete', TaskRunState.WAITING);
+    p.transition('r-complete', TaskRunState.PRE_SNAPSHOT);
+    p.transition('r-complete', TaskRunState.RUNNING);
+    p.transition('r-complete', TaskRunState.POST_SNAPSHOT);
+    p.transition('r-complete', TaskRunState.PACKAGING);
+    p.transition('r-complete', TaskRunState.DELIVERING);
+    p.transition('r-complete', TaskRunState.COMPLETE);
     await recoverInFlight(engine);
     expect(engine.called.has('r-complete')).toBe(false);
   });
@@ -238,19 +238,19 @@ describe('recoverInFlight', () => {
     p.insertDiscovered(makeInput('r-ok'));
     p.insertDiscovered(makeInput('r-err'));
     // r-ok: CLAIMED (safe; advances to WAITING with future start → no stub)
-    p.transition('r-ok', IntentState.CLAIMED);
+    p.transition('r-ok', TaskRunState.CLAIMED);
     // r-err: DISCOVERED (claim() will throw)
     await recoverInFlight(engine);
     // r-err is FAILED
-    expect(p.getByRequestId('r-err')!.state).toBe(IntentState.FAILED);
+    expect(p.getByRequestId('r-err')!.state).toBe(TaskRunState.FAILED);
     // r-ok advanced to WAITING safely
-    expect(p.getByRequestId('r-ok')!.state).toBe(IntentState.WAITING);
+    expect(p.getByRequestId('r-ok')!.state).toBe(TaskRunState.WAITING);
   });
 
   describe('RecoveryReport return shape', () => {
     it('returns ok report for intent that needs no stub (CLAIMED → WAITING)', async () => {
       p.insertDiscovered(makeInput('r-claimed'));
-      p.transition('r-claimed', IntentState.CLAIMED);
+      p.transition('r-claimed', TaskRunState.CLAIMED);
       const reports = await recoverInFlight(engine);
       expect(reports).toHaveLength(1);
       const report = reports[0] as RecoveryReport;
@@ -272,7 +272,7 @@ describe('recoverInFlight', () => {
     it('returns per-intent reports for mixed batch', async () => {
       p.insertDiscovered(makeInput('r-ok'));
       p.insertDiscovered(makeInput('r-err'));
-      p.transition('r-ok', IntentState.CLAIMED); // will advance to WAITING → ok
+      p.transition('r-ok', TaskRunState.CLAIMED); // will advance to WAITING → ok
       const reports = await recoverInFlight(engine);
       expect(reports).toHaveLength(2);
       const ok = reports.find((r) => r.requestId === 'r-ok');
@@ -293,11 +293,11 @@ describe('PACKAGING recovery: solutionOutputs persisted and hydrated on restart'
    * - Overrides pack() to record the hydrated implOutput, then marks DELIVERING
    *   (simulates pack completing successfully without needing IPFS)
    */
-  class PackHydrationEngine extends RestorationEngine {
+  class PackHydrationEngine extends TaskEngine {
     /** The solutionOutput that pack() found in the in-memory map (may have been hydrated from DB). */
     capturedImplOutput: Solution | undefined = undefined;
 
-    get testPersistence(): IntentPersistence { return this.persistence; }
+    get testPersistence(): TaskRunPersistence { return this.persistence; }
 
     /**
      * Access the internal solutionOutputs map (read-only) for test assertions.
@@ -308,7 +308,7 @@ describe('PACKAGING recovery: solutionOutputs persisted and hydrated on restart'
       return (this as any).solutionOutputs as Map<string, Solution>;
     }
 
-    override async pack(intent: PersistedIntent): Promise<void> {
+    override async pack(intent: PersistedTaskRun): Promise<void> {
       // Trigger the hydration logic by calling the real pack() ... but we
       // don't have IPFS/manifest deps wired up. Instead, we call the
       // hydration logic indirectly: check that the map is populated.
@@ -365,22 +365,22 @@ describe('PACKAGING recovery: solutionOutputs persisted and hydrated on restart'
         artifacts: [],
       };
 
-      p.transition(requestId, IntentState.CLAIMED);
-      p.transition(requestId, IntentState.WAITING);
-      p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.CLAIMED);
+      p.transition(requestId, TaskRunState.WAITING);
+      p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
         preSnapshotCapturedAt: 999,
         preSnapshotPayload: { provisioned: true },
       });
       // Simulate runImpl: transition to POST_SNAPSHOT with solutionOutputsJson persisted
-      p.transition(requestId, IntentState.RUNNING);
-      p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.RUNNING);
+      p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: 1000,
         postSnapshotPayload: deterministicOutput.postSnapshot,
         fillsPayload: deterministicOutput.fills ?? [],
         gatingClaim: deterministicOutput.gating,
         solutionOutputsJson: JSON.stringify(deterministicOutput),
       });
-      p.transition(requestId, IntentState.PACKAGING);
+      p.transition(requestId, TaskRunState.PACKAGING);
 
       // ── Phase 2: "crash" — new engine instance (solutionOutputs map is empty) ─
       // engine1 is discarded (its solutionOutputs map is lost).
@@ -441,21 +441,21 @@ describe('PACKAGING recovery: solutionOutputs persisted and hydrated on restart'
       // Manually populate in-memory map (simulates what runImpl does)
       engine.getImplOutputsMap().set(requestId, output);
 
-      p.transition(requestId, IntentState.CLAIMED);
-      p.transition(requestId, IntentState.WAITING);
-      p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.CLAIMED);
+      p.transition(requestId, TaskRunState.WAITING);
+      p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
         preSnapshotCapturedAt: 1999,
         preSnapshotPayload: { provisioned: true },
       });
-      p.transition(requestId, IntentState.RUNNING);
-      p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.RUNNING);
+      p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: 2000,
         postSnapshotPayload: output.postSnapshot,
         fillsPayload: [],
         gatingClaim: output.gating,
         // Note: no solutionOutputsJson — tests that in-memory path doesn't need it
       });
-      p.transition(requestId, IntentState.PACKAGING);
+      p.transition(requestId, TaskRunState.PACKAGING);
 
       await engine.pack(p.getOrThrow(requestId));
 

@@ -68,9 +68,9 @@ function cleanTmp(dir: string): void {
   } catch { /* ignore */ }
 }
 
-const sampleIntent: Task = {
+const sampleTask: Task = {
   id: 'req-001',
-  description: 'Test intent',
+  description: 'Test task',
   solverType: 'portfolio.v0',
   spec: {},
   window: { startTs: 1000, endTs: 2000 },
@@ -83,43 +83,43 @@ describe('provisionWorkingDir', () => {
   beforeEach(() => { tmp = mkTmp(); });
   afterEach(() => cleanTmp(tmp));
 
-  it('creates intent.json with serialised Task', () => {
+  it('creates task.json with serialised Task', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent);
-    const intentJson = JSON.parse(readFileSync(join(workingDir, 'intent.json'), 'utf-8'));
-    expect(intentJson.id).toBe('req-001');
-    expect(intentJson.description).toBe('Test intent');
+    provisionWorkingDir(workingDir, sampleTask);
+    const taskJson = JSON.parse(readFileSync(join(workingDir, 'task.json'), 'utf-8'));
+    expect(taskJson.id).toBe('req-001');
+    expect(taskJson.description).toBe('Test task');
   });
 
   it('creates sessions/ directory', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent);
+    provisionWorkingDir(workingDir, sampleTask);
     expect(existsSync(join(workingDir, 'sessions'))).toBe(true);
   });
 
   it('creates env/ directory', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent);
+    provisionWorkingDir(workingDir, sampleTask);
     expect(existsSync(join(workingDir, 'env'))).toBe(true);
   });
 
   it('writes env var files', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent, { MY_VAR: 'secret', ANOTHER: 'value' });
+    provisionWorkingDir(workingDir, sampleTask, { MY_VAR: 'secret', ANOTHER: 'value' });
     expect(readFileSync(join(workingDir, 'env', 'MY_VAR'), 'utf-8')).toBe('secret');
     expect(readFileSync(join(workingDir, 'env', 'ANOTHER'), 'utf-8')).toBe('value');
   });
 
   it('is idempotent when called twice', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent);
-    provisionWorkingDir(workingDir, sampleIntent); // Should not throw
-    expect(existsSync(join(workingDir, 'intent.json'))).toBe(true);
+    provisionWorkingDir(workingDir, sampleTask);
+    provisionWorkingDir(workingDir, sampleTask); // Should not throw
+    expect(existsSync(join(workingDir, 'task.json'))).toBe(true);
   });
 
   it('writes env var files with mode 0600', () => {
     const workingDir = join(tmp, 'work');
-    provisionWorkingDir(workingDir, sampleIntent, { SECRET_KEY: 'hunter2', API_TOKEN: 'tok123' });
+    provisionWorkingDir(workingDir, sampleTask, { SECRET_KEY: 'hunter2', API_TOKEN: 'tok123' });
     const secretStats = statSync(join(workingDir, 'env', 'SECRET_KEY'));
     const tokenStats = statSync(join(workingDir, 'env', 'API_TOKEN'));
     // On Unix: mode & 0o777 gives the permission bits; env files must be owner-read-write only.

@@ -32,7 +32,7 @@ describe('HarnessRegistry', () => {
     expect(reg.list().map((impl) => impl.name)).toEqual(['alpha', 'beta']);
   });
 
-  it('uses first-match dispatch when no bySolverType/default applies', () => {
+  it('uses first-match dispatch when no solverTypeHarnesses/default applies', () => {
     const reg = new HarnessRegistry();
     reg.register(makeHarness('alpha', ['portfolio.v0']));
     reg.register(makeHarness('beta', ['portfolio.v0']));
@@ -40,27 +40,27 @@ describe('HarnessRegistry', () => {
     expect(reg.findFor({ solverType: 'unknown.v1' })).toBeUndefined();
   });
 
-  it('bySolverType wins over registration order when the named harness supports the request', () => {
-    const reg = new HarnessRegistry({ bySolverType: { 'portfolio.v0': 'beta' } });
+  it('solverTypeHarnesses wins over registration order when the named harness supports the request', () => {
+    const reg = new HarnessRegistry({ solverTypeHarnesses: { 'portfolio.v0': 'beta' } });
     reg.register(makeHarness('alpha', ['portfolio.v0']));
     reg.register(makeHarness('beta', ['portfolio.v0']));
     expect(reg.findFor({ solverType: 'portfolio.v0' })?.name).toBe('beta');
   });
 
-  it('bySolverType falls through when the named harness is missing, disabled, or unsupported', () => {
-    const missing = new HarnessRegistry({ bySolverType: { 'portfolio.v0': 'missing' } });
+  it('solverTypeHarnesses falls through when the named harness is missing, disabled, or unsupported', () => {
+    const missing = new HarnessRegistry({ solverTypeHarnesses: { 'portfolio.v0': 'missing' } });
     missing.register(makeHarness('alpha', ['portfolio.v0']));
     expect(missing.findFor({ solverType: 'portfolio.v0' })?.name).toBe('alpha');
 
     const disabled = new HarnessRegistry({
-      bySolverType: { 'portfolio.v0': 'alpha' },
+      solverTypeHarnesses: { 'portfolio.v0': 'alpha' },
       disabled: ['alpha'],
     });
     disabled.register(makeHarness('alpha', ['portfolio.v0']));
     expect(disabled.findFor({ solverType: 'portfolio.v0' })).toBeUndefined();
 
     const unsupported = new HarnessRegistry({
-      bySolverType: { x: 'x-rest' },
+      solverTypeHarnesses: { x: 'x-rest' },
       default: 'catch-all',
     });
     unsupported.register(stubHarness('x-rest', ({ solverType, role }) => solverType === 'x' && role !== 'evaluation'));
@@ -89,7 +89,7 @@ describe('HarnessRegistry', () => {
   });
 
   it('dispatches restoration and evaluation by role without a universal wrapper', () => {
-    const reg = new HarnessRegistry({ bySolverType: { x: 'x-rest' } });
+    const reg = new HarnessRegistry({ solverTypeHarnesses: { x: 'x-rest' } });
     reg.register(stubHarness('x-rest', ({ solverType, role }) => solverType === 'x' && role !== 'evaluation'));
     reg.register(stubHarness('x-eval', ({ solverType, role }) => solverType === 'x' && role === 'evaluation'));
 

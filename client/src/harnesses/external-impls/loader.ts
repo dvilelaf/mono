@@ -5,8 +5,8 @@
  * validates that the resulting impl matches the manifest's
  * (name, version, supportedSolverTypes) identity.
  *
- * Spec: `spec/2026-05-external-restorer-impls.md` §3, under the
- * `RestorerImpl -> Harness` rename in `spec/2026-05-01-harness-pack-architecture.md`.
+ * Spec: `spec/2026-05-external-restorer-impls.md` §3, now expressed through
+ * the Harness vocabulary in `spec/2026-05-01-harness-pack-architecture.md`.
  */
 
 import { join } from 'node:path';

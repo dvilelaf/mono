@@ -7,11 +7,11 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import {
-  RestorationEngine,
-  type RestorationEngineOptions,
+  TaskEngine,
+  type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, HarnessContext, Solution } from '../../../src/harnesses/types.js';
 import { withTempStore } from '@test/store.js';
 import { makeIntentInput } from '@test/engine.js';
@@ -21,9 +21,9 @@ import { tmpdir } from 'node:os';
 const ROOT = mkdtempSync(join(tmpdir(), 'jinn-impls-'));
 
 function makeOpts(
-  store: Parameters<RestorationEngineOptions['store']['db']['prepare']>[0] extends never ? never : any,
-  implRegistry: RestorationEngineOptions['implRegistry'],
-): RestorationEngineOptions {
+  store: Parameters<TaskEngineOptions['store']['db']['prepare']>[0] extends never ? never : any,
+  implRegistry: TaskEngineOptions['implRegistry'],
+): TaskEngineOptions {
   return {
     store,
     paths: { workingDirRoot: join(ROOT, 'work'), implStateDirRoot: join(ROOT, 'impl') },
@@ -53,20 +53,20 @@ function makeRecordingImpl(name: string, supportedKind: string) {
 
 async function runToPostPreSnapshot(
   store: any,
-  implRegistry: RestorationEngineOptions['implRegistry'],
+  implRegistry: TaskEngineOptions['implRegistry'],
   requestId: string,
   solverType: string,
 ): Promise<string | null> {
-  const engine = new RestorationEngine(makeOpts(store, implRegistry));
-  const persistence = new IntentPersistence(store.db);
+  const engine = new TaskEngine(makeOpts(store, implRegistry));
+  const persistence = new TaskRunPersistence(store.db);
 
   // windowStartTs in the past so dataDrivenAdvance fires immediately.
   const now = Date.now();
   await engine.observe(
     makeIntentInput({ requestId, solverType, windowStartTs: now - 1000, windowEndTs: now + 86_400_000 }),
   );
-  persistence.transition(requestId, IntentState.CLAIMED);
-  persistence.transition(requestId, IntentState.WAITING);
+  persistence.transition(requestId, TaskRunState.CLAIMED);
+  persistence.transition(requestId, TaskRunState.WAITING);
   await engine.process(requestId);
 
   const persisted = persistence.getByRequestId(requestId);
@@ -144,8 +144,8 @@ describe('engine per-kind implStateDir partitioning', () => {
       const { impl } = makeRecordingImpl('fallback-impl', '');
       const registry = { findFor: (s: { solverType: string }) => (s.solverType === '' ? impl : undefined) };
 
-      const engine = new RestorationEngine(makeOpts(store, registry));
-      const persistence = new IntentPersistence(store.db);
+      const engine = new TaskEngine(makeOpts(store, registry));
+      const persistence = new TaskRunPersistence(store.db);
 
       const now = Date.now();
       // solverType undefined → stored as null → implStateName falls back to 'default'
@@ -155,8 +155,8 @@ describe('engine per-kind implStateDir partitioning', () => {
         windowStartTs: now - 1000,
         windowEndTs: now + 86_400_000,
       }));
-      persistence.transition('legacy-1', IntentState.CLAIMED);
-      persistence.transition('legacy-1', IntentState.WAITING);
+      persistence.transition('legacy-1', TaskRunState.CLAIMED);
+      persistence.transition('legacy-1', TaskRunState.WAITING);
       await engine.process('legacy-1');
 
       const persisted = persistence.getByRequestId('legacy-1');

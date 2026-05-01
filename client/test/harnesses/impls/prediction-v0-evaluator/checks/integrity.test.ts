@@ -5,10 +5,10 @@ import {
   checkWindowBounds,
   checkManifestFieldsPresent,
   checkManifestSignature,
-  checkIntentRef,
+  checkTaskRef,
 } from '../../../../../src/harnesses/impls/prediction-v0-evaluator/checks/integrity.js';
 
-const validIntent = {
+const validTask = {
   window: { startTs: 0, endTs: 3_600_000 },
   spec: {
     question: { kind: 'threshold' as const, operator: 'GT' as const, threshold: '3500', resolveTs: 4_500_000 },
@@ -17,7 +17,7 @@ const validIntent = {
 
 describe('integrity.window_bounds', () => {
   it('PASS on valid 1h window + 15min resolve gap', () => {
-    expect(checkWindowBounds(validIntent as any).status).toBe('PASS');
+    expect(checkWindowBounds(validTask as any).status).toBe('PASS');
   });
   it('PASS on 10min window + 5min resolve gap (fast-test)', () => {
     const fast = {
@@ -43,15 +43,15 @@ describe('integrity.window_bounds', () => {
   });
   it('FAIL when resolveTs before endTs', () => {
     const bad = {
-      ...validIntent,
-      spec: { ...validIntent.spec, question: { ...validIntent.spec.question, resolveTs: 3_500_000 } },
+      ...validTask,
+      spec: { ...validTask.spec, question: { ...validTask.spec.question, resolveTs: 3_500_000 } },
     };
     expect(checkWindowBounds(bad as any).status).toBe('FAIL');
   });
   it('FAIL when resolve gap > 1 hour', () => {
     const bad = {
-      ...validIntent,
-      spec: { ...validIntent.spec, question: { ...validIntent.spec.question, resolveTs: 3_600_000 + 3_600_001 } },
+      ...validTask,
+      spec: { ...validTask.spec, question: { ...validTask.spec.question, resolveTs: 3_600_000 + 3_600_001 } },
     };
     expect(checkWindowBounds(bad as any).status).toBe('FAIL');
   });
@@ -91,13 +91,13 @@ describe('integrity.manifest_signature', () => {
   });
 });
 
-describe('integrity.intent_ref', () => {
-  it('PASS when manifest.intent.cid matches expected', () => {
-    const r = checkIntentRef('cid-match', 'cid-match');
+describe('integrity.signedTask_ref', () => {
+  it('PASS when manifest.signedTask.cid matches expected', () => {
+    const r = checkTaskRef('cid-match', 'cid-match');
     expect(r.status).toBe('PASS');
   });
   it('FAIL when mismatched', () => {
-    const r = checkIntentRef('cid-a', 'cid-b');
+    const r = checkTaskRef('cid-a', 'cid-b');
     expect(r.status).toBe('FAIL');
   });
 });

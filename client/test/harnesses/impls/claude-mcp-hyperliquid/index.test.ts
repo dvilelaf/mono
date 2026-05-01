@@ -71,7 +71,7 @@ function mockFills(preValue = 10_000): HlFill[] {
   }));
 }
 
-function makePortfolioV0Intent(): Task {
+function makePortfolioV0Task(): Task {
   return {
     id: 'test-portfolio-v0-intent',
     description: 'Grow HL portfolio by 5% over 24h with max 10% drawdown.',
@@ -102,7 +102,7 @@ function makePortfolioV0Intent(): Task {
 function makeContext(workingDir: string, implStateDir: string): HarnessContext {
   const abortController = new AbortController();
   return {
-    task: makePortfolioV0Intent(),
+    task: makePortfolioV0Task(),
     implStateDir,
     workingDir,
     log: () => {},
@@ -153,7 +153,7 @@ describe('ClaudeMcpHyperliquidImpl', () => {
   describe('canAttempt()', () => {
     it('returns ok:true for valid portfolio.v0 intent', async () => {
       const impl = new ClaudeMcpHyperliquidImpl();
-      const result = await impl.canAttempt(makePortfolioV0Intent());
+      const result = await impl.canAttempt(makePortfolioV0Task());
       expect(result.ok).toBe(true);
     });
 

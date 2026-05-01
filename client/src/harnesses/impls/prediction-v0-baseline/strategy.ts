@@ -3,7 +3,7 @@
  *
  * §5.3 of spec/2026-04-20-prediction-v0-pis-phase-1-design.md
  */
-import type { PredictionV0Intent } from '../../../types/prediction.js';
+import type { PredictionV0Task } from '../../../types/prediction.js';
 import type { StrategyPrediction } from './types.js';
 
 /** Decimal comparison. Both inputs are non-negative decimal strings. */
@@ -21,7 +21,7 @@ function decCmp(a: string, b: string): number {
   return afP < bfP ? -1 : 1;
 }
 
-function evaluateQuestion(question: PredictionV0Intent['spec']['question'], price: string): boolean {
+function evaluateQuestion(question: PredictionV0Task['spec']['question'], price: string): boolean {
   if (question.kind === 'threshold') {
     const c = decCmp(price, question.threshold);
     switch (question.operator) {
@@ -37,8 +37,8 @@ function evaluateQuestion(question: PredictionV0Intent['spec']['question'], pric
   }
 }
 
-export function spotCarryPredict(intent: PredictionV0Intent, currentPrice: string): StrategyPrediction {
-  const currentlyYes = evaluateQuestion(intent.spec.question, currentPrice);
+export function spotCarryPredict(task: PredictionV0Task, currentPrice: string): StrategyPrediction {
+  const currentlyYes = evaluateQuestion(task.spec.question, currentPrice);
   return {
     probability: currentlyYes ? '0.55' : '0.45',
     modelId: 'spot-carry.v1',

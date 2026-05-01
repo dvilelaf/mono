@@ -20,7 +20,7 @@ import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/desired-state.js';
 import {
-  PredictionV0IntentSchema,
+  PredictionV0TaskSchema,
 } from '../../../types/prediction.js';
 import { SignedEnvelopeSchema } from '../../../types/envelope.js';
 import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
@@ -38,11 +38,11 @@ import {
   checkWindowBounds,
   checkManifestFieldsPresent,
   checkManifestSignature,
-  checkIntentRef,
-  checkIntentRefMissingExpected,
+  checkTaskRef,
+  checkTaskRefMissingExpected,
   recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
-import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { resolveExpectedRestorationTaskCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
@@ -61,7 +61,7 @@ export interface PredictionV0EvaluatorConfig {
   _testDeps?: {
     oraclePriceAtResolveTs?: (feed: `0x${string}`, resolveTs: number) => Promise<SpanningResult>;
     /** Override the taskCid we expect to match — bypasses on-chain derivation for tests. */
-    expectedIntentCid?: string;
+    expectedTaskCid?: string;
   };
 }
 
@@ -81,11 +81,11 @@ export class PredictionV0Evaluator implements Harness {
     return { ready: true };
   }
 
-  async canAttempt(intent: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (intent.solverType !== 'prediction.v0') return { ok: false, reason: 'solverType is not prediction.v0' };
-    if (intent.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
-    if (!intent.restorationRequestId) return { ok: false, reason: 'restorationRequestId is required' };
-    if (typeof intent.context?.['restorationResult'] !== 'string') {
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (task.solverType !== 'prediction.v0') return { ok: false, reason: 'solverType is not prediction.v0' };
+    if (task.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
+    if (!task.restorationRequestId) return { ok: false, reason: 'restorationRequestId is required' };
+    if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };
     }
     return { ok: true };
@@ -98,17 +98,17 @@ export class PredictionV0Evaluator implements Harness {
     if (!this.config.evaluatorPk || !this.config.evaluatorSafeAddress) {
       throw new Error('prediction-v0-evaluator: evaluatorPk and evaluatorSafeAddress are required');
     }
-    const { task: intent, workingDir, log } = ctx;
+    const { task: task, workingDir, log } = ctx;
     // Support _testDeps injection from ctx (test) or config (constructor).
     const testDeps = (ctx as any)._testDeps ?? this.config._testDeps;
-    const expectedRef = resolveExpectedRestorationIntentCid(intent, testDeps);
+    const expectedRef = resolveExpectedRestorationTaskCid(task, testDeps);
 
-    // 1. Parse intent — same spec the harness ran under
-    const predictionIntent = PredictionV0IntentSchema.parse(intent);
-    const { feed, venue } = predictionIntent.spec.oracle;
+    // 1. Parse task — same spec the harness ran under
+    const predictionTask = PredictionV0TaskSchema.parse(task);
+    const { feed, venue } = predictionTask.spec.oracle;
 
     // 2. Parse harness's SignedEnvelope from inlined context
-    const manifestJson = intent.context!['restorationResult'] as string;
+    const manifestJson = task.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const envelope = SignedEnvelopeSchema.parse(rawPayload);
     if (envelope.solverType !== 'prediction.v0' || envelope.role !== 'restoration') {
@@ -124,7 +124,7 @@ export class PredictionV0Evaluator implements Harness {
     const oraclePeerName = venue === 'chainlink-base' ? 'base-rpc' : 'base-sepolia-rpc';
     try {
       if (testDeps?.oraclePriceAtResolveTs) {
-        spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionIntent.spec.question.resolveTs);
+        spanning = await testDeps.oraclePriceAtResolveTs(feed as `0x${string}`, predictionTask.spec.question.resolveTs);
       } else {
         const expectedChainId = venue === 'chainlink-base' ? 8453 : 84532;
         const chain = venue === 'chainlink-base' ? base : baseSepolia;
@@ -140,7 +140,7 @@ export class PredictionV0Evaluator implements Harness {
         }
         spanning = await oraclePriceAtResolveTs(
           feed as `0x${string}`,
-          predictionIntent.spec.question.resolveTs,
+          predictionTask.spec.question.resolveTs,
           publicClient,
         );
       }
@@ -157,7 +157,7 @@ export class PredictionV0Evaluator implements Harness {
           'url.full': this.config.rpcUrl ?? 'rpc',
           'venue.id': 'chainlink',
           'chainlink.feed': feed,
-          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+          'chainlink.resolveTs': predictionTask.spec.question.resolveTs,
         },
         events: [],
         status: { code: 'OK' },
@@ -177,7 +177,7 @@ export class PredictionV0Evaluator implements Harness {
           'url.full': this.config.rpcUrl ?? 'rpc',
           'venue.id': 'chainlink',
           'chainlink.feed': feed,
-          'chainlink.resolveTs': predictionIntent.spec.question.resolveTs,
+          'chainlink.resolveTs': predictionTask.spec.question.resolveTs,
         },
         events: [
           {
@@ -199,23 +199,23 @@ export class PredictionV0Evaluator implements Harness {
     checks.push(checkOracleRoundCoversResolveTs(spanning));
 
     // eligibility
-    checks.push(checkSubmissionWithinWindow(payload.prediction.submittedAt, predictionIntent.window));
+    checks.push(checkSubmissionWithinWindow(payload.prediction.submittedAt, predictionTask.window));
 
     // integrity
-    checks.push(checkWindowBounds(predictionIntent));
+    checks.push(checkWindowBounds(predictionTask));
     checks.push(checkManifestFieldsPresent(payload.prediction));
     {
       const recomputed = recomputeTopLevelSignatureHash(rawPayload);
       checks.push(await checkManifestSignature(recomputed, envelope.signature));
     }
     if (expectedRef.kind === 'missing') {
-      checks.push(checkIntentRefMissingExpected());
+      checks.push(checkTaskRefMissingExpected());
     } else {
-      checks.push(checkIntentRef(envelope.task.cid, expectedRef.cid));
+      checks.push(checkTaskRef(envelope.task.cid, expectedRef.cid));
     }
 
     // spec
-    checks.push(checkQuestionKindSupported(predictionIntent.spec.question));
+    checks.push(checkQuestionKindSupported(predictionTask.spec.question));
 
     // 5. Derive verdict
     const scoreStart = nowNanos();
@@ -223,7 +223,7 @@ export class PredictionV0Evaluator implements Harness {
 
     // 6. Derive ground truth + score
     const priceAtResolve = scaleToDecimal(spanning.round.answer, spanning.round.decimals);
-    const groundTruth = resolveGroundTruth(predictionIntent.spec.question, priceAtResolve);
+    const groundTruth = resolveGroundTruth(predictionTask.spec.question, priceAtResolve);
     const { score, scoreBasis, scoreVersion } = computeScore(verdict, payload.prediction.probability, groundTruth);
     const scoreEnd = nowNanos();
     ctx.trajectory.addSpan({
@@ -246,9 +246,9 @@ export class PredictionV0Evaluator implements Harness {
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const verdictManifestBase: Record<string, unknown> = {
       generatedAt: Date.now(),
-      intent: envelope.task,
+      task: envelope.task,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
-      window: predictionIntent.window,
+      window: predictionTask.window,
       verdict,
       score,
       scoreBasis,
@@ -311,8 +311,8 @@ export class PredictionV0Evaluator implements Harness {
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
-    const envelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
-      ?? intent.restorationRequestId
+    const envelopeCid = (task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+      ?? task.restorationRequestId
       ?? 'bafy-unknown';
     // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
     const envelopeSha256 = createHash('sha256').update(canonicalJson(rawPayload)).digest('hex');
@@ -380,7 +380,7 @@ function deriveVerdict(checks: Check[]): Verdict {
   if (checks.some(c => c.name.startsWith('availability.') && c.status === 'FAIL')) return 'INDETERMINATE';
   // Any availability SKIP → INDETERMINATE (oracle not yet spanning)
   if (checks.some(c => c.name.startsWith('availability.') && c.status === 'SKIP')) return 'INDETERMINATE';
-  // Missing trust anchor for intent CID (e.g. legacy eval payload) → INDETERMINATE
+  // Missing trust anchor for task CID (e.g. legacy eval payload) → INDETERMINATE
   if (checks.some(c => c.name.startsWith('integrity.') && c.status === 'INDETERMINATE')) return 'INDETERMINATE';
   // Any eligibility FAIL → REJECTED
   if (checks.some(c => c.name.startsWith('eligibility.') && c.status === 'FAIL')) return 'REJECTED';

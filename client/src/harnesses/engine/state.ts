@@ -8,7 +8,7 @@
 
 // ── State enum ────────────────────────────────────────────────────────────────
 
-export const IntentState = {
+export const TaskRunState = {
   DISCOVERED: 'DISCOVERED',
   CLAIMED: 'CLAIMED',
   WAITING: 'WAITING',
@@ -21,22 +21,22 @@ export const IntentState = {
   FAILED: 'FAILED',
 } as const;
 
-export type IntentState = (typeof IntentState)[keyof typeof IntentState];
+export type TaskRunState = (typeof TaskRunState)[keyof typeof TaskRunState];
 
-export const TERMINAL_STATES: ReadonlySet<IntentState> = new Set([
-  IntentState.COMPLETE,
-  IntentState.FAILED,
+export const TERMINAL_STATES: ReadonlySet<TaskRunState> = new Set([
+  TaskRunState.COMPLETE,
+  TaskRunState.FAILED,
 ]);
 
-export const IN_FLIGHT_STATES: ReadonlySet<IntentState> = new Set([
-  IntentState.DISCOVERED,
-  IntentState.CLAIMED,
-  IntentState.WAITING,
-  IntentState.PRE_SNAPSHOT,
-  IntentState.RUNNING,
-  IntentState.POST_SNAPSHOT,
-  IntentState.PACKAGING,
-  IntentState.DELIVERING,
+export const IN_FLIGHT_STATES: ReadonlySet<TaskRunState> = new Set([
+  TaskRunState.DISCOVERED,
+  TaskRunState.CLAIMED,
+  TaskRunState.WAITING,
+  TaskRunState.PRE_SNAPSHOT,
+  TaskRunState.RUNNING,
+  TaskRunState.POST_SNAPSHOT,
+  TaskRunState.PACKAGING,
+  TaskRunState.DELIVERING,
 ]);
 
 // ── Transition table ──────────────────────────────────────────────────────────
@@ -45,23 +45,23 @@ export const IN_FLIGHT_STATES: ReadonlySet<IntentState> = new Set([
  * Allowed transitions. Any state can transition to FAILED (terminal error path).
  * The table below lists non-FAILED successors only.
  */
-const TRANSITIONS: ReadonlyMap<IntentState, ReadonlySet<IntentState>> = new Map([
-  [IntentState.DISCOVERED,    new Set([IntentState.CLAIMED,       IntentState.FAILED])],
-  [IntentState.CLAIMED,       new Set([IntentState.WAITING,       IntentState.FAILED])],
-  [IntentState.WAITING,       new Set([IntentState.PRE_SNAPSHOT,  IntentState.FAILED])],
-  [IntentState.PRE_SNAPSHOT,  new Set([IntentState.RUNNING,       IntentState.FAILED])],
-  [IntentState.RUNNING,       new Set([IntentState.POST_SNAPSHOT, IntentState.FAILED])],
-  [IntentState.POST_SNAPSHOT, new Set([IntentState.PACKAGING,     IntentState.FAILED])],
-  [IntentState.PACKAGING,     new Set([IntentState.DELIVERING,    IntentState.FAILED])],
-  [IntentState.DELIVERING,    new Set([IntentState.COMPLETE,      IntentState.FAILED])],
-  [IntentState.COMPLETE,      new Set()],
-  [IntentState.FAILED,        new Set()],
+const TRANSITIONS: ReadonlyMap<TaskRunState, ReadonlySet<TaskRunState>> = new Map([
+  [TaskRunState.DISCOVERED,    new Set([TaskRunState.CLAIMED,       TaskRunState.FAILED])],
+  [TaskRunState.CLAIMED,       new Set([TaskRunState.WAITING,       TaskRunState.FAILED])],
+  [TaskRunState.WAITING,       new Set([TaskRunState.PRE_SNAPSHOT,  TaskRunState.FAILED])],
+  [TaskRunState.PRE_SNAPSHOT,  new Set([TaskRunState.RUNNING,       TaskRunState.FAILED])],
+  [TaskRunState.RUNNING,       new Set([TaskRunState.POST_SNAPSHOT, TaskRunState.FAILED])],
+  [TaskRunState.POST_SNAPSHOT, new Set([TaskRunState.PACKAGING,     TaskRunState.FAILED])],
+  [TaskRunState.PACKAGING,     new Set([TaskRunState.DELIVERING,    TaskRunState.FAILED])],
+  [TaskRunState.DELIVERING,    new Set([TaskRunState.COMPLETE,      TaskRunState.FAILED])],
+  [TaskRunState.COMPLETE,      new Set()],
+  [TaskRunState.FAILED,        new Set()],
 ]);
 
 /**
  * Returns true if the transition from → to is permitted by the state machine.
  */
-export function isValidTransition(from: IntentState, to: IntentState): boolean {
+export function isValidTransition(from: TaskRunState, to: TaskRunState): boolean {
   const allowed = TRANSITIONS.get(from);
   if (!allowed) return false;
   return allowed.has(to);
@@ -70,7 +70,7 @@ export function isValidTransition(from: IntentState, to: IntentState): boolean {
 /**
  * Asserts that a transition is valid; throws if not.
  */
-export function assertValidTransition(from: IntentState, to: IntentState): void {
+export function assertValidTransition(from: TaskRunState, to: TaskRunState): void {
   if (!isValidTransition(from, to)) {
     throw new Error(
       `Invalid state transition: ${from} → ${to}. ` +
@@ -82,7 +82,7 @@ export function assertValidTransition(from: IntentState, to: IntentState): void 
 /**
  * All state values as an array, useful for exhaustive checks.
  */
-export const ALL_STATES: readonly IntentState[] = Object.values(IntentState);
+export const ALL_STATES: readonly TaskRunState[] = Object.values(TaskRunState);
 
 // ── Delivery errors ───────────────────────────────────────────────────────────
 

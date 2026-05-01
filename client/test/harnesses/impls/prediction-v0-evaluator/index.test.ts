@@ -5,20 +5,20 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PredictionV0Evaluator } from '../../../../src/harnesses/impls/prediction-v0-evaluator/index.js';
-import { makeValidIntent, makeSignedManifest, makeEvalTask } from './test-helpers.js';
+import { makeValidTask, makeSignedManifest, makeEvalTask } from './test-helpers.js';
 import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
-function makeCtx(intent: any, deps: any) {
+function makeCtx(task: any, deps: any) {
   const tmp = mkdtempSync(join(tmpdir(), 'pred-eval-'));
   return {
-    task: intent,
-    taskCid: 'intent-cid',
+    task: task,
+    taskCid: 'task-cid',
     implStateDir: tmp,
     workingDir: tmp,
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
-    trajectory: new TrajectoryCollector({ taskCid: 'test-intent-cid', runId: 'test-run-id' }),
+    trajectory: new TrajectoryCollector({ taskCid: 'test-task-cid', runId: 'test-run-id' }),
     _testDeps: deps,
   } as any;
 }
@@ -38,72 +38,72 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   const evaluatorPk = ('0x' + 'e'.repeat(64)) as `0x${string}`;
 
   it('PASS with correct prediction (p=0.55, oracle > threshold)', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('PASS');
     expect(out.gating.score).toBe('797500000000000000');
     expect(out.gating.groundTruth).toBe('YES');
   });
 
   it('verdict artifact has correct schemaVersion metadata', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
 
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
 
     expect(out.gating.verdict).toBe('PASS');
     expect(out.artifacts[0]?.metadata).toMatchObject({ verdict: 'PASS' });
   });
 
   it('REJECTED when submittedAt > window.endTs', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ submittedAt: intent.window.endTs + 1, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ submittedAt: task.window.endTs + 1, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('REJECTED');
     expect(out.gating.score).toBe('0');
   });
 
   it('FAIL on bad signature', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ corruptSignature: true, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ corruptSignature: true, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('FAIL');
     expect(out.gating.score).toBe('0');
   });
 
-  it('INDETERMINATE when context.restorationIntentCid is missing (legacy eval payload)', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent, { omitRestorationIntentCid: true });
+  it('INDETERMINATE when context.restorationTaskCid is missing (legacy eval payload)', async () => {
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task, { omitRestorationTaskCid: true });
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     expect(out.gating.verdict).toBe('INDETERMINATE');
   });
 
   it('emits venue_io + state_transition + artifact.emit spans on success', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
-    const ctx = makeCtx(evalIntent, spanningDeps('3501'));
+    const ctx = makeCtx(evalTask, spanningDeps('3501'));
     await evaluator.run(ctx);
 
     const { spans } = ctx.trajectory.snapshot();
@@ -127,16 +127,16 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   });
 
   it('restorationEnvelope.cid uses context restorationEnvelopeCid when present', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent, {
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task, {
       restorationEnvelopeCid: 'f01551220abcdef1234',
     });
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
     expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
     // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
@@ -145,15 +145,15 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   });
 
   it('restorationEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ probability: '0.55', submittedAt: 100, taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     // makeEvalTask sets restorationRequestId to 0x00...00 (not empty)
     const evaluator = new PredictionV0Evaluator({
       evaluatorPk: ('0x' + 'e'.repeat(64)) as `0x${string}`,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
-    const out = await evaluator.run(makeCtx(evalIntent, spanningDeps('3501')));
+    const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
     const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
     // falls back to restorationRequestId (0x00...00) since no RESTORATION_ENVELOPE_CID_CONTEXT_KEY
     expect(vp.restorationEnvelope.cid).not.toBe('bafy-unknown');
@@ -161,11 +161,11 @@ describe('PredictionV0Evaluator — verdict pipeline', () => {
   });
 
   it('INDETERMINATE when oracle has no spanning round', async () => {
-    const intent = makeValidIntent();
-    const manifest = await makeSignedManifest({ taskCid: 'intent-cid' });
-    const evalIntent = makeEvalTask(manifest, intent);
+    const task = makeValidTask();
+    const manifest = await makeSignedManifest({ taskCid: 'task-cid' });
+    const evalTask = makeEvalTask(manifest, task);
     const evaluator = new PredictionV0Evaluator({ evaluatorPk, evaluatorSafeAddress: '0x0000000000000000000000000000000000000003' });
-    const out = await evaluator.run(makeCtx(evalIntent, {
+    const out = await evaluator.run(makeCtx(evalTask, {
       oraclePriceAtResolveTs: async () => ({
         round: { roundId: 1n, answer: 350_000_000_000n, startedAt: 0, updatedAt: 0, answeredInRound: 1n, decimals: 8 },
         nextRound: null,

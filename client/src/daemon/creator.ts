@@ -4,8 +4,8 @@ import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
-import { IntentPostingService } from '../intents/posting-service.js';
-import type { IntentSource } from '../intents/sources.js';
+import { TaskPostingService } from '../tasks/posting-service.js';
+import type { TaskSource } from '../tasks/sources.js';
 
 export interface ActiveAttempt {
   task: Task;
@@ -19,7 +19,7 @@ export class CreatorLoop {
   private attempts = new Map<string, ActiveAttempt>();
   private stopResolve: (() => void) | null = null;
   private stopPromise: Promise<void>;
-  private readonly postingService: IntentPostingService;
+  private readonly postingService: TaskPostingService;
 
   private static readonly PERMANENT_FAILURE_BACKOFF_MS = 30 * 60 * 1000;
 
@@ -30,11 +30,11 @@ export class CreatorLoop {
 
   constructor(
     private readonly adapter: ExecutionAdapter,
-    private readonly intentSources: IntentSource[],
+    private readonly taskSources: TaskSource[],
     private readonly store: Store,
     private readonly safeAddress?: string,
   ) {
-    this.postingService = new IntentPostingService(adapter, store);
+    this.postingService = new TaskPostingService(adapter, store);
     this.stopPromise = new Promise(resolve => {
       this.stopResolve = resolve;
     });
@@ -43,7 +43,7 @@ export class CreatorLoop {
   async tick(): Promise<RequestId | null> {
     const now = Date.now();
     const candidates = [];
-    for (const source of this.intentSources) {
+    for (const source of this.taskSources) {
       try {
         const result = await source.collect(new Date(now));
         candidates.push(...result);

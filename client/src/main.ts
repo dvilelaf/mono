@@ -64,10 +64,11 @@ import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
-import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
+import { collectTestnetAutoTaskGenerators } from './solver-types/index.js';
+import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
+import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
@@ -884,7 +885,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     evictionRecovery,
   });
 
-  // ── RestorationEngine wiring ─────────────────────────────────────────────────
+  // ── TaskEngine wiring ─────────────────────────────────────────────────
 
   // Build agent viem clients (same creds as MechAdapter uses internally).
   const viemChains = await import('viem/chains');
@@ -931,23 +932,25 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     );
   }
 
-  // ── Impl registry ────────────────────────────────────────────────────────────
+  // ── Harness registry ─────────────────────────────────────────────────────────
 
-  // Default-disable impls with external dependencies the operator must opt
-  // into (see cli/intent-registry-access.ts). The user's
-  // `config.harnesses.disabled[]` fully overrides this default when present,
-  // so `jinn intents enable <kind>` persists the opt-in by writing to that
-  // list in ~/.jinn-client/config.json.
-  const { DEFAULT_DISABLED_IMPLS, DEFAULT_BY_SOLVER_TYPE, DEFAULT_HARNESS } = await import(
-    './cli/intent-registry-access.js'
-  );
+  const solverNetRegistry = await loadSolverNets(config);
+  for (const net of solverNetRegistry.list()) {
+    const plugins = [net.canonicalPlugin, ...net.plugins]
+      .map((plugin) => `${plugin.name}@${plugin.version}`)
+      .join(', ');
+    console.log(
+      `[main] Loaded SolverNet: ${net.name} solverType=${net.solverType} harness=${net.harness} plugins=${plugins}`,
+    );
+  }
+
+  // Default-disable Harnesses with external dependencies the operator must opt into.
+  const DEFAULT_DISABLED_HARNESSES = ['claude-mcp-hyperliquid'];
+  const DEFAULT_HARNESS = 'claude-code-learner';
   const implRegistry = new HarnessRegistry({
-    bySolverType: {
-      ...DEFAULT_BY_SOLVER_TYPE,
-      ...(config.harnesses?.bySolverType ?? {}),
-    },
+    solverTypeHarnesses: solverNetRegistry.harnessSelections(),
     default: config.harnesses?.default ?? DEFAULT_HARNESS,
-    disabled: config.harnesses?.disabled ?? [...DEFAULT_DISABLED_IMPLS],
+    disabled: config.harnesses?.disabled ?? [...DEFAULT_DISABLED_HARNESSES],
   });
 
   // Load operator-supplied external harness impls (Path 2 plug-in surface).
@@ -990,23 +993,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     }
   }
 
-  const solverPluginRoots: string[] = [];
-  try {
-    const { loadSolverPlugins } = await import('./plugins/index.js');
-    const solverPluginRegistry = await loadSolverPlugins(config.solverPlugins ?? []);
-    for (const plugin of solverPluginRegistry.list()) {
-      solverPluginRoots.push(plugin.root);
-      console.log(
-        `[main] Loaded SolverPlugin: ${plugin.name}@${plugin.version} solverType=${plugin.solverType}`,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `[main] SolverPlugin loading failed: ${err instanceof Error ? err.message : err}`,
-    );
-  }
-
-  // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) intents
+  // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) tasks
   const corpusEnv: RunnerContext['corpusEnv'] | undefined =
     config.subgraphUrl?.trim()
       ? {
@@ -1029,7 +1016,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     implStateDirRoot: config.engine.implStateDirRoot,
     externalImpls,
     disabledNames: config.harnesses?.disabled,
-    solverPluginRoots,
     corpusEnv,
   })) {
     implRegistry.register(impl);
@@ -1155,7 +1141,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   // Skipped when the operator hasn't minted an agent NFT yet (matches the
   // IdentityPublisher gating above).
   let reputationFeedback:
-    | NonNullable<import('./harnesses/engine/engine.js').RestorationEngineOptions['reputationFeedback']>
+    | NonNullable<import('./harnesses/engine/engine.js').TaskEngineOptions['reputationFeedback']>
     | undefined;
   if (agentId) {
     const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
@@ -1193,14 +1179,16 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     );
   }
 
-  // ── Auto-intent generators (testnet only, opt-out via env) ─────────────────
-  const autoIntentsDisabled = process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+  // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
+  const autoTasksDisabled =
+    process.env['JINN_DISABLE_AUTO_TASKS'] === '1' ||
+    process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
   const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
   const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
-  const { generators: autoIntentGenerators, logLines: autoIntentLogLines } = collectTestnetAutoIntentGenerators({
+  const { generators: autoTaskGenerators, logLines: autoTaskLogLines } = collectTestnetAutoTaskGenerators({
     network: config.network,
     rpcUrl: config.rpcUrl,
-    autoIntentsDisabled,
+    autoTasksDisabled,
     env: process.env,
     agentEoa: agentEoaAddress,
     safeAddress,
@@ -1208,16 +1196,17 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     predictionV0WindowMs: config.predictionV0WindowMs,
     predictionV0ResolveGapMs: config.predictionV0ResolveGapMs,
   });
-  for (const line of autoIntentLogLines) {
+  for (const line of autoTaskLogLines) {
     console.log(line);
   }
-  if (config.network === 'mainnet' && !autoIntentsDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet auto-intent opt-in only; default is OFF. Reserved for a future flag.
+  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
+    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
   }
-  const intentSources = [
-    new StaticConfiguredIntentSource(config.desiredStates),
-    ...autoIntentGenerators.map(({ solverType, generator }) =>
-      new GeneratedIntentSource(`generated:${solverType}`, generator)),
+  const taskSources = [
+    new StaticConfiguredTaskSource(config.tasks),
+    ...autoTaskGenerators
+      .filter(({ solverType }) => solverNetRegistry.forSolverType(solverType)?.taskGenerator.enabled)
+      .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
   ];
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
@@ -1247,7 +1236,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
   const daemon = new Daemon({
     adapter,
     runner,
-    intentSources,
+    taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
     apiServer: setupApiServer,
@@ -1318,6 +1307,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
       envelopeDeps,
       deliveryDeps,
       implRegistry,
+      solverNetRegistry,
       identityPublisher,
       reputationFeedback,
       operatorConfig,

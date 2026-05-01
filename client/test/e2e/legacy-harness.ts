@@ -1,6 +1,6 @@
 /**
  * E2E-only stand-in for the removed production {@link HarnessLoop}.
- * Full {@link RestorationEngine} path requires two-layer claim deps (ClaimRegistry
+ * Full {@link TaskEngine} path requires two-layer claim deps (ClaimRegistry
  * on fork); these phases assert adapter + runner delivery without engine wiring.
  *
  * @internal — do not import from `src/`.
@@ -14,7 +14,7 @@ import { isRecoverableTransactionError } from '../../src/tx-retry.js';
 import { emitEvent } from '../../src/observability/emit-event.js';
 
 /**
- * @deprecated Production uses {@link RestorationEngine}; this class exists for
+ * @deprecated Production uses {@link TaskEngine}; this class exists for
  * `e2e-validate.ts` only.
  */
 export class E2eHarnessLoop {

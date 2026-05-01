@@ -24,14 +24,12 @@ export class ClaudeCodeLearnerImpl implements Harness {
   readonly version: string;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
-  private readonly solverPluginRoots: readonly string[];
 
   constructor(config: ClaudeCodeLearnerConfig) {
     this.adapter = config.adapter;
     this.name = config.name ?? 'claude-code-learner';
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
-    this.solverPluginRoots = config.solverPluginRoots ?? [];
   }
 
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -47,7 +45,7 @@ export class ClaudeCodeLearnerImpl implements Harness {
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
-      pluginRoots: [...this.solverPluginRoots],
+      pluginRoots: [...(ctx.solverPluginRoots ?? [])],
       windowStartTs: window.startTs,
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),

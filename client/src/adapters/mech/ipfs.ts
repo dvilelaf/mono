@@ -1,6 +1,6 @@
 import type { Hex } from 'viem';
 import type { Task, TaskResult } from '../../types/index.js';
-import { parseSignedIntentV1, type SignedIntentV1 } from '../../types/intent.js';
+import { parseSignedTaskV1, type SignedTaskV1 } from '../../types/task-document.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 
@@ -238,18 +238,18 @@ export async function fetchFromIpfs(gatewayUrl: string, cid: string): Promise<un
 }
 
 /**
- * Fetch an intent CID from IPFS and parse it through `parseSignedIntentV1`.
+ * Fetch a Task CID from IPFS and parse it through `parseSignedTaskV1`.
  *
- * Use this whenever you have an intent CID and want a typed `SignedIntentV1`
+ * Use this whenever you have a Task CID and want a typed `SignedTaskV1`
  * document. Throws `ZodError` if the fetched bytes don't conform to the
- * `intent.v1` schema.
+ * `task.v1` schema.
  */
-export async function fetchSignedIntentFromIpfs(
+export async function fetchSignedTaskFromIpfs(
   gatewayUrl: string,
   cid: string,
-): Promise<SignedIntentV1> {
+): Promise<SignedTaskV1> {
   const raw = await fetchFromIpfs(gatewayUrl, cid);
-  return parseSignedIntentV1(raw);
+  return parseSignedTaskV1(raw);
 }
 
 /**

@@ -24,7 +24,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      intentSources: [],
+      taskSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };
@@ -38,7 +38,7 @@ describe('Daemon', () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      intentSources: [],
+      taskSources: [],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };
@@ -50,11 +50,11 @@ describe('Daemon', () => {
     expect(daemon.getShutdownState()).toBe('clean');
   });
 
-  it('accepts legacy desiredStates when intentSources are omitted', async () => {
+  it('accepts legacy tasks when taskSources are omitted', async () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
-      desiredStates: [{ id: 'legacy-static', description: 'legacy static intent' }],
+      tasks: [{ id: 'legacy-static', description: 'legacy static task' }],
       dbPath: ':memory:',
       restorationEngine: minimalEngineConfig(),
     };

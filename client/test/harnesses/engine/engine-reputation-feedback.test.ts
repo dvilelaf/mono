@@ -18,14 +18,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Hex } from 'viem';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
-  type RestorationEngineOptions,
+  TaskEngine,
+  type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
 import {
-  IntentPersistence,
-  type PersistedIntentInput,
+  TaskRunPersistence,
+  type PersistedTaskRunInput,
 } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { ReputationRegistryClient, ResolvedAgent } from '../../../src/erc8004/index.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -88,13 +88,13 @@ task: {
 }
 
 interface MakeOptsArgs {
-  reputationFeedback?: NonNullable<RestorationEngineOptions['reputationFeedback']>;
+  reputationFeedback?: NonNullable<TaskEngineOptions['reputationFeedback']>;
 }
 
 function makeOpts(
   store: Store,
   args: MakeOptsArgs = {},
-): RestorationEngineOptions {
+): TaskEngineOptions {
   return {
     store,
     paths: {
@@ -115,8 +115,8 @@ function makeOpts(
   };
 }
 
-class TestEngine extends RestorationEngine {
-  get testPersistence(): IntentPersistence {
+class TestEngine extends TaskEngine {
+  get testPersistence(): TaskRunPersistence {
     return this.persistence;
   }
 }
@@ -133,7 +133,7 @@ async function seedDelivering(
   opts: SeedOptions,
 ): Promise<void> {
   const now = Date.now() - 1000;
-  const task: PersistedIntentInput['task'] = {
+  const task: PersistedTaskRunInput['task'] = {
     id: requestId,
     description: 'eval test',
     role: opts.taskRole,
@@ -146,7 +146,7 @@ async function seedDelivering(
       : {}),
   };
 
-  const input: PersistedIntentInput = {
+  const input: PersistedTaskRunInput = {
     requestId,
     taskCid: 'bafyintent',
     onchainCreationTx: '0xdeadbeef',
@@ -160,28 +160,28 @@ async function seedDelivering(
   await engine.observe(input);
 
   const p = engine.testPersistence;
-  p.transition(requestId, IntentState.CLAIMED);
-  p.transition(requestId, IntentState.WAITING);
-  p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.CLAIMED);
+  p.transition(requestId, TaskRunState.WAITING);
+  p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
     workingDir: '/tmp/wd',
     implStateDir: '/tmp/impl',
     preSnapshotCapturedAt: now,
     preSnapshotPayload: { capturedAt: now, hlTime: 0 },
   });
-  p.transition(requestId, IntentState.RUNNING);
-  p.transition(requestId, IntentState.POST_SNAPSHOT, {
+  p.transition(requestId, TaskRunState.RUNNING);
+  p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
     postSnapshotCapturedAt: now,
     postSnapshotPayload: { capturedAt: now, hlTime: 0 },
     fillsPayload: [],
     gatingClaim: opts.verdict ? { verdict: opts.verdict, score: '0.5' } : {},
   });
-  p.transition(requestId, IntentState.PACKAGING, {
+  p.transition(requestId, TaskRunState.PACKAGING, {
     manifestCid: 'bafyEvalManifest',
     artifactCids: {},
     evidenceHash:
       '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' as Hex,
   });
-  p.transition(requestId, IntentState.DELIVERING);
+  p.transition(requestId, TaskRunState.DELIVERING);
 }
 
 function makeRegistry(
@@ -236,7 +236,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
 
     expect(resolveAgentId).toHaveBeenCalledWith(RESTORER_EVIDENCE_HASH);
     expect(registry.giveFeedback).toHaveBeenCalledOnce();
@@ -302,7 +302,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     expect(registry.giveFeedback).not.toHaveBeenCalled();
   });
 
@@ -353,7 +353,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     expect(resolveAgentId).toHaveBeenCalled();
     expect(registry.giveFeedback).not.toHaveBeenCalled();
   });
@@ -382,7 +382,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     expect(resolveAgentId).not.toHaveBeenCalled();
     expect(registry.giveFeedback).not.toHaveBeenCalled();
   });
@@ -399,7 +399,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
   });
 
   it('hook unexpected throw is swallowed; deliver still COMPLETE', async () => {
@@ -429,7 +429,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     // submitEvaluatorFeedback already classifies arbitrary errors as `failed`,
     // so deliver finishes cleanly. The warn spy is just here to confirm we
     // didn't mistakenly route the throw through the engine's catch path.
@@ -463,7 +463,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.COMPLETE);
+    expect(intent.state).toBe(TaskRunState.COMPLETE);
     expect(resolveAgentId).not.toHaveBeenCalled();
     expect(registry.giveFeedback).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(

@@ -4,14 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Store } from '../../../src/store/store.js';
-import { RestorationEngine } from '../../../src/harnesses/engine/engine.js';
-import type { PersistedIntent, PersistedIntentInput } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
-import type { Harness, Solution, ReadyStatus, ImplIntentPeek } from '../../../src/harnesses/types.js';
+import { TaskEngine } from '../../../src/harnesses/engine/engine.js';
+import type { PersistedTaskRun, PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
+import type { Harness, Solution, ReadyStatus } from '../../../src/harnesses/types.js';
 import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
 import type { MarketplaceClaimer } from '../../../src/harnesses/engine/claim.js';
 
-function stubImpl(overrides: Partial<Harness> & { isReady?: (spec?: ImplIntentPeek) => Promise<ReadyStatus> } = {}): Harness {
+function stubImpl(
+  overrides: Partial<Harness> & {
+    isReady?: (ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }) => Promise<ReadyStatus>;
+  } = {},
+): Harness {
   return {
     name: 'stub-impl',
     version: '1.0.0',
@@ -33,7 +37,7 @@ function makeClaimDeps() {
   return { registryClient, marketplaceClaimer };
 }
 
-function makeInput(id = 'req-gate'): PersistedIntentInput {
+function makeInput(id = 'req-gate'): PersistedTaskRunInput {
   const now = Date.now();
   return {
     requestId: id,
@@ -47,16 +51,16 @@ function makeInput(id = 'req-gate'): PersistedIntentInput {
   };
 }
 
-class TestEngine extends RestorationEngine {
-  async callClaim(intent: PersistedIntent): Promise<void> {
+class TestEngine extends TaskEngine {
+  async callClaim(intent: PersistedTaskRun): Promise<void> {
     return this.claim(intent);
   }
-  get db(): import('../../../src/harnesses/engine/persistence.js').IntentPersistence {
+  get db(): import('../../../src/harnesses/engine/persistence.js').TaskRunPersistence {
     return this.persistence;
   }
 }
 
-describe('RestorationEngine.claim — impl gate', () => {
+describe('TaskEngine.claim — impl gate', () => {
   let dir: string;
   let store: Store;
 
@@ -81,17 +85,21 @@ describe('RestorationEngine.claim — impl gate', () => {
     engine.db.insertDiscovered(input);
 
     const persisted = engine.db.getByRequestId(input.requestId)!;
-    await expect(engine.callClaim(persisted)).rejects.toThrow(/no impl registered or enabled/);
+    await expect(engine.callClaim(persisted)).rejects.toThrow(/no Harness registered or enabled/);
     const after = engine.db.getByRequestId(input.requestId)!;
-    expect(after.state).toBe(IntentState.FAILED);
-    expect(after.failureReason).toMatch(/jinn intents enable portfolio.v0/);
+    expect(after.state).toBe(TaskRunState.FAILED);
+    expect(after.failureReason).toMatch(/jinn solver-nets set-harness <name> <harness>/);
   });
 
   it('refuses to claim when impl reports not-ready', async () => {
     const notReadyImpl = stubImpl({
-      isReady: async (spec) => {
-        expect(spec).toEqual({ kind: 'portfolio.v0', type: 'restoration' });
-        return { ready: false, reason: 'api-wallet not approved', nextStep: { description: 'do the thing', cli: 'jinn intents enable portfolio.v0 --confirm-approved' } };
+      isReady: async (ctx) => {
+        expect(ctx).toEqual({ solverType: 'portfolio.v0', role: 'restoration' });
+        return {
+          ready: false,
+          reason: 'api-wallet not approved',
+          nextStep: { description: 'do the thing', cli: 'jinn solver-nets enable portfolio --confirm-approved' },
+        };
       },
     });
     const engine = new TestEngine({
@@ -106,9 +114,9 @@ describe('RestorationEngine.claim — impl gate', () => {
     const persisted = engine.db.getByRequestId(input.requestId)!;
     await expect(engine.callClaim(persisted)).rejects.toThrow(/not ready/);
     const after = engine.db.getByRequestId(input.requestId)!;
-    expect(after.state).toBe(IntentState.FAILED);
+    expect(after.state).toBe(TaskRunState.FAILED);
     expect(after.failureReason).toMatch(/api-wallet not approved/);
-    expect(after.failureReason).toMatch(/jinn intents enable portfolio.v0 --confirm-approved/);
+    expect(after.failureReason).toMatch(/jinn solver-nets enable portfolio --confirm-approved/);
   });
 
   it('proceeds with claim when impl is registered and ready', async () => {
@@ -125,7 +133,7 @@ describe('RestorationEngine.claim — impl gate', () => {
     const persisted = engine.db.getByRequestId(input.requestId)!;
     await engine.callClaim(persisted);
     const after = engine.db.getByRequestId(input.requestId)!;
-    expect(after.state).toBe(IntentState.CLAIMED);
+    expect(after.state).toBe(TaskRunState.CLAIMED);
   });
 
   it('does not gate when implRegistry is absent (legacy test-mode path)', async () => {
@@ -141,6 +149,6 @@ describe('RestorationEngine.claim — impl gate', () => {
     const persisted = engine.db.getByRequestId(input.requestId)!;
     await engine.callClaim(persisted);
     const after = engine.db.getByRequestId(input.requestId)!;
-    expect(after.state).toBe(IntentState.CLAIMED);
+    expect(after.state).toBe(TaskRunState.CLAIMED);
   });
 });

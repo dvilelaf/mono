@@ -2,7 +2,7 @@
  * claude-mcp-prediction-apy — Harness for prediction.apy.v0 that spawns a
  * single Claude Code session with read_aave_reserve + submit_apy_prediction.
  *
- * Opt-in via config.harnesses.bySolverType['prediction.apy.v0']; baseline remains default.
+ * Selected through SolverNet `harness` config; baseline remains available as a deterministic override.
  * Isolation gate: test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts
  */
 
@@ -19,11 +19,11 @@ import type {
   Solution,
   ReadyStatus,
   EnableResult,
-  IntentEnableMetadata,
+  HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/desired-state.js';
-import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
+import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 
 import { buildSessionPrompt } from './prompt.js';
 import { spawnSession } from './session-orchestrator.js';
@@ -50,19 +50,19 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     return { ready: true };
   }
 
-  enableMetadata(): IntentEnableMetadata {
+  enableMetadata(): HarnessEnableMetadata {
     return {
       description: 'prediction.apy.v0 — Claude + MCP reads Aave reserve APY and submits predicted bps.',
     };
   }
 
-  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(_ctx: { args: Record<string, string | undefined> }): Promise<EnableResult> {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const parsed = PredictionApyV0IntentSchema.safeParse(intent);
-    if (!parsed.success) return { ok: false, reason: `Invalid prediction.apy.v0 intent: ${parsed.error.message}` };
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const parsed = PredictionApyV0TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false, reason: `Invalid prediction.apy.v0 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false, reason: 'window already closed' };
     return { ok: true };
   }
@@ -71,8 +71,8 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     if (this.config.stub) {
       throw new Error('claude-mcp-prediction-apy: stub registry cannot run (requires live daemon)');
     }
-    const { task: intent, workingDir, log } = ctx;
-    const parsed = PredictionApyV0IntentSchema.parse(intent);
+    const { task: task, workingDir, log } = ctx;
+    const parsed = PredictionApyV0TaskSchema.parse(task);
     const testDeps = this.config._testDeps;
 
     const submissionState: SubmissionState = {
@@ -181,7 +181,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
   }
 
   private _finalize(
-    intent: import('../../../types/prediction-apy.js').PredictionApyV0Intent,
+    task: import('../../../types/prediction-apy.js').PredictionApyV0Task,
     sessionId: string,
     transcriptPath: string,
     submission: SubmissionState,
@@ -209,7 +209,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
       { encoding: 'utf-8' },
     );
 
-    const { venue, pool, reserve, reserveSymbol } = intent.spec.oracle;
+    const { venue, pool, reserve, reserveSymbol } = task.spec.oracle;
 
     return {
       venueRef: { name: 'aave-v3' },

@@ -1,26 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
+  TaskEngine,
   NotImplementedError,
-  type RestorationEngineOptions,
+  type TaskEngineOptions,
   type RecoveryReport,
 } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { ClaimRegistryClient } from '../../../src/adapters/claim-registry/client.js';
 import type { MarketplaceClaimer } from '../../../src/harnesses/engine/claim.js';
 
 // ── Test doubles ──────────────────────────────────────────────────────────────
 
-function makeOpts(store: Store): RestorationEngineOptions {
+function makeOpts(store: Store): TaskEngineOptions {
   return {
     store,
     paths: { workingDirRoot: '/tmp/work', implStateDirRoot: '/tmp/impl' },
   };
 }
 
-function makeInput(overrides: Partial<PersistedIntentInput> = {}): PersistedIntentInput {
+function makeInput(overrides: Partial<PersistedTaskRunInput> = {}): PersistedTaskRunInput {
   const now = Date.now();
   return {
     requestId: 'req-001',
@@ -36,63 +36,63 @@ function makeInput(overrides: Partial<PersistedIntentInput> = {}): PersistedInte
 }
 
 /** Subclass that exposes overrideable stubs and records which transitions were called. */
-class TestEngine extends RestorationEngine {
+class TestEngine extends TaskEngine {
   calls: string[] = [];
-  claimFn?: (intent: PersistedIntent) => Promise<void>;
-  preSnapshotFn?: (intent: PersistedIntent) => Promise<void>;
-  runImplFn?: (intent: PersistedIntent) => Promise<void>;
-  postSnapshotFn?: (intent: PersistedIntent) => Promise<void>;
-  packFn?: (intent: PersistedIntent) => Promise<void>;
-  deliverFn?: (intent: PersistedIntent) => Promise<void>;
+  claimFn?: (intent: PersistedTaskRun) => Promise<void>;
+  preSnapshotFn?: (intent: PersistedTaskRun) => Promise<void>;
+  runImplFn?: (intent: PersistedTaskRun) => Promise<void>;
+  postSnapshotFn?: (intent: PersistedTaskRun) => Promise<void>;
+  packFn?: (intent: PersistedTaskRun) => Promise<void>;
+  deliverFn?: (intent: PersistedTaskRun) => Promise<void>;
 
-  override async claim(intent: PersistedIntent): Promise<void> {
+  override async claim(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('claim');
     if (this.claimFn) return this.claimFn(intent);
     // If claimDeps is injected, delegate to the real implementation.
     if (this.claimDeps) return super.claim(intent);
     throw new NotImplementedError('claim');
   }
-  override async takePreSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePreSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('takePreSnapshot');
     if (this.preSnapshotFn) return this.preSnapshotFn(intent);
     throw new NotImplementedError('takePreSnapshot');
   }
-  override async runImpl(intent: PersistedIntent): Promise<void> {
+  override async runImpl(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('runImpl');
     if (this.runImplFn) return this.runImplFn(intent);
     throw new NotImplementedError('runImpl');
   }
-  override async takePostSnapshot(intent: PersistedIntent): Promise<void> {
+  override async takePostSnapshot(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('takePostSnapshot');
     if (this.postSnapshotFn) return this.postSnapshotFn(intent);
     throw new NotImplementedError('takePostSnapshot');
   }
-  override async pack(intent: PersistedIntent): Promise<void> {
+  override async pack(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('pack');
     if (this.packFn) return this.packFn(intent);
     throw new NotImplementedError('pack');
   }
-  override async deliver(intent: PersistedIntent): Promise<void> {
+  override async deliver(intent: PersistedTaskRun): Promise<void> {
     this.calls.push('deliver');
     if (this.deliverFn) return this.deliverFn(intent);
     throw new NotImplementedError('deliver');
   }
 
   // Expose persistence for test assertions
-  get testPersistence(): IntentPersistence {
+  get testPersistence(): TaskRunPersistence {
     return this.persistence;
   }
 
   // Expose private dataDrivenAdvance for unit testing
-  testDataDrivenAdvance(intent: PersistedIntent): IntentState | null {
+  testDataDrivenAdvance(intent: PersistedTaskRun): TaskRunState | null {
     // Access via index to bypass TypeScript's private modifier
-    return (this as unknown as { dataDrivenAdvance(i: PersistedIntent): IntentState | null }).dataDrivenAdvance(intent);
+    return (this as unknown as { dataDrivenAdvance(i: PersistedTaskRun): TaskRunState | null }).dataDrivenAdvance(intent);
   }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('RestorationEngine', () => {
+describe('TaskEngine', () => {
   let store: Store;
   let engine: TestEngine;
 
@@ -109,7 +109,7 @@ describe('RestorationEngine', () => {
     it('inserts a DISCOVERED row', async () => {
       await engine.observe(makeInput());
       const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.DISCOVERED);
+      expect(intent!.state).toBe(TaskRunState.DISCOVERED);
     });
 
     it('is idempotent — observing twice is a no-op', async () => {
@@ -131,28 +131,28 @@ describe('RestorationEngine', () => {
       await engine.observe(makeInput());
       await expect(engine.process('req-001')).rejects.toThrow();
       const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.FAILED);
+      expect(intent!.state).toBe(TaskRunState.FAILED);
       expect(intent!.failureReason).toContain('claim');
     });
 
     it('advances to CLAIMED when claim() succeeds', async () => {
       await engine.observe(makeInput());
       engine.claimFn = async () => {
-        engine.testPersistence.transition('req-001', IntentState.CLAIMED);
+        engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
       };
       await engine.process('req-001');
       const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.CLAIMED);
+      expect(intent!.state).toBe(TaskRunState.CLAIMED);
     });
   });
 
   describe('process — CLAIMED state', () => {
     it('advances CLAIMED → WAITING without calling any stub', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
       await engine.process('req-001');
       const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.WAITING);
+      expect(intent!.state).toBe(TaskRunState.WAITING);
       expect(engine.calls).toHaveLength(0);
     });
   });
@@ -161,19 +161,19 @@ describe('RestorationEngine', () => {
     it('stays in WAITING when window has not started yet', async () => {
       const futureStart = Date.now() + 10_000_000;
       await engine.observe(makeInput({ windowStartTs: futureStart, windowEndTs: futureStart + 86_400_000 }));
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
       await engine.process('req-001');
       const intent = engine.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.WAITING);
+      expect(intent!.state).toBe(TaskRunState.WAITING);
       expect(engine.calls).toHaveLength(0);
     });
 
     it('advances to PRE_SNAPSHOT and calls takePreSnapshot when window has started', async () => {
       const pastStart = Date.now() - 1_000;
       await engine.observe(makeInput({ windowStartTs: pastStart, windowEndTs: pastStart + 86_400_000 }));
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
       // takePreSnapshot is a stub — will throw NotImplementedError
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('takePreSnapshot');
@@ -183,18 +183,18 @@ describe('RestorationEngine', () => {
   describe('process — PRE_SNAPSHOT state', () => {
     it('calls takePreSnapshot when snapshot is absent', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('takePreSnapshot');
     });
 
     it('advances to RUNNING and calls runImpl when snapshot is already present', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT, {
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT, {
         preSnapshotCapturedAt: Date.now(),
         preSnapshotPayload: { equity: '1000' },
       });
@@ -206,10 +206,10 @@ describe('RestorationEngine', () => {
   describe('process — RUNNING state', () => {
     it('calls runImpl', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('runImpl');
     });
@@ -218,22 +218,22 @@ describe('RestorationEngine', () => {
   describe('process — POST_SNAPSHOT state', () => {
     it('calls takePostSnapshot when post snapshot absent', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT);
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('takePostSnapshot');
     });
 
     it('advances to PACKAGING and calls pack when post snapshot present', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT, {
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: { equity: '1100' },
       });
@@ -245,12 +245,12 @@ describe('RestorationEngine', () => {
   describe('process — PACKAGING state', () => {
     it('calls pack', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.PACKAGING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.PACKAGING);
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('pack');
     });
@@ -259,13 +259,13 @@ describe('RestorationEngine', () => {
   describe('process — DELIVERING state', () => {
     it('calls deliver', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.PACKAGING);
-      engine.testPersistence.transition('req-001', IntentState.DELIVERING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.PACKAGING);
+      engine.testPersistence.transition('req-001', TaskRunState.DELIVERING);
       await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
       expect(engine.calls).toContain('deliver');
     });
@@ -274,16 +274,16 @@ describe('RestorationEngine', () => {
   describe('emitCycleArtifact', () => {
     function callEmit(
       e: TestEngine,
-      intent: PersistedIntent,
+      intent: PersistedTaskRun,
       manifestCid = 'bafkreitestmanifest',
       evidenceHash: `0x${string}` | null = '0xabcd',
     ): void {
       (e as unknown as {
-        emitCycleArtifact(i: PersistedIntent, m: string, h: `0x${string}` | null): void;
+        emitCycleArtifact(i: PersistedTaskRun, m: string, h: `0x${string}` | null): void;
       }).emitCycleArtifact(intent, manifestCid, evidenceHash);
     }
 
-    function makePersistedIntent(overrides: Partial<PersistedIntent> = {}): PersistedIntent {
+    function makePersistedTaskRun(overrides: Partial<PersistedTaskRun> = {}): PersistedTaskRun {
       return {
         requestId: '0xreq1',
         taskCid: 'bafyabc',
@@ -292,7 +292,7 @@ describe('RestorationEngine', () => {
         solverType: 'prediction.v0',
         taskRole: 'restoration',
         implName: 'prediction-v0-baseline',
-        state: IntentState.COMPLETE,
+        state: TaskRunState.COMPLETE,
         stateUpdatedAt: 0,
         workingDir: null,
         implStateDir: null,
@@ -319,7 +319,7 @@ describe('RestorationEngine', () => {
     }
 
     it('writes a restoration-result row for a successful restoration cycle', () => {
-      callEmit(engine, makePersistedIntent());
+      callEmit(engine, makePersistedTaskRun());
       const row = store.getArtifactByRequestId('0xreq1', 'restoration-result');
       expect(row).not.toBeNull();
       expect(row!.outcome).toBe('SUCCESS');
@@ -328,7 +328,7 @@ describe('RestorationEngine', () => {
     });
 
     it('writes an evaluation-verdict row for an evaluation cycle', () => {
-      callEmit(engine, makePersistedIntent({
+      callEmit(engine, makePersistedTaskRun({
         requestId: '0xreq2',
         taskRole: 'evaluation',
         implName: 'prediction-v0-evaluator',
@@ -341,7 +341,7 @@ describe('RestorationEngine', () => {
     });
 
     it('is idempotent — second call leaves the existing row alone', () => {
-      const intent = makePersistedIntent();
+      const intent = makePersistedTaskRun();
       callEmit(engine, intent, 'bafkreifirst');
       const first = store.getArtifactByRequestId('0xreq1', 'restoration-result');
       expect(first).not.toBeNull();
@@ -354,7 +354,7 @@ describe('RestorationEngine', () => {
     });
 
     it('skips rows when task is null (legacy pre-migration intents)', () => {
-      callEmit(engine, makePersistedIntent({ task: null }));
+      callEmit(engine, makePersistedTaskRun({ task: null }));
       const row = store.getArtifactByRequestId('0xreq1', 'restoration-result');
       expect(row).toBeNull();
     });
@@ -365,14 +365,14 @@ describe('RestorationEngine', () => {
       await engine.observe(makeInput());
       // Advance to COMPLETE manually
       const p = engine.testPersistence;
-      p.transition('req-001', IntentState.CLAIMED);
-      p.transition('req-001', IntentState.WAITING);
-      p.transition('req-001', IntentState.PRE_SNAPSHOT);
-      p.transition('req-001', IntentState.RUNNING);
-      p.transition('req-001', IntentState.POST_SNAPSHOT);
-      p.transition('req-001', IntentState.PACKAGING);
-      p.transition('req-001', IntentState.DELIVERING);
-      p.transition('req-001', IntentState.COMPLETE);
+      p.transition('req-001', TaskRunState.CLAIMED);
+      p.transition('req-001', TaskRunState.WAITING);
+      p.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      p.transition('req-001', TaskRunState.RUNNING);
+      p.transition('req-001', TaskRunState.POST_SNAPSHOT);
+      p.transition('req-001', TaskRunState.PACKAGING);
+      p.transition('req-001', TaskRunState.DELIVERING);
+      p.transition('req-001', TaskRunState.COMPLETE);
       await engine.process('req-001');
       expect(engine.calls).toHaveLength(0);
     });
@@ -398,21 +398,21 @@ describe('RestorationEngine', () => {
       await engine.observe(makeInput({ requestId: 'r-discovered' }));
       // CLAIMED
       await engine.observe(makeInput({ requestId: 'r-claimed' }));
-      engine.testPersistence.transition('r-claimed', IntentState.CLAIMED);
+      engine.testPersistence.transition('r-claimed', TaskRunState.CLAIMED);
       // RUNNING
       await engine.observe(makeInput({ requestId: 'r-running', windowStartTs: now - 1000, windowEndTs: now + 86_400_000 }));
-      engine.testPersistence.transition('r-running', IntentState.CLAIMED);
-      engine.testPersistence.transition('r-running', IntentState.WAITING);
-      engine.testPersistence.transition('r-running', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('r-running', IntentState.RUNNING);
+      engine.testPersistence.transition('r-running', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('r-running', TaskRunState.WAITING);
+      engine.testPersistence.transition('r-running', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('r-running', TaskRunState.RUNNING);
       // PACKAGING
       await engine.observe(makeInput({ requestId: 'r-packaging' }));
-      engine.testPersistence.transition('r-packaging', IntentState.CLAIMED);
-      engine.testPersistence.transition('r-packaging', IntentState.WAITING);
-      engine.testPersistence.transition('r-packaging', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('r-packaging', IntentState.RUNNING);
-      engine.testPersistence.transition('r-packaging', IntentState.POST_SNAPSHOT);
-      engine.testPersistence.transition('r-packaging', IntentState.PACKAGING);
+      engine.testPersistence.transition('r-packaging', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('r-packaging', TaskRunState.WAITING);
+      engine.testPersistence.transition('r-packaging', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('r-packaging', TaskRunState.RUNNING);
+      engine.testPersistence.transition('r-packaging', TaskRunState.POST_SNAPSHOT);
+      engine.testPersistence.transition('r-packaging', TaskRunState.PACKAGING);
 
       // recoverInFlight should not throw (errors are caught per-intent)
       const reports = await engine.recoverInFlight();
@@ -434,17 +434,17 @@ describe('RestorationEngine', () => {
       await engine.recoverInFlight();
       const intent = engine.testPersistence.getByRequestId('r1');
       // claim stub threw NotImplementedError → should be marked FAILED
-      expect(intent!.state).toBe(IntentState.FAILED);
+      expect(intent!.state).toBe(TaskRunState.FAILED);
       expect(intent!.failureReason).toContain('NotImplemented');
     });
 
     it('CLAIMED → WAITING is driven without stub call', async () => {
       await engine.observe(makeInput({ requestId: 'r-claimed' }));
-      engine.testPersistence.transition('r-claimed', IntentState.CLAIMED);
+      engine.testPersistence.transition('r-claimed', TaskRunState.CLAIMED);
       // WAITING has future startTs, so recovery stops there without stub call
       const reports = await engine.recoverInFlight();
       const intent = engine.testPersistence.getByRequestId('r-claimed');
-      expect(intent!.state).toBe(IntentState.WAITING);
+      expect(intent!.state).toBe(TaskRunState.WAITING);
       expect(engine.calls).toHaveLength(0);
       // The CLAIMED→WAITING advance is a success
       expect(reports[0]?.outcome).toBe('ok');
@@ -471,8 +471,8 @@ describe('RestorationEngine', () => {
     it('returns null for WAITING when window is in the future', async () => {
       const futureStart = Date.now() + 10_000_000;
       await engine.observe(makeInput({ windowStartTs: futureStart, windowEndTs: futureStart + 86_400_000 }));
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
       const intent = engine.testPersistence.getByRequestId('req-001')!;
       expect(engine.testDataDrivenAdvance(intent)).toBeNull();
     });
@@ -480,64 +480,64 @@ describe('RestorationEngine', () => {
     it('returns PRE_SNAPSHOT for WAITING when window has started', async () => {
       const pastStart = Date.now() - 1_000;
       await engine.observe(makeInput({ windowStartTs: pastStart, windowEndTs: pastStart + 86_400_000 }));
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
       const intent = engine.testPersistence.getByRequestId('req-001')!;
-      expect(engine.testDataDrivenAdvance(intent)).toBe(IntentState.PRE_SNAPSHOT);
+      expect(engine.testDataDrivenAdvance(intent)).toBe(TaskRunState.PRE_SNAPSHOT);
     });
 
     it('returns null for PRE_SNAPSHOT when payload is absent', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
       const intent = engine.testPersistence.getByRequestId('req-001')!;
       expect(engine.testDataDrivenAdvance(intent)).toBeNull();
     });
 
     it('returns RUNNING for PRE_SNAPSHOT when payload is present', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT, {
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT, {
         preSnapshotCapturedAt: Date.now(),
         preSnapshotPayload: { equity: '1000' },
       });
       const intent = engine.testPersistence.getByRequestId('req-001')!;
-      expect(engine.testDataDrivenAdvance(intent)).toBe(IntentState.RUNNING);
+      expect(engine.testDataDrivenAdvance(intent)).toBe(TaskRunState.RUNNING);
     });
 
     it('returns null for POST_SNAPSHOT when payload is absent', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT);
       const intent = engine.testPersistence.getByRequestId('req-001')!;
       expect(engine.testDataDrivenAdvance(intent)).toBeNull();
     });
 
     it('returns PACKAGING for POST_SNAPSHOT when payload is present', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
-      engine.testPersistence.transition('req-001', IntentState.POST_SNAPSHOT, {
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: { equity: '1100' },
       });
       const intent = engine.testPersistence.getByRequestId('req-001')!;
-      expect(engine.testDataDrivenAdvance(intent)).toBe(IntentState.PACKAGING);
+      expect(engine.testDataDrivenAdvance(intent)).toBe(TaskRunState.PACKAGING);
     });
 
     it('returns null for RUNNING state (no data-driven advance)', async () => {
       await engine.observe(makeInput());
-      engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-      engine.testPersistence.transition('req-001', IntentState.WAITING);
-      engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
-      engine.testPersistence.transition('req-001', IntentState.RUNNING);
+      engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+      engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+      engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
+      engine.testPersistence.transition('req-001', TaskRunState.RUNNING);
       const intent = engine.testPersistence.getByRequestId('req-001')!;
       expect(engine.testDataDrivenAdvance(intent)).toBeNull();
     });
@@ -586,7 +586,7 @@ describe('RestorationEngine', () => {
     it('advances DISCOVERED → CLAIMED when both layers succeed', async () => {
       const registryClient = makeRegistryClient();
       const marketplace = makeMarketplaceClaimer();
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: { registryClient, marketplaceClaimer: marketplace },
       };
@@ -596,7 +596,7 @@ describe('RestorationEngine', () => {
       await eng.process('req-001');
 
       const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.CLAIMED);
+      expect(intent!.state).toBe(TaskRunState.CLAIMED);
       expect(registryClient.claimJob).toHaveBeenCalledOnce();
       expect(marketplace.claimRequest).toHaveBeenCalledOnce();
     });
@@ -606,7 +606,7 @@ describe('RestorationEngine', () => {
         claimResult: { txHash: '', claimed: false },
       });
       const marketplace = makeMarketplaceClaimer();
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: { registryClient, marketplaceClaimer: marketplace },
       };
@@ -616,14 +616,14 @@ describe('RestorationEngine', () => {
       await expect(eng.process('req-001')).rejects.toThrow(/ClaimRegistry claim failed/);
 
       const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.FAILED);
+      expect(intent!.state).toBe(TaskRunState.FAILED);
       expect(marketplace.claimRequest).not.toHaveBeenCalled();
     });
 
     it('marks FAILED when marketplace claim fails', async () => {
       const registryClient = makeRegistryClient();
       const marketplace = makeMarketplaceClaimer(new Error('Claim policy rejected'));
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: { registryClient, marketplaceClaimer: marketplace },
       };
@@ -633,7 +633,7 @@ describe('RestorationEngine', () => {
       await expect(eng.process('req-001')).rejects.toThrow('Claim policy rejected');
 
       const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.FAILED);
+      expect(intent!.state).toBe(TaskRunState.FAILED);
       // ClaimRegistry claim should have been released
       expect(registryClient.releaseClaim).toHaveBeenCalledOnce();
     });
@@ -641,7 +641,7 @@ describe('RestorationEngine', () => {
     it('is idempotent on resume: skips claimJob when weAlreadyClaimed=true', async () => {
       const registryClient = makeRegistryClient({ weAlreadyClaimed: true });
       const marketplace = makeMarketplaceClaimer();
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: { registryClient, marketplaceClaimer: marketplace },
       };
@@ -653,7 +653,7 @@ describe('RestorationEngine', () => {
       expect(registryClient.claimJob).not.toHaveBeenCalled();
       expect(marketplace.claimRequest).toHaveBeenCalledOnce();
       const intent = eng.testPersistence.getByRequestId('req-001');
-      expect(intent!.state).toBe(IntentState.CLAIMED);
+      expect(intent!.state).toBe(TaskRunState.CLAIMED);
     });
 
     it('falls back to NotImplementedError when claimDeps is absent', async () => {
@@ -683,7 +683,7 @@ describe('RestorationEngine', () => {
 
     it('releases CLAIMED intents whose window has not started', async () => {
       const registryClient = makeRegistryClient();
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: {
           registryClient,
@@ -695,7 +695,7 @@ describe('RestorationEngine', () => {
       // Insert a CLAIMED intent with future windowStartTs
       const futureStart = Date.now() + 60_000;
       await eng.observe(makeInput({ windowStartTs: futureStart, windowEndTs: futureStart + 86_400_000 }));
-      eng.testPersistence.transition('req-001', IntentState.CLAIMED);
+      eng.testPersistence.transition('req-001', TaskRunState.CLAIMED);
 
       const released = await eng.releaseClaimedNotStarted();
       expect(released).toContain('req-001');
@@ -704,7 +704,7 @@ describe('RestorationEngine', () => {
 
     it('does not release CLAIMED intents whose window has already started', async () => {
       const registryClient = makeRegistryClient();
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         ...makeOpts(store),
         claimDeps: {
           registryClient,
@@ -716,7 +716,7 @@ describe('RestorationEngine', () => {
       // Insert a CLAIMED intent with PAST windowStartTs (window started)
       const pastStart = Date.now() - 1_000;
       await eng.observe(makeInput({ windowStartTs: pastStart, windowEndTs: pastStart + 86_400_000 }));
-      eng.testPersistence.transition('req-001', IntentState.CLAIMED);
+      eng.testPersistence.transition('req-001', TaskRunState.CLAIMED);
 
       const released = await eng.releaseClaimedNotStarted();
       expect(released).toHaveLength(0);

@@ -57,14 +57,14 @@ describe.skipIf(!enabled)('claude-mcp-prediction (isolation)', () => {
     mkdirSync(workingDir);
     mkdirSync(implStateDir);
 
-    // Synthesize a plausible prediction.v0 intent. Window is relative to now;
+    // Synthesize a plausible prediction.v0 task. Window is relative to now;
     // resolveTs is 75 minutes out so the model's reasoning is not nonsensical.
     const now = Date.now();
     const windowStartTs = now;
     const windowEndTs = windowStartTs + 3_600_000;
     const resolveTs = windowEndTs + 900_000;
 
-    const intent: Task = {
+    const task: Task = {
       id: 'iso-test-1',
       description: 'ETH > 3000 at T (isolation test)',
       window: { startTs: windowStartTs, endTs: windowEndTs },
@@ -93,7 +93,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction (isolation)', () => {
     });
 
     const ctx: HarnessContext = {
-      intent,
+      task,
       workingDir,
       implStateDir,
       log: (event) => console.log(`[iso] [${event.level}] ${event.msg}${event.data ? ' ' + JSON.stringify(event.data) : ''}`),

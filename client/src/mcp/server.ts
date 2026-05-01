@@ -79,11 +79,11 @@ const corpus = buildCorpusQuery();
 server.tool(
   'get_desired_state',
   // NOTE: Returns the RUNTIME shape (Task fields + attempt/request metadata),
-  // NOT the signed wire format (SignedIntentV1). The signed intent, if present, was
+  // NOT the signed wire format (SignedTaskV1). The signed Task, if present, was
   // uploaded to IPFS at job creation time and is referenced by the on-chain CID.
   // Claude receives this runtime shape to understand what objective to pursue —
-  // it does not need to verify or re-sign the intent envelope.
-  'Get the current desired state that needs to be restored. Returns runtime Task context: id, description, role (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed intent.v1 wire format.',
+  // it does not need to verify or re-sign the task envelope.
+  'Get the current desired state that needs to be restored. Returns runtime Task context: id, description, role (restoration|evaluation), restorationRequestId, requestId, and optional context bag. This is the RUNTIME shape — not the signed task.v1 wire format.',
   {},
   async () => ({
     content: [{

@@ -855,7 +855,7 @@ async function main(): Promise<void> {
 
     // ── Phase 5: Harness delivers via ClaudeRunner (E2E legacy loop) ───────
     //
-    // Full RestorationEngine is wired in Phase 11 and requires two-layer
+    // Full TaskEngine is wired in Phase 11 and requires two-layer
     // ClaimRegistry deps on the fork. Phases 5–8 use {@link E2eHarnessLoop} —
     // same behavior as the former production `HarnessLoop` (adapter + runner).
 
@@ -2117,7 +2117,6 @@ async function main(): Promise<void> {
         const { createClients } = await import('../../src/adapters/mech/safe.js');
         const { HarnessRegistry } = await import('../../src/harnesses/engine/registry.js');
         const { buildHarnesses } = await import('../../src/harnesses/impls/index.js');
-        const { DEFAULT_BY_SOLVER_TYPE, DEFAULT_DISABLED_IMPLS } = await import('../../src/cli/intent-registry-access.js');
         const { ClaimRegistryClient } = await import('../../src/adapters/claim-registry/client.js');
 
         const daemonAdapter = new MechAdapter({
@@ -2139,9 +2138,13 @@ async function main(): Promise<void> {
         const agentClients = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex, base);
 
         const implRegistry = new HarnessRegistry({
-          bySolverType: { ...DEFAULT_BY_SOLVER_TYPE },
+          solverTypeHarnesses: {
+            'portfolio.v0': 'claude-mcp-hyperliquid',
+            'prediction.v0': 'prediction-v0-baseline',
+            'prediction.apy.v0': 'prediction-apy-v0-baseline',
+          },
           default: 'legacy-claude',
-          disabled: [...DEFAULT_DISABLED_IMPLS],
+          disabled: ['claude-mcp-hyperliquid'],
         });
         for (const impl of buildHarnesses({
           rpcUrl: ANVIL_RPC,
@@ -2176,7 +2179,7 @@ async function main(): Promise<void> {
         const daemon = new Daemon({
           adapter: daemonAdapter,
           runner,
-          desiredStates: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
+          tasks: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
           dbPath: daemonDbPath,
           shutdownTimeoutMs: 10000,
           apiPort: 7331,
@@ -3665,24 +3668,27 @@ async function main(): Promise<void> {
             throw new Error(`expected claim-rewards dryRun, got ${JSON.stringify(jClaim)}`);
           }
 
-          const intent = await runJinnCliSubprocess(
+          const task = await runJinnCliSubprocess(
             [
-              'submit-intent',
+              'tasks',
+              'submit',
               '--dry-run',
               '--id',
               'e2e-cli',
               '--description',
               'E2E CLI config + password-fd',
+              '--solver-type',
+              'prediction.v0',
               ...cfg,
             ],
             pw,
           );
-          if (intent.code !== 0) {
-            throw new Error(`submit-intent --dry-run exit ${intent.code} stderr=${intent.stderr}`);
+          if (task.code !== 0) {
+            throw new Error(`tasks submit --dry-run exit ${task.code} stderr=${task.stderr}`);
           }
-          const jIntent = parseLastStdoutJsonObject(intent.stdout);
-          if (jIntent['dryRun'] !== true) {
-            throw new Error(`expected submit-intent dryRun, got ${JSON.stringify(jIntent)}`);
+          const jTask = parseLastStdoutJsonObject(task.stdout);
+          if (jTask['dryRun'] !== true) {
+            throw new Error(`expected tasks submit dryRun, got ${JSON.stringify(jTask)}`);
           }
 
           const scale = await runJinnCliSubprocess(['fleet', 'scale', '--to', '1', '--dry-run', ...cfg], pw);
@@ -3749,7 +3755,7 @@ async function main(): Promise<void> {
             throw new Error(`expected empty stolas tick, got ${JSON.stringify(tickEmpty)}`);
           }
 
-          console.log('    claim-rewards, submit-intent, fleet scale/retire, withdraw (dry-run + flags)');
+          console.log('    claim-rewards, tasks submit, fleet scale/retire, withdraw (dry-run + flags)');
           console.log('    fleet retire display 0 -> chainIndex 1 (matches jinn fleet JSON index)');
           console.log('    nextFleetServiceIndex + tickStolasDistributorClaims(strict, []) OK');
         },

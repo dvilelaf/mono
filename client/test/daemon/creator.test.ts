@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CreatorLoop } from '../../src/daemon/creator.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
-import { GeneratedIntentSource, StaticConfiguredIntentSource } from '../../src/intents/sources.js';
+import { GeneratedTaskSource, StaticConfiguredTaskSource } from '../../src/tasks/sources.js';
 import { Store } from '../../src/store/store.js';
 import { PermanentError, type Task } from '../../src/types/index.js';
 
@@ -18,7 +18,7 @@ describe('CreatorLoop', () => {
     ];
 
     const postSpy = vi.spyOn(adapter, 'postTask');
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store);
 
     await loop.tick();
 
@@ -45,7 +45,7 @@ describe('CreatorLoop', () => {
     ];
 
     const postSpy = vi.spyOn(adapter, 'postTask');
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store);
 
     await loop.tick();
     await loop.tick();
@@ -55,7 +55,7 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
-  it('calls intent generators each tick and posts their results', async () => {
+  it('calls task generators each tick and posts their results', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -70,7 +70,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
-      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      [new GeneratedTaskSource('generated:prediction.v0', generator)],
       store,
     );
 
@@ -91,7 +91,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
-      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      [new GeneratedTaskSource('generated:prediction.v0', generator)],
       store,
     );
 
@@ -113,7 +113,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postTask');
 
     // First loop instance posts.
-    const source = new StaticConfiguredIntentSource(states);
+    const source = new StaticConfiguredTaskSource(states);
     const loop1 = new CreatorLoop(adapter, [source], store, SAFE);
     await loop1.tick();
     expect(postSpy).toHaveBeenCalledTimes(1);
@@ -142,7 +142,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
-      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      [new GeneratedTaskSource('generated:prediction.v0', generator)],
       store,
     );
 
@@ -156,7 +156,7 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
-  it('backs off permanent create failures for the same intent', async () => {
+  it('backs off permanent create failures for the same task', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -165,7 +165,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi
       .spyOn(adapter, 'postTask')
       .mockRejectedValue(new PermanentError('No request IDs returned from router'));
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredIntentSource(states)], store, SAFE);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store, SAFE);
 
     await expect(loop.tick()).rejects.toThrow(/No request IDs/);
     await loop.tick();
@@ -175,7 +175,7 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
-  it('posts generated intents once per bucket and again in a new bucket', async () => {
+  it('posts generated tasks once per bucket and again in a new bucket', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -190,7 +190,7 @@ describe('CreatorLoop', () => {
     const postSpy = vi.spyOn(adapter, 'postTask');
     const loop = new CreatorLoop(
       adapter,
-      [new GeneratedIntentSource('generated:prediction.v0', generator)],
+      [new GeneratedTaskSource('generated:prediction.v0', generator)],
       store,
       SAFE,
     );

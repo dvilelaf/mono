@@ -1,11 +1,11 @@
 /**
- * Runtime shape of a Task — wraps SignedIntentV1 (see ./intent.ts) plus
+ * Runtime shape of a Task — wraps SignedTaskV1 plus
  * runtime fields (attempt number, role, etc.).
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { WindowSchema, type Window } from './window.js';
-import { SignedIntentV1Schema, type SignedIntentV1 } from './intent.js';
+import { SignedTaskV1Schema, type SignedTaskV1 } from './task-document.js';
 
 export type RequestId = string;
 
@@ -33,8 +33,7 @@ export const TaskSchema = z.object({
   // §3 — pre-claim and post-hoc qualifying rules; shape governed by solverType
   eligibility: z.record(z.unknown()).optional(),
 
-  // §4 — optional typed signed intent; loose fields hydrate from this when absent
-  intent: SignedIntentV1Schema.optional(),
+  signedTask: SignedTaskV1Schema.optional(),
 });
 
 export interface Task {
@@ -52,38 +51,41 @@ export interface Task {
   spec?: Record<string, unknown>;
   eligibility?: Record<string, unknown>;
 
-  // §4 — typed signed intent (Plan C will migrate consumers to read this directly)
-  intent?: SignedIntentV1;
+  signedTask?: SignedTaskV1;
 }
 
 export function parseTask(input: unknown): Task {
   const parsed = TaskSchema.parse(input);
-  const intent = parsed.intent;
-  const description = parsed.description ?? intent?.description;
+  const signedTask = parsed.signedTask;
+  const signedRuntime = signedTask as (SignedTaskV1 & {
+    context?: Record<string, unknown>;
+    attemptId?: string;
+    attemptNumber?: number;
+    restorationRequestId?: string;
+  }) | undefined;
+  const description = parsed.description ?? signedTask?.description;
   if (!description) {
-    throw new Error('Task requires description (loose field or intent.description)');
+    throw new Error('Task requires description (loose field or signedTask.description)');
   }
-  const intentSpec = intent?.spec as ({ kind?: string } & Record<string, unknown>) | undefined;
-  const parsedSpec = parsed.spec as ({ kind?: string } & Record<string, unknown>) | undefined;
-  const solverType = parsed.solverType ?? parsedSpec?.kind ?? intentSpec?.kind;
-  const stripLegacyKind = (spec: ({ kind?: string } & Record<string, unknown>) | undefined) =>
-    spec ? Object.fromEntries(Object.entries(spec).filter(([key]) => key !== 'kind')) : undefined;
-  const spec =
-    stripLegacyKind(parsedSpec) ??
-    stripLegacyKind(intentSpec);
+  const parsedSpec = parsed.spec as Record<string, unknown> | undefined;
+  if (parsedSpec && Object.prototype.hasOwnProperty.call(parsedSpec, 'kind')) {
+    throw new Error('Task spec.kind is retired; use top-level solverType');
+  }
+  const solverType = parsed.solverType ?? signedTask?.solverType;
+  const spec = parsedSpec ?? signedTask?.spec;
   return {
-    id: parsed.id ?? intent?.id ?? randomUUID(),
+    id: parsed.id ?? signedTask?.id ?? randomUUID(),
     description,
-    context: parsed.context,
+    context: parsed.context ?? signedRuntime?.context,
     solverType,
-    role: parsed.role,
-    attemptId: parsed.attemptId,
-    attemptNumber: parsed.attemptNumber,
-    restorationRequestId: parsed.restorationRequestId,
-    window: parsed.window ?? intent?.window,
+    role: parsed.role ?? signedTask?.role,
+    attemptId: parsed.attemptId ?? signedRuntime?.attemptId,
+    attemptNumber: parsed.attemptNumber ?? signedRuntime?.attemptNumber,
+    restorationRequestId: parsed.restorationRequestId ?? signedRuntime?.restorationRequestId,
+    window: parsed.window ?? signedTask?.window,
     spec,
-    eligibility: parsed.eligibility ?? intent?.eligibility,
-    intent,
+    eligibility: parsed.eligibility ?? signedTask?.eligibility,
+    signedTask,
   };
 }
 

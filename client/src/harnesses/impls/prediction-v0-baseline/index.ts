@@ -14,11 +14,11 @@ import type {
   Solution,
   ReadyStatus,
   EnableResult,
-  IntentEnableMetadata,
+  HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { PublicClient } from 'viem';
-import { PredictionV0IntentSchema } from '../../../types/prediction.js';
+import { PredictionV0TaskSchema } from '../../../types/prediction.js';
 import {
   readChainlinkLatest,
   scaleToDecimal,
@@ -28,7 +28,7 @@ import { spotCarryPredict } from './strategy.js';
 
 export interface PredictionV0BaselineConfig {
   rpcUrl?: string;
-  /** CLI registries that cannot execute intents without the daemon. */
+  /** CLI registries that cannot execute tasks without the daemon. */
   stub?: boolean;
   _testDeps?: {
     readChainlink?: (feed: `0x${string}`) => Promise<RoundReading>;
@@ -51,22 +51,22 @@ export class PredictionV0BaselineImpl implements Harness {
     return { ready: true };
   }
 
-  enableMetadata(): IntentEnableMetadata {
+  enableMetadata(): HarnessEnableMetadata {
     return {
       description:
         'prediction.v0 — submit probability predictions against on-chain price feeds. No external credentials required.',
     };
   }
 
-  async onEnable(_args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(_ctx: { args: Record<string, string | undefined> }): Promise<EnableResult> {
     return { status: 'ready' };
   }
 
-  async canAttempt(intent: import('../../../types/desired-state.js').Task):
+  async canAttempt(task: import('../../../types/desired-state.js').Task):
     Promise<{ ok: true } | { ok: false; reason: string }>
   {
-    const parsed = PredictionV0IntentSchema.safeParse(intent);
-    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 intent: ${parsed.error.message}` };
+    const parsed = PredictionV0TaskSchema.safeParse(task);
+    if (!parsed.success) return { ok: false, reason: `Invalid prediction.v0 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) {
       return { ok: false, reason: 'window already closed' };
     }
@@ -77,8 +77,8 @@ export class PredictionV0BaselineImpl implements Harness {
     if (this.config.stub) {
       throw new Error('prediction-v0-baseline: stub registry cannot run (requires live daemon)');
     }
-    const { task: intent, workingDir, log } = ctx;
-    const parsed = PredictionV0IntentSchema.parse(intent);
+    const { task: task, workingDir, log } = ctx;
+    const parsed = PredictionV0TaskSchema.parse(task);
     const { feed, venue } = parsed.spec.oracle;
 
     log({ level: 'info', msg: 'prediction-v0-baseline: starting', data: { feed, venue } });

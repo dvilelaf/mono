@@ -1,16 +1,16 @@
 /**
- * Harness engine — main RestorationEngine class.
+ * Harness engine — main TaskEngine class.
  *
  * §6.3, §6.5 of spec/2026-04-17-portfolio-v0-design.md
  *
- * Orchestrates the state machine lifecycle for each observed intent.
+ * Orchestrates the state machine lifecycle for each observed task.
  * Transition method bodies are stubs; subsequent tasks fill them in.
  */
 
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { IntentPersistence, type PersistedIntent, type PersistedIntentInput } from './persistence.js';
-import { IntentState, MissingEvidenceHashError } from './state.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
+import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
   executeTwoLayerClaim,
@@ -34,7 +34,7 @@ import {
   deliverAndClaim,
   type DeliveryDeps,
 } from './delivery.js';
-import type { Harness, HarnessContext, Solution } from '../types.js';
+import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.js';
 import { SkippableError } from '../types.js';
 import type {
   ExecutionPayload,
@@ -77,9 +77,19 @@ export interface ImplRegistry {
   findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined;
 }
 
+export interface SolverNetRegistryLike {
+  forSolverType(solverType: string): {
+    name: string;
+    solverType: string;
+    harness: string;
+    canonicalPlugin: RuntimePlugin;
+    plugins: RuntimePlugin[];
+  } | undefined;
+}
+
 // ── Engine options ────────────────────────────────────────────────────────────
 
-export interface RestorationEngineOptions {
+export interface TaskEngineOptions {
   store: Store;
   paths: {
     workingDirRoot: string;
@@ -98,7 +108,7 @@ export interface RestorationEngineOptions {
    * Packaging dependencies. When provided, pack() is functional.
    * When absent, pack() falls back to NotImplementedError.
    *
-   * `requestId` is filled per-call by the engine from the in-flight intent;
+   * `requestId` is filled per-call by the engine from the in-flight task;
    * `collector` is wired per-call from `trajectoryCollectors`.
    */
   packagingDeps?: Omit<PackagingDeps, 'requestId' | 'collector'>;
@@ -121,6 +131,7 @@ export interface RestorationEngineOptions {
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
   implRegistry?: ImplRegistry;
+  solverNetRegistry?: SolverNetRegistryLike;
   /**
    * ERC-8004 Identity Registry per-execution publisher (jinn-mono-3zk).
    * When provided, the engine calls
@@ -151,7 +162,7 @@ export interface RestorationEngineOptions {
    *
    * Failures inside the hook are logged but NEVER fatal: JinnRouter's
    * `claimDelivery` is the authoritative settlement. Restoration-only
-   * intents skip this branch entirely.
+   * tasks skip this branch entirely.
    *
    * Optional — when absent, the engine simply skips feedback.
    */
@@ -178,26 +189,27 @@ export interface RestorationEngineOptions {
 
 // ── Recovery report ───────────────────────────────────────────────────────────
 
-/** Per-intent outcome from a recovery pass. */
+/** Per-task outcome from a recovery pass. */
 export interface RecoveryReport {
   requestId: string;
   outcome: 'ok' | 'failed';
   error?: string;
 }
 
-// ── RestorationEngine ─────────────────────────────────────────────────────────
+// ── TaskEngine ─────────────────────────────────────────────────────────
 
-export class RestorationEngine {
-  protected readonly persistence: IntentPersistence;
-  protected readonly paths: RestorationEngineOptions['paths'];
-  protected readonly claimDeps: RestorationEngineOptions['claimDeps'];
-  protected readonly packagingDeps: RestorationEngineOptions['packagingDeps'];
-  protected readonly envelopeDeps: RestorationEngineOptions['envelopeDeps'];
-  protected readonly deliveryDeps: RestorationEngineOptions['deliveryDeps'];
-  protected readonly implRegistry: RestorationEngineOptions['implRegistry'];
-  protected readonly identityPublisher: RestorationEngineOptions['identityPublisher'];
-  protected readonly reputationFeedback: RestorationEngineOptions['reputationFeedback'];
-  protected readonly operatorConfig: RestorationEngineOptions['operatorConfig'];
+export class TaskEngine {
+  protected readonly persistence: TaskRunPersistence;
+  protected readonly paths: TaskEngineOptions['paths'];
+  protected readonly claimDeps: TaskEngineOptions['claimDeps'];
+  protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
+  protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
+  protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
+  protected readonly implRegistry: TaskEngineOptions['implRegistry'];
+  protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
+  protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
+  protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
+  protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -217,12 +229,13 @@ export class RestorationEngine {
   // Transient storage for trajectory CID+sha256 refs produced by runImpl.
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
+  private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
 
-  constructor(opts: RestorationEngineOptions) {
-    this.persistence = new IntentPersistence(opts.store.db);
+  constructor(opts: TaskEngineOptions) {
+    this.persistence = new TaskRunPersistence(opts.store.db);
     this.store = opts.store;
     this.paths = opts.paths;
     this.claimDeps = opts.claimDeps;
@@ -230,6 +243,7 @@ export class RestorationEngine {
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
+    this.solverNetRegistry = opts.solverNetRegistry;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
@@ -238,10 +252,10 @@ export class RestorationEngine {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /**
-   * Called when an intent is observed from an on-chain event.
+   * Called when an task is observed from an on-chain event.
    * Persists a DISCOVERED row. Idempotent: if the row already exists, no-op.
    */
-  async observe(input: PersistedIntentInput): Promise<void> {
+  async observe(input: PersistedTaskRunInput): Promise<void> {
     const existing = this.persistence.getByRequestId(input.requestId);
     if (!existing) {
       this.persistence.insertDiscovered(input);
@@ -250,14 +264,14 @@ export class RestorationEngine {
   }
 
   /**
-   * Recover all in-flight intents from persisted state.
+   * Recover all in-flight tasks from persisted state.
    * Called at daemon startup before beginning normal event processing.
-   * Returns a per-intent report for each intent attempted.
+   * Returns a per-task report for each task attempted.
    */
   async recoverInFlight(): Promise<RecoveryReport[]> {
     const inflight = this.persistence.getInFlight();
     const results = await Promise.allSettled(
-      inflight.map((intent) => this._recoverOne(intent)),
+      inflight.map((task) => this._recoverOne(task)),
     );
 
     const reports: RecoveryReport[] = results.map((result, i) => {
@@ -273,23 +287,23 @@ export class RestorationEngine {
     });
 
     const okCount = reports.filter((r) => r.outcome === 'ok').length;
-    console.log(`[harness-engine] recovery: ${okCount}/${reports.length} intents resumed`);
+    console.log(`[harness-engine] recovery: ${okCount}/${reports.length} tasks resumed`);
 
     return reports;
   }
 
   /**
-   * Periodic tick: advance every in-flight intent by one transition.
-   * Called by `runTickLoop` so that intents which entered a non-event-driven
+   * Periodic tick: advance every in-flight task by one transition.
+   * Called by `runTickLoop` so that tasks which entered a non-event-driven
    * state (e.g. CLAIMED waiting for windowStartTs) get re-driven without
    * waiting for a daemon restart or a fresh marketplace event.
    *
-   * Errors from individual intents are logged but do not stop the loop.
+   * Errors from individual tasks are logged but do not stop the loop.
    */
   async tick(): Promise<void> {
     const inflight = this.persistence.getInFlight();
     const results = await Promise.allSettled(
-      inflight.map((intent) => this.process(intent.requestId)),
+      inflight.map((task) => this.process(task.requestId)),
     );
     for (let i = 0; i < results.length; i++) {
       const r = results[i]!;
@@ -323,103 +337,103 @@ export class RestorationEngine {
   }
 
   /**
-   * Process a single intent: dispatch by current state to the appropriate
+   * Process a single task: dispatch by current state to the appropriate
    * transition. Drives one state transition per call.
    *
    * Called both by recovery and by the ongoing event-processing loop.
    */
   async process(requestId: string): Promise<void> {
-    const intent = this.persistence.getByRequestId(requestId);
-    if (!intent) {
-      throw new Error(`process: intent not found: ${requestId}`);
+    const task = this.persistence.getByRequestId(requestId);
+    if (!task) {
+      throw new Error(`process: task not found: ${requestId}`);
     }
 
-    switch (intent.state) {
-      case IntentState.DISCOVERED:
-        await this._runTransition(intent, () => this.claim(intent));
+    switch (task.state) {
+      case TaskRunState.DISCOVERED:
+        await this._runTransition(task, () => this.claim(task));
         break;
 
-      case IntentState.CLAIMED: {
+      case TaskRunState.CLAIMED: {
         // Advance to WAITING — persist-before-invoke principle.
-        const oldState = intent.state;
-        this.persistence.transition(intent.requestId, IntentState.WAITING);
-        console.log(`[harness-engine] ${requestId} ${oldState} → ${IntentState.WAITING}`);
+        const oldState = task.state;
+        this.persistence.transition(task.requestId, TaskRunState.WAITING);
+        console.log(`[harness-engine] ${requestId} ${oldState} → ${TaskRunState.WAITING}`);
         break;
       }
 
-      case IntentState.WAITING: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.WAITING: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
-          this.persistence.transition(intent.requestId, advance);
-          console.log(`[harness-engine] ${requestId} ${intent.state} → ${advance}`);
+          this.persistence.transition(task.requestId, advance);
+          console.log(`[harness-engine] ${requestId} ${task.state} → ${advance}`);
           await this._runTransition(
             this.persistence.getOrThrow(requestId),
             () => this.takePreSnapshot(this.persistence.getOrThrow(requestId)),
           );
           // takePreSnapshot transitions PRE_SNAPSHOT → RUNNING. Re-dispatch on
           // the post-transition state so RUNNING fires in the same pass (jinn-mono-sae).
-          const after = this.persistence.getByRequestId(intent.requestId);
-          if (after && after.state === IntentState.RUNNING) {
-            await this.process(intent.requestId);
+          const after = this.persistence.getByRequestId(task.requestId);
+          if (after && after.state === TaskRunState.RUNNING) {
+            await this.process(task.requestId);
           }
         }
         // else: not yet time — caller is responsible for scheduling retry
         break;
       }
 
-      case IntentState.PRE_SNAPSHOT: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.PRE_SNAPSHOT: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
           // Snapshot already captured (e.g. recovered from crash mid-transition)
-          this.persistence.transition(intent.requestId, advance);
-          console.log(`[harness-engine] ${requestId} ${intent.state} → ${advance}`);
+          this.persistence.transition(task.requestId, advance);
+          console.log(`[harness-engine] ${requestId} ${task.state} → ${advance}`);
           await this._runTransition(
             this.persistence.getOrThrow(requestId),
             () => this.runImpl(this.persistence.getOrThrow(requestId)),
           );
         } else {
-          await this._runTransition(intent, () => this.takePreSnapshot(intent));
+          await this._runTransition(task, () => this.takePreSnapshot(task));
           // takePreSnapshot transitions PRE_SNAPSHOT → RUNNING internally.
           // Re-dispatch on the post-transition state so the RUNNING case fires
-          // in the same pass (jinn-mono-sae fix). Without this, intents stall
+          // in the same pass (jinn-mono-sae fix). Without this, tasks stall
           // at RUNNING until the next tick/restart and runImpl never executes.
-          const after = this.persistence.getByRequestId(intent.requestId);
-          if (after && after.state === IntentState.RUNNING) {
-            await this.process(intent.requestId);
+          const after = this.persistence.getByRequestId(task.requestId);
+          if (after && after.state === TaskRunState.RUNNING) {
+            await this.process(task.requestId);
           }
         }
         break;
       }
 
-      case IntentState.RUNNING:
-        await this._runTransition(intent, () => this.runImpl(intent));
+      case TaskRunState.RUNNING:
+        await this._runTransition(task, () => this.runImpl(task));
         break;
 
-      case IntentState.POST_SNAPSHOT: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.POST_SNAPSHOT: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
-          this.persistence.transition(intent.requestId, advance);
-          console.log(`[harness-engine] ${requestId} ${intent.state} → ${advance}`);
+          this.persistence.transition(task.requestId, advance);
+          console.log(`[harness-engine] ${requestId} ${task.state} → ${advance}`);
           await this._runTransition(
             this.persistence.getOrThrow(requestId),
             () => this.pack(this.persistence.getOrThrow(requestId)),
           );
         } else {
-          await this._runTransition(intent, () => this.takePostSnapshot(intent));
+          await this._runTransition(task, () => this.takePostSnapshot(task));
         }
         break;
       }
 
-      case IntentState.PACKAGING:
-        await this._runTransition(intent, () => this.pack(intent));
+      case TaskRunState.PACKAGING:
+        await this._runTransition(task, () => this.pack(task));
         break;
 
-      case IntentState.DELIVERING:
-        await this._runTransition(intent, () => this.deliver(intent));
+      case TaskRunState.DELIVERING:
+        await this._runTransition(task, () => this.deliver(task));
         break;
 
-      case IntentState.COMPLETE:
-      case IntentState.FAILED:
+      case TaskRunState.COMPLETE:
+      case TaskRunState.FAILED:
         // Terminal — nothing to do.
         break;
     }
@@ -441,13 +455,13 @@ export class RestorationEngine {
    * Requires claimDeps to be injected via constructor options. Falls back to
    * NotImplementedError if claimDeps is absent (development / test mode).
    */
-  protected async claim(intent: PersistedIntent): Promise<void> {
+  protected async claim(task: PersistedTaskRun): Promise<void> {
     if (!this.claimDeps) {
       throw new NotImplementedError('claim');
     }
 
     // ── Pre-claim impl gate ─────────────────────────────────────────────────
-    // Refuse to claim intents whose impl is either unregistered (operator has
+    // Refuse to claim tasks whose impl is either unregistered (operator has
     // opted out via config.harnesses.disabled[]) or not ready (external deps
     // missing — e.g. HL api-wallet not approved for portfolio.v0). Marking
     // FAILED is terminal so we don't re-attempt; another operator can still
@@ -456,26 +470,41 @@ export class RestorationEngine {
     // Only fires when an implRegistry is wired in (production); tests that
     // inject claimDeps without a registry intentionally exercise the raw
     // claim path and are not gated.
-    if (this.implRegistry && intent.solverType) {
+    const solverNet = this.solverNetRegistry && task.solverType
+      ? this.solverNetRegistry.forSolverType(task.solverType)
+      : undefined;
+    if (this.solverNetRegistry && task.solverType && !solverNet) {
+      const reason = `no enabled SolverNet for solverType '${task.solverType}'; run \`jinn solver-nets enable <name>\``;
+      this.persistence.markFailed(task.requestId, reason);
+      console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
+      throw new Error(reason);
+    }
+    if (this.implRegistry && task.solverType) {
+      if (!solverNet) {
+        // Unit tests can wire only implRegistry to exercise the Harness gate.
+      }
       const impl = this.implRegistry.findFor({
-        solverType: intent.solverType,
-        role: intent.taskRole ?? 'restoration',
+        solverType: task.solverType,
+        role: task.taskRole ?? 'restoration',
       });
       if (!impl) {
-        const reason = `no impl registered or enabled for solverType '${intent.solverType}'; run \`jinn intents enable ${intent.solverType}\` to opt in`;
-        this.persistence.markFailed(intent.requestId, reason);
-        console.log(`[harness-engine] ${intent.requestId}: skipping claim — ${reason}`);
+        const setHarnessHint = solverNet
+          ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
+          : 'jinn solver-nets set-harness <name> <harness>';
+        const reason = `no Harness registered or enabled for solverType '${task.solverType}'; run \`${setHarnessHint}\``;
+        this.persistence.markFailed(task.requestId, reason);
+        console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
         throw new Error(reason);
       }
       if (impl.isReady) {
         const status = await impl.isReady({
-          kind: intent.specKind,
-          type: intent.intentType ?? 'restoration',
+          solverType: task.solverType,
+          role: task.taskRole ?? 'restoration',
         });
         if (!status.ready) {
           const reason = `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
-          this.persistence.markFailed(intent.requestId, reason);
-          console.log(`[harness-engine] ${intent.requestId}: skipping claim — ${reason}`);
+          this.persistence.markFailed(task.requestId, reason);
+          console.log(`[harness-engine] ${task.requestId}: skipping claim — ${reason}`);
           throw new Error(reason);
         }
       }
@@ -485,8 +514,8 @@ export class RestorationEngine {
 
     await executeTwoLayerClaim(
       {
-        requestId: intent.requestId,
-        windowStartTs: intent.windowStartTs,
+        requestId: task.requestId,
+        windowStartTs: task.windowStartTs,
       },
       registryClient,
       marketplaceClaimer,
@@ -494,22 +523,22 @@ export class RestorationEngine {
 
     // Both layers succeeded. The event path and tick loop can race on the same
     // DISCOVERED row; if another caller already advanced it, treat this claim as
-    // idempotent and do not rewind or fail the intent.
-    const current = this.persistence.getByRequestId(intent.requestId);
+    // idempotent and do not rewind or fail the task.
+    const current = this.persistence.getByRequestId(task.requestId);
     if (!current) {
-      throw new Error(`claim: intent not found after claim: ${intent.requestId}`);
+      throw new Error(`claim: task not found after claim: ${task.requestId}`);
     }
-    if (current.state === IntentState.DISCOVERED) {
-      this.persistence.transition(intent.requestId, IntentState.CLAIMED);
+    if (current.state === TaskRunState.DISCOVERED) {
+      this.persistence.transition(task.requestId, TaskRunState.CLAIMED);
     } else {
       console.log(
-        `[harness-engine] ${intent.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
+        `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
       );
     }
   }
 
   /**
-   * Release ClaimRegistry claims for all CLAIMED intents whose work window has
+   * Release ClaimRegistry claims for all CLAIMED tasks whose work window has
    * not yet started. Called on graceful engine shutdown.
    *
    * Returns the list of requestIds that were successfully released.
@@ -519,26 +548,26 @@ export class RestorationEngine {
       return []; // No registry client — nothing to release
     }
 
-    const claimed = this.persistence.getByState(IntentState.CLAIMED);
+    const claimed = this.persistence.getByState(TaskRunState.CLAIMED);
     const released: string[] = [];
 
-    for (const intent of claimed) {
-      if (Date.now() < intent.windowStartTs) {
+    for (const task of claimed) {
+      if (Date.now() < task.windowStartTs) {
         try {
           const ok = await releaseClaimedNotStarted(
             {
-              requestId: intent.requestId,
-              windowStartTs: intent.windowStartTs,
+              requestId: task.requestId,
+              windowStartTs: task.windowStartTs,
             },
             this.claimDeps.registryClient,
           );
           if (ok) {
-            released.push(intent.requestId);
+            released.push(task.requestId);
           }
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           console.error(
-            `[harness-engine] releaseClaimedNotStarted failed for ${intent.requestId}: ${reason}`,
+            `[harness-engine] releaseClaimedNotStarted failed for ${task.requestId}: ${reason}`,
           );
         }
       }
@@ -555,33 +584,33 @@ export class RestorationEngine {
 
   /**
    * PRE_SNAPSHOT transition: provision workingDir + implStateDir, write
-   * intent.json + env/ files, create sessions/ directory.
+   * task.json + env/ files, create sessions/ directory.
    *
    * Requires no external deps beyond filesystem access — always implemented.
    * Advances state PRE_SNAPSHOT with workingDir + implStateDir patch.
    */
-  protected async takePreSnapshot(intent: PersistedIntent): Promise<void> {
-    const workingDir = join(this.paths.workingDirRoot, intent.requestId);
+  protected async takePreSnapshot(run: PersistedTaskRun): Promise<void> {
+    const workingDir = join(this.paths.workingDirRoot, run.requestId);
     // Resolve the impl via registry so implStateDir matches the path runImpl uses
     // (join(implStateDirRoot, impl.name, solverType)). Falls back to solverType then 'default'
-    // when no impl is registered — legacy path preserved for health-check intents.
-    const resolvedImpl = intent.solverType
-      ? this.implRegistry?.findFor({ solverType: intent.solverType, role: intent.taskRole ?? 'restoration' }) ?? null
+    // when no impl is registered — legacy path preserved for health-check tasks.
+    const resolvedImpl = run.solverType
+      ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
       : null;
-    const implStateName = intent.implName ?? resolvedImpl?.name ?? intent.solverType ?? 'default';
-    const kindSeg = (intent.solverType ?? '').replace(/[.:]/g, '_');
+    const implStateName = run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default';
+    const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
     const implStateDir = kindSeg
       ? join(this.paths.implStateDirRoot, implStateName, kindSeg)
       : join(this.paths.implStateDirRoot, implStateName);
 
     // Prefer the persisted full Task; fall back to a stub for legacy
-    // (pre-migration) rows so the engine still works for health-check intents.
-    const task = intent.task ?? {
-      id: intent.requestId,
+    // (pre-migration) rows so the engine still works for health-check tasks.
+    const task = run.task ?? {
+      id: run.requestId,
       description: '',
-      ...(intent.solverType ? { solverType: intent.solverType, spec: {} } : {}),
-      role: intent.taskRole ?? 'restoration',
-      window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
+      ...(run.solverType ? { solverType: run.solverType, spec: {} } : {}),
+      role: run.taskRole ?? 'restoration',
+      window: { startTs: run.windowStartTs, endTs: run.windowEndTs },
     };
 
     provisionWorkingDir(workingDir, task as import('../../types/desired-state.js').Task);
@@ -592,13 +621,13 @@ export class RestorationEngine {
     // PRE_SNAPSHOT → PRE_SNAPSHOT (invalid); the snapshot is immediately ready
     // (it's just the provisioned dir context), so we advance to RUNNING in one
     // step.  The impl is responsible for capturing real market data.
-    this.persistence.transition(intent.requestId, IntentState.RUNNING, {
+    this.persistence.transition(run.requestId, TaskRunState.RUNNING, {
       workingDir,
       implStateDir,
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { provisioned: true, workingDir },
     });
-    console.log(`[harness-engine] ${intent.requestId} PRE_SNAPSHOT → RUNNING: workingDir=${workingDir}`);
+    console.log(`[harness-engine] ${run.requestId} PRE_SNAPSHOT -> RUNNING: workingDir=${workingDir}`);
   }
 
   /**
@@ -611,22 +640,27 @@ export class RestorationEngine {
    * Captures impl output in `solutionOutputs` map for pack() to consume. Also
    * records a minimal post-snapshot so data-driven advance can fire.
    */
-  protected async runImpl(intent: PersistedIntent): Promise<void> {
-    const solverType = intent.solverType ?? '';
-    const role = intent.taskRole ?? 'restoration';
+  protected async runImpl(task: PersistedTaskRun): Promise<void> {
+    const solverType = task.solverType ?? '';
+    const role = task.taskRole ?? 'restoration';
+    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType) : undefined;
     const impl = this.implRegistry?.findFor({ solverType, role });
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }
+    const runtimePlugins: RuntimePlugin[] = solverNet
+      ? [solverNet.canonicalPlugin, ...solverNet.plugins]
+      : [];
+    this.runtimePluginsByRequest.set(task.requestId, runtimePlugins);
 
-    const workingDir = intent.workingDir ?? join(this.paths.workingDirRoot, intent.requestId);
+    const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
     const kindSeg = solverType.replace(/[.:]/g, '_');
-    const implStateDir = intent.implStateDir ?? (
+    const implStateDir = task.implStateDir ?? (
       kindSeg
         ? join(this.paths.implStateDirRoot, impl.name, kindSeg)
         : join(this.paths.implStateDirRoot, impl.name)
     );
-    const windowEndTs = intent.windowEndTs;
+    const windowEndTs = task.windowEndTs;
 
     const abort = new AbortController();
     const msUntilEndTs = () => Math.max(0, windowEndTs - Date.now());
@@ -634,20 +668,23 @@ export class RestorationEngine {
 
     // Create a trajectory collector for this run.
     const trajectory = new TrajectoryCollector({
-      taskCid: intent.taskCid ?? '',
+      taskCid: task.taskCid ?? '',
       runId: randomUUID(),
     });
 
     try {
       const ctx: HarnessContext = {
-        task: (intent.task ?? {
-          id: intent.requestId,
+        task: (task.task ?? {
+          id: task.requestId,
           description: '',
-          ...(intent.solverType ? { solverType: intent.solverType, spec: {} } : {}),
+          ...(task.solverType ? { solverType: task.solverType, spec: {} } : {}),
           role,
-          window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
+          window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
         }) as import('../../types/desired-state.js').Task,
-        taskCid: intent.taskCid,
+        taskCid: task.taskCid,
+        solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
+        runtimePlugins,
+        solverPluginRoots: runtimePlugins.map((plugin) => plugin.root),
         implStateDir,
         workingDir,
         log: (event: { level: string; msg: string; data?: unknown }) => {
@@ -666,7 +703,7 @@ export class RestorationEngine {
           const skippedAt = Date.now();
           const detail = err.message;
           console.warn(
-            `[harness-engine] ${intent.requestId}: impl=${impl.name} skipped (${err.reason}): ${detail}`,
+            `[harness-engine] ${task.requestId}: impl=${impl.name} skipped (${err.reason}): ${detail}`,
           );
           output = {
             venueRef: { name: 'legacy' },
@@ -685,35 +722,37 @@ export class RestorationEngine {
           throw err;
         }
       }
-      this.solutionOutputs.set(intent.requestId, output);
+      this.solutionOutputs.set(task.requestId, output);
 
       // Store the trajectory collector so pack() can:
       //   1. pass it to uploadArtifacts (artifact.emit spans + producedBy metadata)
       //   2. call emitTrajectory AFTER artifact upload so spans are included
       //   3. backfill trajectoryCid on artifacts before envelope assembly
       // emitTrajectory is intentionally deferred to pack() (Task 16).
-      this.trajectoryCollectors.set(intent.requestId, trajectory);
+      this.trajectoryCollectors.set(task.requestId, trajectory);
 
       // Persist impl output BEFORE the state transition so that a crash after
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
       // find the serialised output in the DB on restart. pack() will hydrate the
       // in-memory map from solutionOutputsJson if the map entry is absent (#6).
       // Capture post-snapshot from impl output so data-driven advance fires
-      this.persistence.transition(intent.requestId, IntentState.POST_SNAPSHOT, {
+      this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },
         fillsPayload: output.fills ?? [],
         gatingClaim: output.gating,
         informationalClaim: output.informational ?? null,
         solutionOutputsJson: JSON.stringify(output),
+        implName: impl.name,
+        runtimePluginsJson: JSON.stringify(runtimePlugins),
       });
     } finally {
       clearTimeout(endTimer);
     }
-    console.log(`[harness-engine] ${intent.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name}`);
+    console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name}`);
   }
 
-  protected async takePostSnapshot(_intent: PersistedIntent): Promise<void> {
+  protected async takePostSnapshot(_intent: PersistedTaskRun): Promise<void> {
     throw new NotImplementedError('takePostSnapshot');
   }
 
@@ -724,18 +763,18 @@ export class RestorationEngine {
    * Requires packagingDeps + envelopeDeps. When absent, falls back to
    * NotImplementedError.
    */
-  protected async pack(intent: PersistedIntent): Promise<void> {
+  protected async pack(task: PersistedTaskRun): Promise<void> {
     // Hydrate implOutput from DB if the in-memory map was lost (e.g. process restart
     // after RUNNING → POST_SNAPSHOT but before pack() completed). This must run
     // BEFORE the packagingDeps guard so subclass overrides that call super.pack()
     // can still benefit from hydration even when packagingDeps is absent (#6).
-    if (!this.solutionOutputs.has(intent.requestId) && intent.solutionOutputsJson != null) {
+    if (!this.solutionOutputs.has(task.requestId) && task.solutionOutputsJson != null) {
       try {
-        const recovered = JSON.parse(intent.solutionOutputsJson) as Solution;
-        this.solutionOutputs.set(intent.requestId, recovered);
-        console.log(`[harness-engine] ${intent.requestId}: hydrated solutionOutputs from DB (crash recovery)`);
+        const recovered = JSON.parse(task.solutionOutputsJson) as Solution;
+        this.solutionOutputs.set(task.requestId, recovered);
+        console.log(`[harness-engine] ${task.requestId}: hydrated solutionOutputs from DB (crash recovery)`);
       } catch (err) {
-        console.warn(`[harness-engine] ${intent.requestId}: failed to hydrate solutionOutputsJson: ${err instanceof Error ? err.message : err}`);
+        console.warn(`[harness-engine] ${task.requestId}: failed to hydrate solutionOutputsJson: ${err instanceof Error ? err.message : err}`);
       }
     }
 
@@ -743,19 +782,19 @@ export class RestorationEngine {
       throw new NotImplementedError('pack');
     }
 
-    const workingDir = intent.workingDir ?? join(this.paths.workingDirRoot, intent.requestId);
+    const workingDir = task.workingDir ?? join(this.paths.workingDirRoot, task.requestId);
 
-    const implOutput = this.solutionOutputs.get(intent.requestId);
+    const implOutput = this.solutionOutputs.get(task.requestId);
     const implArtifacts = implOutput?.artifacts ?? [];
 
     // 1. Walk + upload artifacts (NO registration yet — manifest CID not known).
     // Pass the trajectory collector (if present) so uploadArtifacts can emit
     // jinn.artifact.emit spans and attach producedBy back-refs (Task 16 forward
     // linkage). emitTrajectory is called AFTER upload so artifact spans are included.
-    const collector = this.trajectoryCollectors.get(intent.requestId);
+    const collector = this.trajectoryCollectors.get(task.requestId);
     const packagingDepsWithReq: PackagingDeps = {
       ...this.packagingDeps,
-      requestId: intent.requestId,
+      requestId: task.requestId,
       ...(collector ? { collector } : {}),
     };
     const rawArtifacts = await walkArtifacts(workingDir, implArtifacts);
@@ -764,7 +803,7 @@ export class RestorationEngine {
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
     // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
     let trajectoryRef: { cid: string; sha256: string } | null =
-      this.trajectoryRefs.get(intent.requestId) ?? null;
+      this.trajectoryRefs.get(task.requestId) ?? null;
     if (!trajectoryRef && collector && this.envelopeDeps) {
       try {
         const { privateKeyToAccount } = await import('viem/accounts');
@@ -777,15 +816,15 @@ export class RestorationEngine {
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
         });
         trajectoryRef = { cid, sha256 };
-        console.log(`[harness-engine] ${intent.requestId}: trajectory emitted cid=${cid}`);
+        console.log(`[harness-engine] ${task.requestId}: trajectory emitted cid=${cid}`);
       } catch (err) {
         console.warn(
-          `[harness-engine] ${intent.requestId}: trajectory emit failed (non-fatal):`,
+          `[harness-engine] ${task.requestId}: trajectory emit failed (non-fatal):`,
           err instanceof Error ? err.message : err,
         );
       }
     }
-    this.trajectoryRefs.set(intent.requestId, trajectoryRef);
+    this.trajectoryRefs.set(task.requestId, trajectoryRef);
 
     // 1c. Backward linkage: backfill trajectoryCid on all artifacts that have a
     // producedBy back-ref. This must happen BEFORE assembleAndSignEnvelope so the
@@ -817,18 +856,18 @@ export class RestorationEngine {
     }
 
     // 3. Build envelope payload from impl output (kind-typed, wrapped into payload field)
-    const preSnapshotPayload = intent.preSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
-    const postSnapshotPayload = intent.postSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
+    const preSnapshotPayload = task.preSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
+    const postSnapshotPayload = task.postSnapshotPayload as { capturedAt?: number; hlTime?: number; payload?: unknown } | null;
 
     // The solverType drives payload schema selection. Fall back to 'legacy.v0'
     // for tasks without a solverType (legacy health-check / daemon-loop-test
-    // intents that use the legacy-claude impl). The legacy.v0 kind accepts any
+    // tasks that use the legacy-claude impl). The legacy.v0 kind accepts any
     // Record payload so validatePayload does not reject the output.
-    const solverType = intent.solverType ?? 'legacy.v0';
+    const solverType = task.solverType ?? 'legacy.v0';
 
     // Derive role from Task.role. Evaluator tasks produce 'verdict' envelopes;
-    // all other intents produce 'restoration' envelopes.
-    const isEvaluation = intent.taskRole === 'evaluation';
+    // all other tasks produce 'restoration' envelopes.
+    const isEvaluation = task.taskRole === 'evaluation';
     const role: Role = isEvaluation ? 'verdict' : 'restoration';
 
     let envelopePayload: Record<string, unknown>;
@@ -848,7 +887,7 @@ export class RestorationEngine {
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(
-          `pack: evaluator impl for ${intent.requestId} did not produce verdictPayload on Solution; ` +
+          `pack: evaluator impl for ${task.requestId} did not produce verdictPayload on Solution; ` +
           `ensure the impl populates output.verdictPayload`,
         );
       }
@@ -878,7 +917,7 @@ export class RestorationEngine {
       // ── Portfolio restoration envelope payload (legacy / portfolio.v0) ─────────
       envelopePayload = {
         preSnapshot: {
-          capturedAt: intent.preSnapshotCapturedAt ?? Date.now(),
+          capturedAt: task.preSnapshotCapturedAt ?? Date.now(),
           hlTime: preSnapshotPayload?.hlTime ?? 0,
           // Double-fallback: first tries the structured .payload field (normal shape),
           // then falls back to the whole payload object (handles takePreSnapshot's
@@ -886,26 +925,26 @@ export class RestorationEngine {
           payload: preSnapshotPayload?.payload ?? preSnapshotPayload ?? {},
         },
         postSnapshot: {
-          capturedAt: intent.postSnapshotCapturedAt ?? Date.now(),
+          capturedAt: task.postSnapshotCapturedAt ?? Date.now(),
           hlTime: postSnapshotPayload?.hlTime ?? 0,
           // Same double-fallback as above.
           payload: postSnapshotPayload?.payload ?? postSnapshotPayload ?? {},
         },
-        fills: (intent.fillsPayload as unknown[]) ?? [],
-        gating: (intent.gatingClaim as Record<string, unknown>) ?? {},
-        ...(intent.informationalClaim != null
-          ? { informational: intent.informationalClaim as Record<string, unknown> }
+        fills: (task.fillsPayload as unknown[]) ?? [],
+        gating: (task.gatingClaim as Record<string, unknown>) ?? {},
+        ...(task.informationalClaim != null
+          ? { informational: task.informationalClaim as Record<string, unknown> }
           : {}),
         ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
       };
     }
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
-    const generatedAt: number = intent.manifestGeneratedAt ?? Date.now();
-    if (!intent.manifestGeneratedAt) {
+    const generatedAt: number = task.manifestGeneratedAt ?? Date.now();
+    if (!task.manifestGeneratedAt) {
       // Persist before assembling so that a crash after assembly but before
       // transition still gets the same generatedAt on the next attempt.
-      this.persistence.setManifestGeneratedAt(intent.requestId, generatedAt);
+      this.persistence.setManifestGeneratedAt(task.requestId, generatedAt);
     }
 
     // 5. Assemble + sign envelope → envelope CID now known.
@@ -932,8 +971,20 @@ export class RestorationEngine {
     // 'self-signed' is accurate (no on-chain hash commitment).
     const evidenceTier: import('../../types/envelope.js').EvidenceTier =
       this.deliveryDeps?.claimDeliveryVariant === 'v2' ? 'committed' : 'self-signed';
-    const executorPlugins: Array<{ name: string; version: string; cid?: string; sha256: string }> = [];
-    const implNameForEnvelope = intent.implName ?? solverType;
+    const runtimePlugins: RuntimePlugin[] =
+      this.runtimePluginsByRequest.get(task.requestId)
+      ?? (task.runtimePluginsJson ? JSON.parse(task.runtimePluginsJson) as RuntimePlugin[] : []);
+    const executorPlugins: Array<{ name: string; version: string; cid?: string; sha256: string }> =
+      runtimePlugins
+        .map((plugin) => ({
+          name: plugin.name,
+          version: plugin.version,
+          ...(plugin.cid ? { cid: plugin.cid } : {}),
+          sha256: plugin.sha256,
+        }))
+        .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
+    const implNameForEnvelope = task.implName ?? solverType;
+    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType) : undefined;
     const runtimeBundleDigest = `sha256:${createHash('sha256')
       .update(JSON.stringify({
         harness: {
@@ -941,6 +992,7 @@ export class RestorationEngine {
           version: buildInfo.implVersion,
           codeDigest: buildInfo.codeDigest,
         },
+        solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : null,
         plugins: executorPlugins,
       }))
       .digest('hex')}`;
@@ -949,13 +1001,13 @@ export class RestorationEngine {
       solverType,
       role,
       task: {
-        cid: intent.taskCid,
-        onchainCreationTx: intent.onchainCreationTx,
-        onchainCreationBlock: intent.onchainCreationBlock,
-        requestId: intent.requestId,
+        cid: task.taskCid,
+        onchainCreationTx: task.onchainCreationTx,
+        onchainCreationBlock: task.onchainCreationBlock,
+        requestId: task.requestId,
       },
       participant: { safeAddress, agentEoa },
-      window: { startTs: intent.windowStartTs, endTs: intent.windowEndTs },
+      window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
       executor: {
         implName: implNameForEnvelope,
         // buildInfo resolves to real values in production builds; falls back to
@@ -1008,17 +1060,17 @@ export class RestorationEngine {
 
     // 8. Persist DELIVERING with manifest CID + artifact CIDs + evidence hash.
     //    evidenceHash gets its own dedicated column (not stashed in informationalClaim).
-    this.persistence.transition(intent.requestId, IntentState.DELIVERING, {
+    this.persistence.transition(task.requestId, TaskRunState.DELIVERING, {
       manifestCid,
       artifactCids,
       evidenceHash: signatureHash,
     });
-    console.log(`[harness-engine] ${intent.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
+    console.log(`[harness-engine] ${task.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
 
     // Clean up transient state (no longer needed after DELIVERING)
-    this.solutionOutputs.delete(intent.requestId);
-    this.trajectoryCollectors.delete(intent.requestId);
-    this.trajectoryRefs.delete(intent.requestId);
+    this.solutionOutputs.delete(task.requestId);
+    this.trajectoryCollectors.delete(task.requestId);
+    this.trajectoryRefs.delete(task.requestId);
   }
 
   /**
@@ -1026,29 +1078,29 @@ export class RestorationEngine {
    *
    * Requires deliveryDeps. When absent, falls back to NotImplementedError.
    *
-   * Crash-recovery safe: if `intent.deliveryTxHash` is already set (persisted
+   * Crash-recovery safe: if `task.deliveryTxHash` is already set (persisted
    * after a previous deliverToMarketplace call that completed before the process
    * crashed), we skip the deliver step and go straight to claimDelivery.
    */
-  protected async deliver(intent: PersistedIntent): Promise<void> {
+  protected async deliver(task: PersistedTaskRun): Promise<void> {
     if (!this.deliveryDeps) {
       throw new NotImplementedError('deliver');
     }
 
-    const manifestCid = intent.manifestCid;
+    const manifestCid = task.manifestCid;
     if (!manifestCid) {
-      throw new Error(`deliver: manifestCid missing for ${intent.requestId}`);
+      throw new Error(`deliver: manifestCid missing for ${task.requestId}`);
     }
 
     // Guard: v2 claimDelivery requires an evidenceHash — a zero fallback would
     // silently brick staking rewards, so we fail loudly instead.
-    const evidenceHash = intent.evidenceHash as `0x${string}` | null | undefined;
+    const evidenceHash = task.evidenceHash as `0x${string}` | null | undefined;
     if (!evidenceHash && this.deliveryDeps.claimDeliveryVariant === 'v2') {
-      throw new MissingEvidenceHashError(intent.requestId);
+      throw new MissingEvidenceHashError(task.requestId);
     }
 
     // Capture locals for use in the onDeliveryTxLanded closure.
-    const requestId = intent.requestId;
+    const requestId = task.requestId;
     const persistence = this.persistence;
 
     const { deliveryTxHash, claimTxHash } = await deliverAndClaim(
@@ -1057,14 +1109,14 @@ export class RestorationEngine {
       evidenceHash as `0x${string}`,
       this.deliveryDeps,
       // Recovery: pass existing deliveryTxHash so deliverToMarketplace is skipped.
-      (intent.deliveryTxHash as `0x${string}`) ?? undefined,
+      (task.deliveryTxHash as `0x${string}`) ?? undefined,
       // Persist deliveryTxHash before claimDelivery so recovery can resume from here.
       async (txHash) => {
         persistence.setDeliveryTxHash(requestId, txHash);
       },
     );
 
-    this.persistence.transition(requestId, IntentState.COMPLETE, {
+    this.persistence.transition(requestId, TaskRunState.COMPLETE, {
       deliveryTxHash,
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
@@ -1076,19 +1128,19 @@ export class RestorationEngine {
     // …) don't go through MCP, so the engine emits on their behalf here.
     // Idempotent: skips when a row for this requestId+tag already exists
     // (legacy path may have already inserted).
-    this.emitCycleArtifact(intent, manifestCid, evidenceHash);
+    this.emitCycleArtifact(task, manifestCid, evidenceHash);
 
     // ── ERC-8004 setMetadata — fires AFTER claimDelivery succeeds ────────────
     //
     // Moved here from pack() per PR#37 review2 must-fix #2. 'committed' means
     // "observable on-chain evidenceHash exists" — publishing before claim would
-    // lie during failures. evidenceHash comes from intent (persisted in
+    // lie during failures. evidenceHash comes from task (persisted in
     // DELIVERING state by pack()); idempotent on retry (setMetadata is a pure
     // key-value write; re-running with the same payload is safe).
     //
     // Restoration-only for now. Evaluator setMetadata lands with jinn-mono-2ff.
     if (this.identityPublisher) {
-      const taskRoleRaw = intent.taskRole ?? 'restoration';
+      const taskRoleRaw = task.taskRole ?? 'restoration';
       if (taskRoleRaw === 'restoration') {
         const signatureHash = evidenceHash as `0x${string}` | null | undefined;
         // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
@@ -1127,8 +1179,8 @@ export class RestorationEngine {
     //
     // Best-effort: any failure inside the hook is logged but does not
     // change the COMPLETE state. claimDelivery is already authoritative.
-    if (intent.taskRole === 'evaluation' && this.reputationFeedback) {
-      await this._maybePostEvaluatorFeedback(intent).catch((err) => {
+    if (task.taskRole === 'evaluation' && this.reputationFeedback) {
+      await this._maybePostEvaluatorFeedback(task).catch((err) => {
         console.warn(
           `[harness-engine] ${requestId}: reputation feedback hook errored unexpectedly (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
@@ -1149,7 +1201,7 @@ export class RestorationEngine {
    *   - `gatingClaim` doesn't carry a verdict (impl shape mismatch — log and
    *     return).
    *   - The parent harness's manifest hash isn't reachable from the
-   *     persisted state (legacy intents that pre-date evidenceHash
+   *     persisted state (legacy tasks that pre-date evidenceHash
    *     threading — log and return).
    *   - `resolveAgentId` returns null (subgraph not indexed yet, or no
    *     subgraph URL configured at all — log and return).
@@ -1172,41 +1224,41 @@ export class RestorationEngine {
    * MCP path got there first — we leave it alone.
    */
   private emitCycleArtifact(
-    intent: PersistedIntent,
+    task: PersistedTaskRun,
     manifestCid: string,
     evidenceHash: `0x${string}` | null | undefined,
   ): void {
-    const desiredStateId = intent.task?.id;
+    const desiredStateId = task.task?.id;
     if (!desiredStateId) {
-      // Pre-migration intent rows had no task_payload; the legacy
+      // Pre-migration task rows had no task_payload; the legacy
       // path is the only thing that can emit artifacts for them, and it
       // does so via MCP. Skip rather than synthesise an id.
       return;
     }
-    const taskRole = intent.taskRole ?? 'restoration';
+    const taskRole = task.taskRole ?? 'restoration';
     const tag = taskRole === 'evaluation' ? 'evaluation-verdict' : 'restoration-result';
-    const existing = this.store.getArtifactByRequestId(intent.requestId, tag);
+    const existing = this.store.getArtifactByRequestId(task.requestId, tag);
     if (existing) return;
 
     this.store.insertArtifact({
       id: randomUUID(),
       desiredStateId,
-      requestId: intent.requestId,
-      title: `${tag}: ${intent.solverType ?? 'cycle'} (${intent.implName ?? 'engine'})`,
+      requestId: task.requestId,
+      title: `${tag}: ${task.solverType ?? 'cycle'} (${task.implName ?? 'engine'})`,
       content: JSON.stringify({
         manifestCid,
         evidenceHash: evidenceHash ?? null,
-        implName: intent.implName,
+        implName: task.implName,
       }),
       tags: [tag, 'success'],
       outcome: 'SUCCESS',
     });
   }
 
-  private async _maybePostEvaluatorFeedback(intent: PersistedIntent): Promise<void> {
+  private async _maybePostEvaluatorFeedback(task: PersistedTaskRun): Promise<void> {
     if (!this.reputationFeedback) return;
 
-    const gating = intent.gatingClaim as
+    const gating = task.gatingClaim as
       | { verdict?: unknown; scoreBasis?: unknown }
       | null;
     const verdictRaw = gating?.['verdict'];
@@ -1217,7 +1269,7 @@ export class RestorationEngine {
       verdictRaw !== 'INDETERMINATE'
     ) {
       console.warn(
-        `[harness-engine] ${intent.requestId}: reputation feedback skipped — gatingClaim has no recognised verdict (got=${String(verdictRaw)})`,
+        `[harness-engine] ${task.requestId}: reputation feedback skipped — gatingClaim has no recognised verdict (got=${String(verdictRaw)})`,
       );
       return;
     }
@@ -1225,13 +1277,13 @@ export class RestorationEngine {
 
     // Pull the parent harness's manifest evidence from the inlined eval
     // payload. The evaluator impl receives the harness's signed manifest
-    // JSON via `intent.context.restorationResult` (see
+    // JSON via `task.context.restorationResult` (see
     // `MechAdapter.tryCreateEvaluationJob`). Its `signature.hash` is
     // exactly what the harness committed via `claimDelivery(evidenceHash)`.
-    const parent = this._extractHarnessManifestRef(intent);
+    const parent = this._extractHarnessManifestRef(task);
     if (!parent) {
       console.warn(
-        `[harness-engine] ${intent.requestId}: reputation feedback skipped — could not extract harness manifest hash from inlined evaluation payload`,
+        `[harness-engine] ${task.requestId}: reputation feedback skipped — could not extract harness manifest hash from inlined evaluation payload`,
       );
       return;
     }
@@ -1241,13 +1293,13 @@ export class RestorationEngine {
       resolved = await this.reputationFeedback.resolveAgentId(parent.evidenceHash);
     } catch (err) {
       console.warn(
-        `[harness-engine] ${intent.requestId}: reputation feedback resolver threw (non-fatal): ${err instanceof Error ? err.message : err}`,
+        `[harness-engine] ${task.requestId}: reputation feedback resolver threw (non-fatal): ${err instanceof Error ? err.message : err}`,
       );
       return;
     }
     if (!resolved) {
       console.log(
-        `[harness-engine] ${intent.requestId}: reputation feedback skipped — no agentId resolved for harness manifestHash=${parent.evidenceHash} (subgraph not indexed yet, or no envelope published)`,
+        `[harness-engine] ${task.requestId}: reputation feedback skipped — no agentId resolved for harness manifestHash=${parent.evidenceHash} (subgraph not indexed yet, or no envelope published)`,
       );
       return;
     }
@@ -1259,9 +1311,9 @@ export class RestorationEngine {
     const manifestCid = resolved.manifestCid ?? parent.manifestCid ?? '';
 
     // The SolverType is the same value used by the restoration —
-    // `intent.solverType` is "portfolio.v0" both for the restoration and its
+    // `task.solverType` is "portfolio.v0" both for the restoration and its
     // evaluation. Tag1 is indexed on the on-chain event, so cheap to filter.
-    const kind = intent.solverType ?? undefined;
+    const kind = task.solverType ?? undefined;
 
     const verdictArg: EvaluatorVerdict = kind ? { verdict, solverType: kind } : { verdict };
 
@@ -1280,36 +1332,36 @@ export class RestorationEngine {
       // submitEvaluatorFeedback already swallows known reverts, but a
       // truly unexpected throw still must not propagate past delivery.
       console.warn(
-        `[harness-engine] ${intent.requestId}: reputation feedback unexpected throw (non-fatal): ${err instanceof Error ? err.message : err}`,
+        `[harness-engine] ${task.requestId}: reputation feedback unexpected throw (non-fatal): ${err instanceof Error ? err.message : err}`,
       );
       return;
     }
 
     console.log(
-      `[harness-engine] ${intent.requestId}: reputation feedback ${outcome.kind} verdict=${verdict} harnessAgentId=${resolved.agentId.toString()}`,
+      `[harness-engine] ${task.requestId}: reputation feedback ${outcome.kind} verdict=${verdict} harnessAgentId=${resolved.agentId.toString()}`,
     );
   }
 
   /**
    * Extract the harness's `evidenceHash` (and best-effort `manifestCid`)
-   * from the persisted evaluation intent.
+   * from the persisted evaluation task.
    *
-   * The evaluator's `intent.context.restorationResult` holds the harness's
+   * The evaluator's `task.context.restorationResult` holds the harness's
    * full signed manifest JSON inlined as a string (per
    * `MechAdapter.tryCreateEvaluationJob`). We parse it and pull the
    * `signature.hash`, which is exactly the on-chain `evidenceHash`.
    *
    * The CID is not always inlined — the manifest carries its own
-   * `intent.cid` field (the *original intent* CID), not its self-CID. We
+   * `task.cid` field (the *original task* CID), not its self-CID. We
    * therefore return `manifestCid: null` here and rely on the subgraph
    * resolver to surface the published manifest CID. Returns `null` when
    * the inlined payload is missing or malformed.
    */
-  private _extractHarnessManifestRef(intent: PersistedIntent): {
+  private _extractHarnessManifestRef(task: PersistedTaskRun): {
     evidenceHash: `0x${string}`;
     manifestCid: string | null;
   } | null {
-    const ds = intent.task;
+    const ds = task.task;
     const inlined = ds?.context?.['restorationResult'];
     if (typeof inlined !== 'string' || inlined.length === 0) {
       return null;
@@ -1346,14 +1398,14 @@ export class RestorationEngine {
    * Used for crash recovery and for collapsing transitions in process()
    * when a previous run already produced the data.
    */
-  private dataDrivenAdvance(intent: PersistedIntent): IntentState | null {
-    switch (intent.state) {
-      case IntentState.WAITING:
-        return Date.now() >= intent.windowStartTs ? IntentState.PRE_SNAPSHOT : null;
-      case IntentState.PRE_SNAPSHOT:
-        return intent.preSnapshotPayload != null ? IntentState.RUNNING : null;
-      case IntentState.POST_SNAPSHOT:
-        return intent.postSnapshotPayload != null ? IntentState.PACKAGING : null;
+  private dataDrivenAdvance(task: PersistedTaskRun): TaskRunState | null {
+    switch (task.state) {
+      case TaskRunState.WAITING:
+        return Date.now() >= task.windowStartTs ? TaskRunState.PRE_SNAPSHOT : null;
+      case TaskRunState.PRE_SNAPSHOT:
+        return task.preSnapshotPayload != null ? TaskRunState.RUNNING : null;
+      case TaskRunState.POST_SNAPSHOT:
+        return task.postSnapshotPayload != null ? TaskRunState.PACKAGING : null;
       default:
         return null;
     }
@@ -1361,43 +1413,43 @@ export class RestorationEngine {
 
   /**
    * Wraps a transition method call with error handling: if the transition
-   * throws, the intent is marked FAILED with the error message.
+   * throws, the task is marked FAILED with the error message.
    */
   private async _runTransition(
-    intent: PersistedIntent,
+    task: PersistedTaskRun,
     fn: () => Promise<void>,
   ): Promise<void> {
-    const oldState = intent.state;
+    const oldState = task.state;
     try {
       await fn();
-      const updated = this.persistence.getByRequestId(intent.requestId);
+      const updated = this.persistence.getByRequestId(task.requestId);
       if (updated && updated.state !== oldState) {
-        console.log(`[harness-engine] ${intent.requestId} ${oldState} → ${updated.state}`);
+        console.log(`[harness-engine] ${task.requestId} ${oldState} → ${updated.state}`);
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      this.persistence.markFailed(intent.requestId, reason);
+      this.persistence.markFailed(task.requestId, reason);
       throw err;
     }
   }
 
   /**
-   * Recovery handler for a single in-flight intent.
+   * Recovery handler for a single in-flight task.
    * Dispatches by state per §6.5.
    */
-  private async _recoverOne(intent: PersistedIntent): Promise<void> {
+  private async _recoverOne(task: PersistedTaskRun): Promise<void> {
     try {
-      await this._recoverDispatch(intent);
+      await this._recoverDispatch(task);
     } catch (err) {
       // If recovery itself throws (e.g. NotImplementedError stub), mark failed.
       // NotImplementedError is expected during development; don't swallow it in prod.
       const reason = err instanceof Error ? err.message : String(err);
-      // Only mark failed if the intent is still in the same non-terminal state
+      // Only mark failed if the task is still in the same non-terminal state
       // (another concurrent recovery pass might have already advanced it).
-      const current = this.persistence.getByRequestId(intent.requestId);
-      if (current && current.state === intent.state) {
-        this.persistence.markFailed(intent.requestId, `recovery: ${reason}`);
-        console.error(`[harness-engine] resume failed for ${intent.requestId}: ${reason}`);
+      const current = this.persistence.getByRequestId(task.requestId);
+      if (current && current.state === task.state) {
+        this.persistence.markFailed(task.requestId, `recovery: ${reason}`);
+        console.error(`[harness-engine] resume failed for ${task.requestId}: ${reason}`);
       }
       throw err;
     }
@@ -1406,81 +1458,81 @@ export class RestorationEngine {
   /**
    * Per-state recovery dispatch per §6.5.
    */
-  private async _recoverDispatch(intent: PersistedIntent): Promise<void> {
-    switch (intent.state) {
-      case IntentState.DISCOVERED:
+  private async _recoverDispatch(task: PersistedTaskRun): Promise<void> {
+    switch (task.state) {
+      case TaskRunState.DISCOVERED:
         // Ready to claim — delegate to claim flow (subsequent task).
-        // Stub: leaves state unchanged; logs intent is ready.
-        await this.claim(intent);
+        // Stub: leaves state unchanged; logs task is ready.
+        await this.claim(task);
         break;
 
-      case IntentState.CLAIMED:
+      case TaskRunState.CLAIMED:
         // Advance to WAITING — no side effect needed.
-        this.persistence.transition(intent.requestId, IntentState.WAITING);
-        await this._recoverDispatch(this.persistence.getOrThrow(intent.requestId));
+        this.persistence.transition(task.requestId, TaskRunState.WAITING);
+        await this._recoverDispatch(this.persistence.getOrThrow(task.requestId));
         break;
 
-      case IntentState.WAITING: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.WAITING: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
           // Window has started — advance immediately.
-          this.persistence.transition(intent.requestId, advance);
-          await this._recoverDispatch(this.persistence.getOrThrow(intent.requestId));
+          this.persistence.transition(task.requestId, advance);
+          await this._recoverDispatch(this.persistence.getOrThrow(task.requestId));
         }
         // else: schedule a timer for startTs — caller handles scheduling.
         break;
       }
 
-      case IntentState.PRE_SNAPSHOT: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.PRE_SNAPSHOT: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
           // Snapshot already in DB — advance to RUNNING.
-          this.persistence.transition(intent.requestId, advance);
-          await this._recoverDispatch(this.persistence.getOrThrow(intent.requestId));
+          this.persistence.transition(task.requestId, advance);
+          await this._recoverDispatch(this.persistence.getOrThrow(task.requestId));
         } else {
           // Need to (re-)fetch snapshot.
-          await this.takePreSnapshot(intent);
+          await this.takePreSnapshot(task);
           // takePreSnapshot transitions PRE_SNAPSHOT → RUNNING. Re-dispatch
           // against the post-transition state so runImpl actually fires for
-          // intents that were persisted at CLAIMED/WAITING/PRE_SNAPSHOT
+          // tasks that were persisted at CLAIMED/WAITING/PRE_SNAPSHOT
           // before a restart (otherwise recovery stops at RUNNING-but-not-run).
-          const after = this.persistence.getByRequestId(intent.requestId);
-          if (after && after.state !== intent.state && after.state !== IntentState.FAILED) {
+          const after = this.persistence.getByRequestId(task.requestId);
+          if (after && after.state !== task.state && after.state !== TaskRunState.FAILED) {
             await this._recoverDispatch(after);
           }
         }
         break;
       }
 
-      case IntentState.RUNNING:
+      case TaskRunState.RUNNING:
         // Re-spawn impl with workingDir + implStateDir intact.
-        await this.runImpl(intent);
+        await this.runImpl(task);
         break;
 
-      case IntentState.POST_SNAPSHOT: {
-        const advance = this.dataDrivenAdvance(intent);
+      case TaskRunState.POST_SNAPSHOT: {
+        const advance = this.dataDrivenAdvance(task);
         if (advance !== null) {
           // Snapshot already in DB — advance to PACKAGING.
-          this.persistence.transition(intent.requestId, advance);
-          await this._recoverDispatch(this.persistence.getOrThrow(intent.requestId));
+          this.persistence.transition(task.requestId, advance);
+          await this._recoverDispatch(this.persistence.getOrThrow(task.requestId));
         } else {
-          await this.takePostSnapshot(intent);
+          await this.takePostSnapshot(task);
         }
         break;
       }
 
-      case IntentState.PACKAGING:
+      case TaskRunState.PACKAGING:
         // Re-walk workingDir + Solution; re-upload missing CIDs.
-        await this.pack(intent);
+        await this.pack(task);
         break;
 
-      case IntentState.DELIVERING:
+      case TaskRunState.DELIVERING:
         // Chain query — if already delivered → COMPLETE; else retry.
-        await this.deliver(intent);
+        await this.deliver(task);
         break;
 
-      case IntentState.COMPLETE:
-      case IntentState.FAILED:
+      case TaskRunState.COMPLETE:
+      case TaskRunState.FAILED:
         // Terminal — nothing to recover.
         break;
     }

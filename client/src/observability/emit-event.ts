@@ -1,7 +1,7 @@
 import type { Store } from '../store/store.js';
 
 export type LifecycleKind =
-  | 'intent_posted'
+  | 'task_posted'
   | 'intent_registry_failed'
   | 'request_claimed'
   | 'delivery_submitted'

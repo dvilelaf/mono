@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { buildSessionPrompt } from '../../../../src/harnesses/impls/claude-mcp-prediction-apy/prompt.js';
-import type { PredictionApyV0Intent } from '../../../../src/types/prediction-apy.js';
+import type { PredictionApyV0Task } from '../../../../src/types/prediction-apy.js';
 
-function sampleIntent(): PredictionApyV0Intent {
+function sampleTask(): PredictionApyV0Task {
   const startTs = 1_700_000_000_000;
   const endTs = startTs + 600_000;
   const resolveTs = endTs + 300_000;
   return {
     id: 'snap-1',
-    description: 'snapshot intent',
+    description: 'snapshot task',
     window: { startTs, endTs },
     spec: {
       kind: 'prediction.apy.v0',
@@ -32,6 +32,6 @@ function sampleIntent(): PredictionApyV0Intent {
 
 describe('buildSessionPrompt', () => {
   it('matches snapshot (static template + fixed timestamps)', () => {
-    expect(buildSessionPrompt(sampleIntent(), 'apy-snap-session')).toMatchSnapshot();
+    expect(buildSessionPrompt(sampleTask(), 'apy-snap-session')).toMatchSnapshot();
   });
 });

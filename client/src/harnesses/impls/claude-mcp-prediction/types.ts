@@ -36,7 +36,7 @@ export interface SubmissionState {
 // ── Factory deps ──────────────────────────────────────────────────────────────
 
 export interface PredictionToolDeps {
-  /** Chainlink AggregatorV3 proxy address the intent is anchored to. */
+  /** Chainlink AggregatorV3 proxy address the task is anchored to. */
   feed: `0x${string}`;
   /** Human-readable feed description, echoed in tool responses. */
   feedDescription: string;
@@ -64,7 +64,7 @@ export interface ClaudeMcpPredictionConfig {
   sessionMaxMs?: number;
   /** Injected deps for test mode — bypasses the real Claude spawn. */
   _testDeps?: TestDeps;
-  /** CLI `jinn intents` registry without a live daemon */
+  /** CLI Harness registry without a live daemon */
   stub?: boolean;
 }
 

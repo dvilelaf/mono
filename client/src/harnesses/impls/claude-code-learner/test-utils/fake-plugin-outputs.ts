@@ -20,7 +20,7 @@ export function fakeOrientSummary(workingDir: string, taskId: string, solverType
   writeJson(join(workingDir, '.orient', 'summary.json'), {
     task: { id: taskId, solverType, window: { startTs: 0, endTs: 0 } },
     topics: [
-      { topic: 'intent-parse', artifact: 'workingDir/.orient/intent-parse.json', summary: 'parsed', flags: [] },
+      { topic: 'task-parse', artifact: 'workingDir/.orient/task-parse.json', summary: 'parsed', flags: [] },
     ],
     openQuestions: [],
   });

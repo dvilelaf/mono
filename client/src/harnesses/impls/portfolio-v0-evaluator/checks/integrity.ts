@@ -6,7 +6,7 @@
  *
  * engine-prepended (NOT this impl's job):
  *   integrity.signature
- *   integrity.intent_ref
+ *   integrity.signedTask_ref
  *   integrity.onchain_anchor
  *
  * FAIL in any integrity.* check → verdict FAIL per §7.3.

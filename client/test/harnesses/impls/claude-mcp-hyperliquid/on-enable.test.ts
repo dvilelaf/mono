@@ -28,13 +28,13 @@ describe('ClaudeMcpHyperliquidImpl.onEnable + isReady state machine', () => {
 
   it('onEnable without --hl-master returns missing_args', async () => {
     const impl = makeImpl();
-    const result = await impl.onEnable({});
+    const result = await impl.onEnable({ args: {}, runtimePlugins: [] });
     expect(result.status).toBe('missing_args');
   });
 
   it('onEnable with --hl-master generates wallet and returns waiting_for_external_action', async () => {
     const impl = makeImpl();
-    const result = await impl.onEnable({ 'hl-master': '0xABC' });
+    const result = await impl.onEnable({ args: { 'hl-master': '0xABC' }, runtimePlugins: [] });
     expect(result.status).toBe('waiting_for_external_action');
     if (result.status !== 'waiting_for_external_action') throw new Error('unreachable');
     expect(result.details?.['apiWalletAddress']).toMatch(/^0x[a-fA-F0-9]{40}$/);
@@ -50,19 +50,19 @@ describe('ClaudeMcpHyperliquidImpl.onEnable + isReady state machine', () => {
 
   it('re-invoking onEnable without --confirm-approved stays in waiting state (no regen)', async () => {
     const impl = makeImpl();
-    const first = await impl.onEnable({ 'hl-master': '0xABC' });
+    const first = await impl.onEnable({ args: { 'hl-master': '0xABC' }, runtimePlugins: [] });
     if (first.status !== 'waiting_for_external_action') throw new Error('unreachable');
     const firstAddress = first.details?.['apiWalletAddress'];
 
-    const second = await impl.onEnable({});
+    const second = await impl.onEnable({ args: {}, runtimePlugins: [] });
     if (second.status !== 'waiting_for_external_action') throw new Error('unreachable');
     expect(second.details?.['apiWalletAddress']).toBe(firstAddress);
   });
 
   it('onEnable with --confirm-approved flips approved and returns ready', async () => {
     const impl = makeImpl();
-    await impl.onEnable({ 'hl-master': '0xABC' });
-    const result = await impl.onEnable({ 'confirm-approved': '' });
+    await impl.onEnable({ args: { 'hl-master': '0xABC' }, runtimePlugins: [] });
+    const result = await impl.onEnable({ args: { 'confirm-approved': '' }, runtimePlugins: [] });
     expect(result.status).toBe('ready');
 
     const persisted = loadApiWalletState(implStateDir);
@@ -75,9 +75,9 @@ describe('ClaudeMcpHyperliquidImpl.onEnable + isReady state machine', () => {
 
   it('onEnable on an already-ready impl is a no-op returning ready', async () => {
     const impl = makeImpl();
-    await impl.onEnable({ 'hl-master': '0xABC' });
-    await impl.onEnable({ 'confirm-approved': '' });
-    const repeat = await impl.onEnable({ 'hl-master': '0xOTHER' });
+    await impl.onEnable({ args: { 'hl-master': '0xABC' }, runtimePlugins: [] });
+    await impl.onEnable({ args: { 'confirm-approved': '' }, runtimePlugins: [] });
+    const repeat = await impl.onEnable({ args: { 'hl-master': '0xOTHER' }, runtimePlugins: [] });
     expect(repeat.status).toBe('ready');
 
     // Master not overwritten by idempotent no-op.
@@ -89,7 +89,7 @@ describe('ClaudeMcpHyperliquidImpl.onEnable + isReady state machine', () => {
     // Set up a wallet file with approved:true but no master (simulate an
     // old hand-crafted file).
     const impl = makeImpl();
-    await impl.onEnable({ 'hl-master': '0xABC' });
+    await impl.onEnable({ args: { 'hl-master': '0xABC' }, runtimePlugins: [] });
     // Manually rewrite to strip masterAddress but keep approved.
     const persisted = loadApiWalletState(implStateDir)!;
     const { masterAddress: _m, ...rest } = persisted;

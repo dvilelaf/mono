@@ -12,11 +12,11 @@ import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
-  type RestorationEngineOptions,
+  TaskEngine,
+  type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState, MissingEvidenceHashError } from '../../../src/harnesses/engine/state.js';
+import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState, MissingEvidenceHashError } from '../../../src/harnesses/engine/state.js';
 import type { Task } from '../../../src/types/desired-state.js';
 import type { Harness, HarnessContext, Solution } from '../../../src/harnesses/types.js';
 import {
@@ -28,7 +28,7 @@ import {
 
 const engTestRoot = mkdtempSync(join(tmpdir(), 're-eng-'));
 
-function makeOpts(store: Store, implRegistry?: RestorationEngineOptions['implRegistry']): RestorationEngineOptions {
+function makeOpts(store: Store, implRegistry?: TaskEngineOptions['implRegistry']): TaskEngineOptions {
   return {
     store,
     paths: { workingDirRoot: join(engTestRoot, 'work'), implStateDirRoot: join(engTestRoot, 'impl') },
@@ -88,12 +88,12 @@ describe('jinn-mono-sae: recovery re-dispatches runImpl after takePreSnapshot', 
   it('CLAIMED intent with open window recovers all the way through runImpl', async () => {
     const now = Date.now();
     const { impl, received } = makeRecordingImpl({ solverType: 'portfolio.v0' });
-    const opts: RestorationEngineOptions = {
+    const opts: TaskEngineOptions = {
       ...makeOpts(store),
       implRegistry: { findFor: (s) => (impl.supports(s) ? impl : undefined) },
     };
-    const engine = new RestorationEngine(opts);
-    const persistence = new IntentPersistence(store.db);
+    const engine = new TaskEngine(opts);
+    const persistence = new TaskRunPersistence(store.db);
 
     const ds = fullTask('rec-1', now - 1000, now + 86_400_000);
     persistence.insertDiscovered({
@@ -106,14 +106,14 @@ describe('jinn-mono-sae: recovery re-dispatches runImpl after takePreSnapshot', 
       windowEndTs: ds.window!.endTs,
       task: ds,
     });
-    persistence.transition('rec-1', IntentState.CLAIMED);
+    persistence.transition('rec-1', TaskRunState.CLAIMED);
 
     await engine.recoverInFlight();
 
     expect(received.ctx).not.toBeNull();
     const after = persistence.getByRequestId('rec-1')!;
     // runImpl ran and captured its post-snapshot
-    expect(after.state).toBe(IntentState.POST_SNAPSHOT);
+    expect(after.state).toBe(TaskRunState.POST_SNAPSHOT);
   });
 });
 
@@ -128,12 +128,12 @@ describe('jinn-mono-egi: full Task round-trip', () => {
     const now = Date.now();
     const ds = fullTask('egi-1', now - 1000, now + 86_400_000);
     const { impl, received } = makeRecordingImpl({ solverType: 'portfolio.v0' });
-    const opts: RestorationEngineOptions = {
+    const opts: TaskEngineOptions = {
       ...makeOpts(store),
       implRegistry: { findFor: (s) => (impl.supports(s) ? impl : undefined) },
     };
-    const engine = new RestorationEngine(opts);
-    const persistence = new IntentPersistence(store.db);
+    const engine = new TaskEngine(opts);
+    const persistence = new TaskRunPersistence(store.db);
 
     await engine.observe({
       requestId: 'egi-1',
@@ -148,8 +148,8 @@ describe('jinn-mono-egi: full Task round-trip', () => {
 
     // Drive to RUNNING via process() (DISCOVERED → CLAIMED requires claimDeps;
     // shortcut by direct transitions then process()).
-    persistence.transition('egi-1', IntentState.CLAIMED);
-    persistence.transition('egi-1', IntentState.WAITING);
+    persistence.transition('egi-1', TaskRunState.CLAIMED);
+    persistence.transition('egi-1', TaskRunState.WAITING);
     await engine.process('egi-1'); // advances WAITING → PRE_SNAPSHOT → RUNNING (re-dispatched)
 
     expect(received.ctx).not.toBeNull();
@@ -158,10 +158,10 @@ describe('jinn-mono-egi: full Task round-trip', () => {
 
   it('falls back to stub when task_payload is NULL (legacy row)', async () => {
     const now = Date.now();
-    const persistence = new IntentPersistence(store.db);
+    const persistence = new TaskRunPersistence(store.db);
     // Direct INSERT with NULL task_payload (simulates pre-migration row).
     store.db.prepare(`
-      INSERT INTO restoration_intents (
+      INSERT INTO task_runs (
         request_id, task_cid, onchain_creation_tx, onchain_creation_block,
         solver_type, state, state_updated_at, window_start_ts, window_end_ts,
         task_payload
@@ -175,7 +175,7 @@ describe('jinn-mono-egi: full Task round-trip', () => {
     // without throwing on the missing payload. The legacy stub Task is
     // synthesised from intent.solverType/window for both takePreSnapshot and
     // runImpl. Recovery advances CLAIMED → WAITING → PRE_SNAPSHOT → RUNNING.
-    const engine = new RestorationEngine(makeOpts(store));
+    const engine = new TaskEngine(makeOpts(store));
     await engine.recoverInFlight();
     const after = persistence.getByRequestId('legacy-1')!;
     // The intent advanced past CLAIMED (recovery did not throw on NULL payload).
@@ -184,7 +184,7 @@ describe('jinn-mono-egi: full Task round-trip', () => {
     // NotImplementedError. That throw propagates out of _recoverOne without
     // marking FAILED because current.state (RUNNING) no longer matches the
     // original intent.state (CLAIMED) — so the row is left in RUNNING.
-    expect(after.state).toBe(IntentState.RUNNING);
+    expect(after.state).toBe(TaskRunState.RUNNING);
     expect(after.task).toBeNull();
   });
 });
@@ -200,12 +200,12 @@ describe('jinn-mono-u59: takePreSnapshot uses impl.name for implStateDir', () =>
     const now = Date.now();
     const ds = fullTask('u59-1', now - 1000, now + 86_400_000);
     const { impl, received } = makeRecordingImpl({ name: 'claude-mcp-hyperliquid', solverType: 'portfolio.v0' });
-    const opts: RestorationEngineOptions = {
+    const opts: TaskEngineOptions = {
       ...makeOpts(store),
       implRegistry: { findFor: (s) => (impl.supports(s) ? impl : undefined) },
     };
-    const engine = new RestorationEngine(opts);
-    const persistence = new IntentPersistence(store.db);
+    const engine = new TaskEngine(opts);
+    const persistence = new TaskRunPersistence(store.db);
 
     await engine.observe({
       requestId: 'u59-1',
@@ -217,8 +217,8 @@ describe('jinn-mono-u59: takePreSnapshot uses impl.name for implStateDir', () =>
       windowEndTs: ds.window!.endTs,
       task: ds,
     });
-    persistence.transition('u59-1', IntentState.CLAIMED);
-    persistence.transition('u59-1', IntentState.WAITING);
+    persistence.transition('u59-1', TaskRunState.CLAIMED);
+    persistence.transition('u59-1', TaskRunState.WAITING);
     await engine.process('u59-1');
 
     expect(received.ctx).not.toBeNull();
@@ -264,7 +264,7 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
   beforeEach(() => { store = new Store(':memory:'); });
   afterEach(() => { store.close(); });
 
-  function makeDeliveryDeps(variant: 'v1' | 'v2' = 'v2'): RestorationEngineOptions['deliveryDeps'] {
+  function makeDeliveryDeps(variant: 'v1' | 'v2' = 'v2'): TaskEngineOptions['deliveryDeps'] {
     return {
       publicClient: {} as import('viem').PublicClient,
       walletClient: {} as import('viem').WalletClient,
@@ -276,7 +276,7 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
   }
 
   it('throws MissingEvidenceHashError when evidenceHash is null and variant is v2', async () => {
-    const persistence = new IntentPersistence(store.db);
+    const persistence = new TaskRunPersistence(store.db);
     const now = Date.now();
 
     persistence.insertDiscovered({
@@ -290,18 +290,18 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
     });
 
     // Advance to DELIVERING with no evidenceHash (null)
-    persistence.transition('mis-1', IntentState.CLAIMED);
-    persistence.transition('mis-1', IntentState.WAITING);
-    persistence.transition('mis-1', IntentState.PRE_SNAPSHOT);
-    persistence.transition('mis-1', IntentState.RUNNING);
-    persistence.transition('mis-1', IntentState.POST_SNAPSHOT);
-    persistence.transition('mis-1', IntentState.PACKAGING);
-    persistence.transition('mis-1', IntentState.DELIVERING, {
+    persistence.transition('mis-1', TaskRunState.CLAIMED);
+    persistence.transition('mis-1', TaskRunState.WAITING);
+    persistence.transition('mis-1', TaskRunState.PRE_SNAPSHOT);
+    persistence.transition('mis-1', TaskRunState.RUNNING);
+    persistence.transition('mis-1', TaskRunState.POST_SNAPSHOT);
+    persistence.transition('mis-1', TaskRunState.PACKAGING);
+    persistence.transition('mis-1', TaskRunState.DELIVERING, {
       manifestCid: 'bafymanifest',
       // evidenceHash intentionally omitted → null
     });
 
-    const engine = new RestorationEngine({
+    const engine = new TaskEngine({
       ...makeOpts(store),
       deliveryDeps: makeDeliveryDeps('v2'),
     });
@@ -314,7 +314,7 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
     // v1 does not require evidenceHash — it should fail for a different reason
     // (callDeliverToMarketplace network call) not MissingEvidenceHashError.
     // We just assert the error is not MissingEvidenceHashError.
-    const persistence = new IntentPersistence(store.db);
+    const persistence = new TaskRunPersistence(store.db);
     const now = Date.now();
 
     persistence.insertDiscovered({
@@ -326,18 +326,18 @@ describe('finding-3: deliver() throws MissingEvidenceHashError when evidenceHash
       windowEndTs: now + 86_400_000,
       task: { id: 'v1-1', description: 'test', role: 'restoration' },
     });
-    persistence.transition('v1-1', IntentState.CLAIMED);
-    persistence.transition('v1-1', IntentState.WAITING);
-    persistence.transition('v1-1', IntentState.PRE_SNAPSHOT);
-    persistence.transition('v1-1', IntentState.RUNNING);
-    persistence.transition('v1-1', IntentState.POST_SNAPSHOT);
-    persistence.transition('v1-1', IntentState.PACKAGING);
-    persistence.transition('v1-1', IntentState.DELIVERING, {
+    persistence.transition('v1-1', TaskRunState.CLAIMED);
+    persistence.transition('v1-1', TaskRunState.WAITING);
+    persistence.transition('v1-1', TaskRunState.PRE_SNAPSHOT);
+    persistence.transition('v1-1', TaskRunState.RUNNING);
+    persistence.transition('v1-1', TaskRunState.POST_SNAPSHOT);
+    persistence.transition('v1-1', TaskRunState.PACKAGING);
+    persistence.transition('v1-1', TaskRunState.DELIVERING, {
       manifestCid: 'bafymanifest',
       // evidenceHash intentionally omitted → null
     });
 
-    const engine = new RestorationEngine({
+    const engine = new TaskEngine({
       ...makeOpts(store),
       deliveryDeps: makeDeliveryDeps('v1'),
     });
@@ -368,7 +368,7 @@ describe('jinn-mono-eci: tick advances WAITING intents past windowStartTs', () =
     const baseNow = Date.now();
     vi.setSystemTime(baseNow);
 
-    const persistence = new IntentPersistence(store.db);
+    const persistence = new TaskRunPersistence(store.db);
     persistence.insertDiscovered({
       requestId: 'eci-1',
       taskCid: 'cid-eci-1',
@@ -378,14 +378,14 @@ describe('jinn-mono-eci: tick advances WAITING intents past windowStartTs', () =
       windowEndTs: baseNow + 86_400_000,
       task: { id: 'eci-1', description: 'test', role: 'restoration' },
     });
-    persistence.transition('eci-1', IntentState.CLAIMED);
-    persistence.transition('eci-1', IntentState.WAITING);
+    persistence.transition('eci-1', TaskRunState.CLAIMED);
+    persistence.transition('eci-1', TaskRunState.WAITING);
 
-    const engine = new RestorationEngine(makeOpts(store));
+    const engine = new TaskEngine(makeOpts(store));
 
     // First tick: window not yet open → stays WAITING
     await engine.tick();
-    expect(persistence.getByRequestId('eci-1')!.state).toBe(IntentState.WAITING);
+    expect(persistence.getByRequestId('eci-1')!.state).toBe(TaskRunState.WAITING);
 
     // Advance the clock past windowStartTs and tick again
     vi.setSystemTime(baseNow + 5_000);
@@ -395,6 +395,6 @@ describe('jinn-mono-eci: tick advances WAITING intents past windowStartTs', () =
     // WAITING → PRE_SNAPSHOT (then takePreSnapshot → RUNNING then re-dispatched
     // to runImpl which throws NotImplementedError → FAILED — but in any case
     // the intent has advanced past WAITING).
-    expect(after.state).not.toBe(IntentState.WAITING);
+    expect(after.state).not.toBe(TaskRunState.WAITING);
   });
 });

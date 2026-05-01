@@ -821,9 +821,9 @@ describe('PortfolioV0Evaluator', () => {
       expect(verdict.verdict).toBeDefined();
     });
 
-    it('verdict.json carries onchainCreationBlock from manifest intent provenance', async () => {
+    it('verdict.json carries onchainCreationBlock from manifest task provenance', async () => {
       // In the unified-payload model, onchainCreationBlock comes from the inlined manifest,
-      // not from EvalSpec pointer fields. MOCK_MANIFEST.intent.onchainCreationBlock = 100.
+      // not from EvalSpec pointer fields. MOCK_MANIFEST.signedTask.onchainCreationBlock = 100.
       const impl = makeEvaluator();
       const wd = makeTmpDir(); dirs.push(wd);
       const ctx = makeCtx(wd, impl);
@@ -831,7 +831,7 @@ describe('PortfolioV0Evaluator', () => {
       await impl.run(ctx);
 
       const verdict = JSON.parse(readFileSync(join(wd, 'verdict.json'), 'utf-8'));
-      expect(verdict.intent.onchainCreationBlock).toBe(100);
+      expect(verdict.task.onchainCreationBlock).toBe(100);
     });
 
     // ── Finding #12: generatedAt determinism ────────────────────────────────

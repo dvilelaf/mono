@@ -13,11 +13,11 @@ export {
 export {
   PortfolioV0SpecSchema,
   PortfolioV0EligibilitySchema,
-  PortfolioV0IntentSchema,
+  PortfolioV0TaskSchema,
   type Artifact,
   type PortfolioV0Spec,
   type PortfolioV0Eligibility,
-  type PortfolioV0Intent,
+  type PortfolioV0Task,
 } from './portfolio.js';
 
 export { TransientError, PermanentError } from './errors.js';
@@ -25,17 +25,17 @@ export { TransientError, PermanentError } from './errors.js';
 export {
   PredictionV0SpecSchema,
   PredictionV0EligibilitySchema,
-  PredictionV0IntentSchema,
+  PredictionV0TaskSchema,
   type PredictionV0Spec,
   type PredictionV0Eligibility,
-  type PredictionV0Intent,
+  type PredictionV0Task,
 } from './prediction.js';
 
 export {
   PredictionApyV0SpecSchema,
   PredictionApyV0EligibilitySchema,
-  PredictionApyV0IntentSchema,
+  PredictionApyV0TaskSchema,
   type PredictionApyV0Spec,
   type PredictionApyV0Eligibility,
-  type PredictionApyV0Intent,
+  type PredictionApyV0Task,
 } from './prediction-apy.js';

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { spotCarryPredict } from '../../../../src/harnesses/impls/prediction-v0-baseline/strategy.js';
-import type { PredictionV0Intent } from '../../../../src/types/prediction.js';
+import type { PredictionV0Task } from '../../../../src/types/prediction.js';
 
-const intent = (overrides: Partial<PredictionV0Intent['spec']['question']> = {}): PredictionV0Intent => ({
+const intent = (overrides: Partial<PredictionV0Task['spec']['question']> = {}): PredictionV0Task => ({
   id: 'test',
   description: 'd',
   window: { startTs: 0, endTs: 3_600_000 },
@@ -12,7 +12,7 @@ const intent = (overrides: Partial<PredictionV0Intent['spec']['question']> = {})
     question: { kind: 'threshold', operator: 'GT', threshold: '3500', resolveTs: 4_500_000, ...overrides },
   },
   eligibility: { maxSubmissionDelayMs: 60_000 },
-} as PredictionV0Intent);
+} as PredictionV0Task);
 
 describe('spotCarryPredict', () => {
   it('returns 0.55 when current price above threshold (GT)', () => {

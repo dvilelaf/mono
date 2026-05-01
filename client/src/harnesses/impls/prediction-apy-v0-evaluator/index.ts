@@ -10,15 +10,15 @@ import type { PublicClient } from 'viem';
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/desired-state.js';
-import { PredictionApyV0IntentSchema } from '../../../types/prediction-apy.js';
+import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
 import {
-  checkIntentRef,
-  checkIntentRefMissingExpected,
+  checkTaskRef,
+  checkTaskRefMissingExpected,
   checkManifestSignature,
   recomputeTopLevelSignatureHash,
 } from '../prediction-v0-evaluator/checks/integrity.js';
-import { resolveExpectedRestorationIntentCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
+import { resolveExpectedRestorationTaskCid, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 import { canonicalJson } from '../../engine/canonical-json.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
 import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
@@ -39,7 +39,7 @@ export interface PredictionApyV0EvaluatorConfig {
       pool: `0x${string}`;
       reserve: `0x${string}`;
     }) => Promise<{ twApyBps: number; sampleCount: number }>;
-    expectedIntentCid?: string;
+    expectedTaskCid?: string;
   };
 }
 
@@ -68,10 +68,10 @@ export class PredictionApyV0Evaluator implements Harness {
     return { ready: true };
   }
 
-  async canAttempt(intent: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (intent.solverType !== 'prediction.apy.v0') return { ok: false, reason: 'solverType is not prediction.apy.v0' };
-    if (intent.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
-    if (typeof intent.context?.['restorationResult'] !== 'string') {
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (task.solverType !== 'prediction.apy.v0') return { ok: false, reason: 'solverType is not prediction.apy.v0' };
+    if (task.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
+    if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };
     }
     return { ok: true };
@@ -86,14 +86,14 @@ export class PredictionApyV0Evaluator implements Harness {
     }
     const testDeps = (ctx as HarnessContext & { _testDeps?: PredictionApyV0EvaluatorConfig['_testDeps'] })._testDeps
       ?? this.config._testDeps;
-    const expectedRef = resolveExpectedRestorationIntentCid(ctx.task, testDeps);
+    const expectedRef = resolveExpectedRestorationTaskCid(ctx.task, testDeps);
 
-    const intent = PredictionApyV0IntentSchema.parse(ctx.task);
+    const task = PredictionApyV0TaskSchema.parse(ctx.task);
     const manifestJson = ctx.task.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const { envelope: submissionEnvelope, payload: submission } = parsePredictionApySubmissionEnvelope(manifestJson);
     const checks: Check[] = [];
-    const { venue, pool, reserve } = intent.spec.oracle;
+    const { venue, pool, reserve } = task.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
 
     let twApyBps: number;
@@ -105,9 +105,9 @@ export class PredictionApyV0Evaluator implements Harness {
         const result = await testDeps.twApyBpsOverWindow({
           pool: pool as `0x${string}`,
           reserve: reserve as `0x${string}`,
-          windowEndTs: intent.spec.question.resolveTs,
-          twaWindowSeconds: intent.spec.metric.twaWindowSeconds,
-          sampleCount: intent.spec.metric.sampleCount,
+          windowEndTs: task.spec.question.resolveTs,
+          twaWindowSeconds: task.spec.metric.twaWindowSeconds,
+          sampleCount: task.spec.metric.sampleCount,
         });
         twApyBps = result.twApyBps;
         sampleCount = result.sampleCount;
@@ -122,9 +122,9 @@ export class PredictionApyV0Evaluator implements Harness {
           publicClient,
           pool: pool as `0x${string}`,
           reserve: reserve as `0x${string}`,
-          windowEndTs: intent.spec.question.resolveTs,
-          twaWindowSeconds: intent.spec.metric.twaWindowSeconds,
-          sampleCount: intent.spec.metric.sampleCount,
+          windowEndTs: task.spec.question.resolveTs,
+          twaWindowSeconds: task.spec.metric.twaWindowSeconds,
+          sampleCount: task.spec.metric.sampleCount,
         });
         twApyBps = result.twApyBps;
         sampleCount = result.sampleCount;
@@ -181,7 +181,7 @@ export class PredictionApyV0Evaluator implements Harness {
 
     {
       const sa = submission.prediction.submittedAt;
-      const w = intent.window;
+      const w = task.window;
       const within = sa >= w.startTs && sa < w.endTs;
       checks.push({
         name: 'eligibility.submission_within_window',
@@ -191,8 +191,8 @@ export class PredictionApyV0Evaluator implements Harness {
     }
     {
       const sa = submission.prediction.submittedAt;
-      const w = intent.window;
-      const maxDelay = intent.eligibility.maxSubmissionDelayMs;
+      const w = task.window;
+      const maxDelay = task.eligibility.maxSubmissionDelayMs;
       const within = sa <= w.startTs + maxDelay;
       checks.push({
         name: 'eligibility.submission_within_max_delay',
@@ -208,12 +208,12 @@ export class PredictionApyV0Evaluator implements Harness {
       checks.push(await checkManifestSignature(recomputed, submissionEnvelope.signature));
     }
     if (expectedRef.kind === 'missing') {
-      checks.push(checkIntentRefMissingExpected());
+      checks.push(checkTaskRefMissingExpected());
     } else {
-      checks.push(checkIntentRef(submissionEnvelope.task.cid, expectedRef.cid));
+      checks.push(checkTaskRef(submissionEnvelope.task.cid, expectedRef.cid));
     }
 
-    if (intent.spec.metric.toleranceBps > 0) {
+    if (task.spec.metric.toleranceBps > 0) {
       checks.push({ name: 'spec.tolerance_positive', status: 'PASS' });
     } else {
       checks.push({ name: 'spec.tolerance_positive', status: 'FAIL' });
@@ -221,8 +221,8 @@ export class PredictionApyV0Evaluator implements Harness {
 
     const scoreStart = nowNanos();
     const verdict = deriveVerdict(checks);
-    const groundTruthBps = deriveGroundTruthBps(intent, twApyBps);
-    const scored = computeScore(verdict, submission.prediction.predictedBps, groundTruthBps, intent.spec.metric.toleranceBps);
+    const groundTruthBps = deriveGroundTruthBps(task, twApyBps);
+    const scored = computeScore(verdict, submission.prediction.predictedBps, groundTruthBps, task.spec.metric.toleranceBps);
     const scoreEnd = nowNanos();
     ctx.trajectory.addSpan({
       name: 'score.absolute-error-linear.v1',
@@ -243,9 +243,9 @@ export class PredictionApyV0Evaluator implements Harness {
     const evaluatorAccount = privateKeyToAccount(this.config.evaluatorPk!);
     const baseManifest: Record<string, unknown> = {
       generatedAt: Date.now(),
-      intent: submissionEnvelope.task,
+      task: submissionEnvelope.task,
       evaluator: { safeAddress: this.config.evaluatorSafeAddress, agentEoa: evaluatorAccount.address },
-      window: intent.window,
+      window: task.window,
       verdict,
       score: scored.score,
       scoreBasis: scored.scoreBasis,
@@ -254,8 +254,8 @@ export class PredictionApyV0Evaluator implements Harness {
         pool: pool as `0x${string}`,
         reserve: reserve as `0x${string}`,
         sampleCount,
-        twaWindowSeconds: intent.spec.metric.twaWindowSeconds,
-        resolveTs: intent.spec.question.resolveTs,
+        twaWindowSeconds: task.spec.metric.twaWindowSeconds,
+        resolveTs: task.spec.question.resolveTs,
       },
       claimed: {
         predictedBps: submission.prediction.predictedBps,

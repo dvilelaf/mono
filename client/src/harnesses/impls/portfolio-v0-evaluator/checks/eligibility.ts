@@ -15,7 +15,7 @@ import type { Check } from '../types.js';
  * Check that the number of closed trades meets the minimum threshold.
  *
  * @param count   Rederived closedTradesCount
- * @param minRequired  Minimum from intent.eligibility.minClosedTrades (default 20)
+ * @param minRequired  Minimum from task.eligibility.minClosedTrades (default 20)
  */
 export function checkMinClosedTrades(count: number, minRequired: number): Check {
   if (count >= minRequired) {
@@ -37,7 +37,7 @@ export function checkMinClosedTrades(count: number, minRequired: number): Check 
  * Check that the traded notional multiple meets the minimum threshold.
  *
  * @param multiple     Rederived tradedNotionalMultiple
- * @param minRequired  Minimum from intent.eligibility.minTradedNotionalMultiple (default 5.0)
+ * @param minRequired  Minimum from task.eligibility.minTradedNotionalMultiple (default 5.0)
  */
 export function checkMinTradedNotional(multiple: number, minRequired: number): Check {
   if (multiple >= minRequired) {

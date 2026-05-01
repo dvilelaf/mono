@@ -27,7 +27,7 @@ function assertClaudeAvailable(): { ok: true } | { ok: false; reason: string } {
   }
 }
 
-// Base Sepolia Aave v3 pool + USDC reserve (see fixtures/prediction-apy-v0-intent.example.json)
+// Base Sepolia Aave v3 pool + USDC reserve (see fixtures/prediction-apy-v0-task.example.json)
 const POOL = '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951';
 const RESERVE = '0x31d3A7711a10C45D72649D51E1c8D74282702572';
 
@@ -52,7 +52,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction-apy (isolation)', () => {
     const windowEndTs = windowStartTs + 3_600_000;
     const resolveTs = windowEndTs + 900_000;
 
-    const intent: Task = {
+    const task: Task = {
       id: 'iso-apy-1',
       description: 'USDC supply APY (isolation test)',
       window: { startTs: windowStartTs, endTs: windowEndTs },
@@ -83,7 +83,7 @@ describe.skipIf(!enabled)('claude-mcp-prediction-apy (isolation)', () => {
     });
 
     const ctx: HarnessContext = {
-      intent,
+      task,
       workingDir,
       implStateDir,
       log: (event) =>

@@ -11,12 +11,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from '../../../src/store/store.js';
 import {
-  RestorationEngine,
+  TaskEngine,
   NotImplementedError,
-  type RestorationEngineOptions,
+  type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
-import { IntentPersistence, type PersistedIntentInput } from '../../../src/harnesses/engine/persistence.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskRunPersistence, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ function mkTmp(): string {
   return dir;
 }
 
-function makeInput(requestId: string, tmp: string): PersistedIntentInput {
+function makeInput(requestId: string, tmp: string): PersistedTaskRunInput {
   const now = Date.now() - 1000;
   return {
     requestId,
@@ -68,7 +68,7 @@ function makeInput(requestId: string, tmp: string): PersistedIntentInput {
   };
 }
 
-function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
+function makeOpts(store: Store, tmp: string): TaskEngineOptions {
   return {
     store,
     paths: {
@@ -99,8 +99,8 @@ function makeOpts(store: Store, tmp: string): RestorationEngineOptions {
 
 // ── TestEngine subclass ───────────────────────────────────────────────────────
 
-class TestEngine extends RestorationEngine {
-  get testPersistence(): IntentPersistence {
+class TestEngine extends TaskEngine {
+  get testPersistence(): TaskRunPersistence {
     return this.persistence;
   }
 }
@@ -126,15 +126,15 @@ describe('Engine packaging integration', () => {
   it('takePreSnapshot provisions workingDir and advances state', async () => {
     await engine.observe(makeInput('req-001', tmp));
     // Advance to CLAIMED → WAITING (window started in the past)
-    engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-    engine.testPersistence.transition('req-001', IntentState.WAITING);
+    engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+    engine.testPersistence.transition('req-001', TaskRunState.WAITING);
     // Process WAITING → dataDrivenAdvance says PRE_SNAPSHOT → transitions to
     // PRE_SNAPSHOT, then calls takePreSnapshot which transitions PRE_SNAPSHOT
     // → RUNNING. Per jinn-mono-sae, process() then re-dispatches into RUNNING;
     // with no impl registered runImpl throws NotImplementedError → FAILED.
     await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
     const intent = engine.testPersistence.getByRequestId('req-001');
-    expect(intent!.state).toBe(IntentState.FAILED);
+    expect(intent!.state).toBe(TaskRunState.FAILED);
     expect(intent!.workingDir).toBeTruthy();
     expect(intent!.implStateDir).toBeTruthy();
   });
@@ -146,30 +146,30 @@ describe('Engine packaging integration', () => {
     // state so RUNNING fires in the same pass; with no impl registered the
     // re-dispatch hits runImpl → NotImplementedError → FAILED.
     await engine.observe(makeInput('req-001', tmp));
-    engine.testPersistence.transition('req-001', IntentState.CLAIMED);
-    engine.testPersistence.transition('req-001', IntentState.WAITING);
-    engine.testPersistence.transition('req-001', IntentState.PRE_SNAPSHOT);
+    engine.testPersistence.transition('req-001', TaskRunState.CLAIMED);
+    engine.testPersistence.transition('req-001', TaskRunState.WAITING);
+    engine.testPersistence.transition('req-001', TaskRunState.PRE_SNAPSHOT);
     await expect(engine.process('req-001')).rejects.toThrow(NotImplementedError);
     const intent = engine.testPersistence.getByRequestId('req-001');
-    expect(intent!.state).toBe(IntentState.FAILED);
+    expect(intent!.state).toBe(TaskRunState.FAILED);
     expect(intent!.workingDir).toBeTruthy();
     expect(intent!.preSnapshotPayload).toBeTruthy();
   });
 
   it('pack() throws NotImplementedError when packagingDeps absent', async () => {
-    const optsNoPackaging: RestorationEngineOptions = {
+    const optsNoPackaging: TaskEngineOptions = {
       store,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
     };
     const eng = new TestEngine(optsNoPackaging);
     await eng.observe(makeInput('req-002', tmp));
     const p = eng.testPersistence;
-    p.transition('req-002', IntentState.CLAIMED);
-    p.transition('req-002', IntentState.WAITING);
-    p.transition('req-002', IntentState.PRE_SNAPSHOT);
-    p.transition('req-002', IntentState.RUNNING);
-    p.transition('req-002', IntentState.POST_SNAPSHOT);
-    p.transition('req-002', IntentState.PACKAGING);
+    p.transition('req-002', TaskRunState.CLAIMED);
+    p.transition('req-002', TaskRunState.WAITING);
+    p.transition('req-002', TaskRunState.PRE_SNAPSHOT);
+    p.transition('req-002', TaskRunState.RUNNING);
+    p.transition('req-002', TaskRunState.POST_SNAPSHOT);
+    p.transition('req-002', TaskRunState.PACKAGING);
     await expect(eng.process('req-002')).rejects.toThrow(NotImplementedError);
   });
 
@@ -184,28 +184,28 @@ describe('Engine packaging integration', () => {
 
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'test'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { equity: '1000', capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { equity: '1100', capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     // Process PACKAGING — should succeed and advance to DELIVERING
     const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     await engine.process(requestId);
     const intent = engine.testPersistence.getByRequestId(requestId);
-    expect(intent!.state).toBe(IntentState.DELIVERING);
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
     expect(intent!.manifestCid).toBe('bafymock123');
 
     // Assert participant provenance: safeAddress must be the Safe multisig,
@@ -224,20 +224,20 @@ describe('Engine packaging integration', () => {
   });
 
   it('deliver() throws NotImplementedError when deliveryDeps absent', async () => {
-    const optsNoDelivery: RestorationEngineOptions = {
+    const optsNoDelivery: TaskEngineOptions = {
       store,
       paths: { workingDirRoot: join(tmp, 'restorations'), implStateDirRoot: join(tmp, 'impls') },
     };
     const eng = new TestEngine(optsNoDelivery);
     await eng.observe(makeInput('req-004', tmp));
     const p = eng.testPersistence;
-    p.transition('req-004', IntentState.CLAIMED);
-    p.transition('req-004', IntentState.WAITING);
-    p.transition('req-004', IntentState.PRE_SNAPSHOT);
-    p.transition('req-004', IntentState.RUNNING);
-    p.transition('req-004', IntentState.POST_SNAPSHOT);
-    p.transition('req-004', IntentState.PACKAGING);
-    p.transition('req-004', IntentState.DELIVERING);
+    p.transition('req-004', TaskRunState.CLAIMED);
+    p.transition('req-004', TaskRunState.WAITING);
+    p.transition('req-004', TaskRunState.PRE_SNAPSHOT);
+    p.transition('req-004', TaskRunState.RUNNING);
+    p.transition('req-004', TaskRunState.POST_SNAPSHOT);
+    p.transition('req-004', TaskRunState.PACKAGING);
+    p.transition('req-004', TaskRunState.DELIVERING);
     await expect(eng.process('req-004')).rejects.toThrow(NotImplementedError);
   });
 
@@ -245,13 +245,13 @@ describe('Engine packaging integration', () => {
     const requestId = 'req-005';
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT);
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT);
-    p.transition(requestId, IntentState.PACKAGING);
-    p.transition(requestId, IntentState.DELIVERING, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT);
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT);
+    p.transition(requestId, TaskRunState.PACKAGING);
+    p.transition(requestId, TaskRunState.DELIVERING, {
       manifestCid: 'bafymanifest123',
       // evidenceHash required for v2 claimDelivery (fix #3: zero fallback removed)
       evidenceHash: '0xaabbccdd00000000000000000000000000000000000000000000000000000000',
@@ -259,13 +259,13 @@ describe('Engine packaging integration', () => {
 
     await engine.process(requestId);
     const intent = engine.testPersistence.getByRequestId(requestId);
-    expect(intent!.state).toBe(IntentState.COMPLETE);
+    expect(intent!.state).toBe(TaskRunState.COMPLETE);
     expect(intent!.deliveryTxHash).toBe('0xdeliverytx');
   });
 
   it('pack() throws when safeAddress is not configured', async () => {
     // Engine with envelopeDeps missing safeAddress and no deliveryDeps
-    const optsNoSafe: RestorationEngineOptions = {
+    const optsNoSafe: TaskEngineOptions = {
       store,
       paths: {
         workingDirRoot: join(tmp, 'restorations'),
@@ -293,22 +293,22 @@ describe('Engine packaging integration', () => {
 
     await eng.observe(makeInput(requestId, tmp));
     const p = eng.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'test'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: {},
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     await expect(eng.process(requestId)).rejects.toThrow(
       'pack: safeAddress not configured in envelopeDeps or deliveryDeps',
@@ -324,26 +324,26 @@ describe('Engine packaging integration', () => {
 
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'test'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     await engine.process(requestId);
     const afterPack = engine.testPersistence.getByRequestId(requestId)!;
-    expect(afterPack.state).toBe(IntentState.DELIVERING);
+    expect(afterPack.state).toBe(TaskRunState.DELIVERING);
 
     // evidenceHash must be in its own column (not in informationalClaim)
     expect(afterPack.evidenceHash).toBeTruthy();
@@ -366,22 +366,22 @@ describe('Engine packaging integration', () => {
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
     const baseTransitions = () => {
-      p.transition(requestId, IntentState.CLAIMED);
-      p.transition(requestId, IntentState.WAITING);
-      p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.CLAIMED);
+      p.transition(requestId, TaskRunState.WAITING);
+      p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
         workingDir,
         implStateDir: join(tmp, 'impls', 'test'),
         preSnapshotCapturedAt: 1000,
         preSnapshotPayload: { capturedAt: 1000, hlTime: 0 },
       });
-      p.transition(requestId, IntentState.RUNNING);
-      p.transition(requestId, IntentState.POST_SNAPSHOT, {
+      p.transition(requestId, TaskRunState.RUNNING);
+      p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: 2000,
         postSnapshotPayload: { capturedAt: 2000, hlTime: 0 },
         fillsPayload: [],
         gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
       });
-      p.transition(requestId, IntentState.PACKAGING);
+      p.transition(requestId, TaskRunState.PACKAGING);
     };
     baseTransitions();
 
@@ -405,20 +405,20 @@ describe('Engine packaging integration', () => {
     // First pack run
     await engine.process(requestId);
     const afterFirst = engine.testPersistence.getByRequestId(requestId)!;
-    expect(afterFirst.state).toBe(IntentState.DELIVERING);
+    expect(afterFirst.state).toBe(TaskRunState.DELIVERING);
     const generatedAtFirst = afterFirst.manifestGeneratedAt;
     expect(generatedAtFirst).toBeTruthy();
 
     // Simulate PACKAGING retry: reset state back to PACKAGING
     // (use raw DB because transition() would reject DELIVERING → PACKAGING)
     store.db.prepare(
-      "UPDATE restoration_intents SET state = 'PACKAGING', manifest_cid = NULL, evidence_hash = NULL, delivery_tx_hash = NULL WHERE request_id = ?",
+      "UPDATE task_runs SET state = 'PACKAGING', manifest_cid = NULL, evidence_hash = NULL, delivery_tx_hash = NULL WHERE request_id = ?",
     ).run(requestId);
 
     // Re-run with same engine (generatedAt is preserved in DB)
     await engine.process(requestId);
     const afterSecond = engine.testPersistence.getByRequestId(requestId)!;
-    expect(afterSecond.state).toBe(IntentState.DELIVERING);
+    expect(afterSecond.state).toBe(TaskRunState.DELIVERING);
 
     // generatedAt must be identical across both runs
     expect(afterSecond.manifestGeneratedAt).toBe(generatedAtFirst);
@@ -497,23 +497,23 @@ describe('Engine packaging integration', () => {
       task: { id: requestId, description: 'test', solverType: 'portfolio.v0', role: 'evaluation' },
     });
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { verdict: 'PASS', score: '0.5' },
       solutionOutputsJson: JSON.stringify(implOutput),
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
@@ -524,7 +524,7 @@ describe('Engine packaging integration', () => {
     await engine.process(requestId);
 
     const intent = engine.testPersistence.getByRequestId(requestId)!;
-    expect(intent.state).toBe(IntentState.DELIVERING);
+    expect(intent.state).toBe(TaskRunState.DELIVERING);
     expect(intent.manifestCid).toBe('bafymock123');
 
     // Find the uploaded envelope (has schemaVersion='jinn.execution.v1')
@@ -583,23 +583,23 @@ describe('Engine packaging integration', () => {
       task: { id: requestId, description: 'test', solverType: 'portfolio.v0', role: 'evaluation' },
     });
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'portfolio-v0-evaluator'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { verdict: 'PASS' },
       solutionOutputsJson: JSON.stringify(implOutput),
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     await expect(engine.process(requestId)).rejects.toThrow(
       /evaluator impl.*did not produce verdictPayload/,
@@ -611,8 +611,8 @@ describe('Engine packaging integration', () => {
 
 import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
 
-class TrajectoryTestEngine extends RestorationEngine {
-  get testPersistence(): IntentPersistence {
+class TrajectoryTestEngine extends TaskEngine {
+  get testPersistence(): TaskRunPersistence {
     return this.persistence;
   }
 
@@ -666,22 +666,22 @@ describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => 
 
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'test'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     // Inject a trajectory collector (simulates what runImpl would have set up)
     const collector = new TrajectoryCollector({ taskCid: 'bafyintent123', runId: 'run-test-1' });
@@ -702,7 +702,7 @@ describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => 
 
     // Verify state advanced to DELIVERING
     const intent = engine.testPersistence.getByRequestId(requestId);
-    expect(intent!.state).toBe(IntentState.DELIVERING);
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
 
     // Verify the envelope's artifacts have producedBy.trajectoryCid populated
     const envelopeCall = uploadMock.mock.calls.find(
@@ -749,27 +749,27 @@ describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => 
 
     await engine.observe(makeInput(requestId, tmp));
     const p = engine.testPersistence;
-    p.transition(requestId, IntentState.CLAIMED);
-    p.transition(requestId, IntentState.WAITING);
-    p.transition(requestId, IntentState.PRE_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
       workingDir,
       implStateDir: join(tmp, 'impls', 'test'),
       preSnapshotCapturedAt: Date.now(),
       preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
     });
-    p.transition(requestId, IntentState.RUNNING);
-    p.transition(requestId, IntentState.POST_SNAPSHOT, {
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
       postSnapshotCapturedAt: Date.now(),
       postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
       fillsPayload: [],
       gatingClaim: { equityReturnPct: '5', maxDrawdownPct: '2', closedTradesCount: 10, tradedNotionalMultiple: '3' },
     });
-    p.transition(requestId, IntentState.PACKAGING);
+    p.transition(requestId, TaskRunState.PACKAGING);
 
     // No collector injected — emitTrajectory should not be called
     await engine.process(requestId);
     const intent = engine.testPersistence.getByRequestId(requestId);
-    expect(intent!.state).toBe(IntentState.DELIVERING);
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
 
     // Envelope's trajectory field should be null (no collector → no trajectory)
     const envelopeCall = uploadMock.mock.calls.find(

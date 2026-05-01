@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { ClaudeMcpPredictionApyImpl } from '../../../../src/harnesses/impls/claude-mcp-prediction-apy/index.js';
 import { makeHarnessCtx } from '@test/harness-ctx.js';
 
-function makeIntent() {
+function makeTask() {
   const now = Date.now();
   const startTs = now;
   const endTs = startTs + 3_600_000;
@@ -35,7 +35,7 @@ function makeIntent() {
 
 function makeCtx() {
   return makeHarnessCtx({
-task: makeIntent(),
+task: makeTask(),
     prefix: 'apy-claude-test-',
     separateDirs: true,
     msUntilEndTs: () => 3_600_000,
@@ -129,15 +129,15 @@ describe('ClaudeMcpPredictionApyImpl (mocked session)', () => {
     await expect(impl.run(ctx)).rejects.toThrow(/ended without a valid submit_apy_prediction call/);
   });
 
-  it('canAttempt rejects intents with an already-closed window', async () => {
+  it('canAttempt rejects tasks with an already-closed window', async () => {
     const impl = new ClaudeMcpPredictionApyImpl();
-    const intent = makeIntent();
+    const task = makeTask();
     const startTs = 1_000_000;
     const endTs = startTs + 3_600_000;
     const resolveTs = endTs + 900_000;
-    (intent as unknown as Record<string, unknown>).window = { startTs, endTs };
-    (intent as unknown as Record<string, Record<string, Record<string, unknown>>>).spec.question.resolveTs = resolveTs;
-    const r = await impl.canAttempt(intent);
+    (task as unknown as Record<string, unknown>).window = { startTs, endTs };
+    (task as unknown as Record<string, Record<string, Record<string, unknown>>>).spec.question.resolveTs = resolveTs;
+    const r = await impl.canAttempt(task);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/window already closed/);
   });

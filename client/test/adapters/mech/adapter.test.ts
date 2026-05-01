@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ZodError } from 'zod';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../../src/harnesses/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../../src/harnesses/impls/evaluation-context.js';
 
 // Mock contract helpers
 // MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
@@ -29,15 +29,32 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
 // Mock IPFS
 // MOCK_JUSTIFICATION: src/adapters/mech/ipfs.js is the I/O leaf for IPFS gateway HTTP calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
-  buildTaskPayload: vi.fn().mockReturnValue({ desiredStateId: 'ds-1', description: 'test' }),
   uploadToIpfs: vi.fn().mockResolvedValue('QmFakeCid'),
   cidToDigestHex: vi.fn().mockReturnValue('0x' + 'cc'.repeat(32)),
   fetchFromIpfs: vi.fn().mockResolvedValue({ data: 'result' }),
   // Default: simulate legacy (pre-envelope) IPFS data by throwing ZodError so the
   // adapter falls back to parseTaskFromPayload. Tests that want to exercise
   // the signed-envelope path can override this mock per-test.
-  fetchSignedIntentFromIpfs: vi.fn().mockImplementation(() => {
-    throw new ZodError([]);
+  fetchSignedTaskFromIpfs: vi.fn().mockResolvedValue({
+    schemaVersion: 'task.v1',
+    id: 'ds-1',
+    solverType: 'prediction.v0',
+    role: 'restoration',
+    description: 'test',
+    window: { startTs: 0, endTs: 1 },
+    spec: {},
+    eligibility: {},
+    creator: {
+      safeAddress: '0x1111111111111111111111111111111111111111',
+      agentEoa: '0x2222222222222222222222222222222222222222',
+    },
+    createdAt: 1,
+    signature: {
+      algo: 'secp256k1',
+      signer: '0x2222222222222222222222222222222222222222',
+      hash: '0x' + 'ab'.repeat(32),
+      sig: '0x' + 'cd'.repeat(65),
+    },
   }),
   fetchSignedEnvelopeFromIpfs: vi.fn().mockResolvedValue(null),
   parseTaskFromPayload: vi.fn().mockReturnValue({ id: 'ds-1', description: 'test' }),
@@ -169,8 +186,8 @@ describe('MechAdapter with JinnRouter', () => {
       transactionHash: fakeTxHash,
       blockNumber: fakeBlockNumber,
     }]);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ description: 'test intent' });
-    vi.mocked(parseTaskFromPayload).mockReturnValueOnce({ id: 'ds-prov', description: 'test intent' });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ description: 'test task' });
+    vi.mocked(parseTaskFromPayload).mockReturnValueOnce({ id: 'ds-prov', description: 'test task' });
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -193,7 +210,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('preserves restoration result context across evaluation-job retries', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildTaskPayload } = await import('../../../src/adapters/mech/ipfs.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(submitEvaluationJob)
       .mockRejectedValueOnce(new Error('GS013'))
@@ -216,8 +233,8 @@ describe('MechAdapter with JinnRouter', () => {
     await (adapter as any).tryCreateEvaluationJob(requestId, 'restoration output');
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildTaskPayload)).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(buildTaskPayload).mock.calls[1]?.[0]).toMatchObject({
+    expect(vi.mocked(uploadToIpfs)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(uploadToIpfs).mock.calls[1]?.[1]).toMatchObject({
       role: 'evaluation',
       restorationRequestId: requestId,
       context: {
@@ -231,7 +248,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('defers evaluation job when restoration result is not in cache and chain backfill finds nothing', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildTaskPayload } = await import('../../../src/adapters/mech/ipfs.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(null);
 
@@ -246,14 +263,14 @@ describe('MechAdapter with JinnRouter', () => {
 
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildTaskPayload)).not.toHaveBeenCalled();
+    expect(vi.mocked(uploadToIpfs)).not.toHaveBeenCalled();
     expect(submitEvaluationJob).not.toHaveBeenCalled();
     expect((adapter as any).claimedButNotEvaluated.has(requestId)).toBe(true);
 
     await adapter.stop();
   });
 
-  it('recoverPendingState backfills restorationIntentCid from marketplace logs', async () => {
+  it('recoverPendingState backfills restorationTaskCid from marketplace logs', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {
       scanTasks,
@@ -295,7 +312,7 @@ describe('MechAdapter with JinnRouter', () => {
     await (adapter as any).recoverPendingState(100n);
 
     const pending = (adapter as any).pendingEvaluations.get('0x' + 'aa'.repeat(32));
-    expect(pending.context[RESTORATION_INTENT_CID_CONTEXT_KEY]).toBe(`f01551220${'dd'.repeat(32)}`);
+    expect(pending.context[RESTORATION_TASK_CID_CONTEXT_KEY]).toBe(`f01551220${'dd'.repeat(32)}`);
 
     await adapter.stop();
   });
@@ -347,7 +364,7 @@ describe('MechAdapter with JinnRouter', () => {
   it('tryCreateEvaluationJob uses chain backfill result when cache is cold', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitEvaluationJob, findLatestDeliveryDataHexForRequest } = await import('../../../src/adapters/mech/contracts.js');
-    const { buildTaskPayload, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { uploadToIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValueOnce(('0x' + 'ef'.repeat(32)) as `0x${string}`);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'backfilled restoration output' });
@@ -364,7 +381,7 @@ describe('MechAdapter with JinnRouter', () => {
 
     await (adapter as any).tryCreateEvaluationJob(requestId);
 
-    expect(vi.mocked(buildTaskPayload).mock.calls.at(-1)?.[0]).toMatchObject({
+    expect(vi.mocked(uploadToIpfs).mock.calls.at(-1)?.[1]).toMatchObject({
       context: { restorationResult: 'backfilled restoration output' },
     });
     expect(submitEvaluationJob).toHaveBeenCalled();

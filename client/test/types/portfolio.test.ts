@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseTask } from '../../src/types/desired-state.js';
 import {
-  PortfolioV0IntentSchema,
+  PortfolioV0TaskSchema,
 } from '../../src/types/portfolio.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -9,8 +9,8 @@ import {
 const START_TS = 1_700_000_000_000;
 const END_TS = START_TS + 86_400_000; // exactly 24h later
 
-const portfolioV0Intent = {
-  id: 'intent-1',
+const portfolioV0Task = {
+  id: 'task-1',
   description: 'Increase HL portfolio over 24h with bounded drawdown.',
   solverType: 'portfolio.v0',
   window: { startTs: START_TS, endTs: END_TS },
@@ -71,7 +71,7 @@ describe('Task legacy backwards compat', () => {
 
 describe('Task with window / spec / eligibility', () => {
   it('parses a portfolio.v0 desired state', () => {
-    const result = parseTask(portfolioV0Intent);
+    const result = parseTask(portfolioV0Task);
     expect(result.window).toEqual({ startTs: START_TS, endTs: END_TS });
     expect(result.solverType).toBe('portfolio.v0');
     expect(result.spec?.kind).toBeUndefined();
@@ -79,11 +79,11 @@ describe('Task with window / spec / eligibility', () => {
   });
 });
 
-// ── portfolio.v0 intent schema ────────────────────────────────────────────────
+// ── portfolio.v0 task schema ────────────────────────────────────────────────
 
-describe('PortfolioV0IntentSchema', () => {
-  it('parses a fully-specified portfolio.v0 intent', () => {
-    const result = PortfolioV0IntentSchema.parse(portfolioV0Intent);
+describe('PortfolioV0TaskSchema', () => {
+  it('parses a fully-specified portfolio.v0 task', () => {
+    const result = PortfolioV0TaskSchema.parse(portfolioV0Task);
     expect(result.solverType).toBe('portfolio.v0');
     expect(result.spec.kind).toBeUndefined();
     expect(result.spec.account.venue).toBe('hyperliquid-testnet');
@@ -91,15 +91,15 @@ describe('PortfolioV0IntentSchema', () => {
   });
 
   it('applies eligibility defaults when eligibility is omitted', () => {
-    const { eligibility: _, ...withoutEligibility } = portfolioV0Intent;
-    const result = PortfolioV0IntentSchema.parse(withoutEligibility);
+    const { eligibility: _, ...withoutEligibility } = portfolioV0Task;
+    const result = PortfolioV0TaskSchema.parse(withoutEligibility);
     // eligibility defaults to {} which triggers sub-field defaults per spec §4.1
     expect(result.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
   it('parses eligibility with explicit defaults', () => {
-    const result = PortfolioV0IntentSchema.parse({
-      ...portfolioV0Intent,
+    const result = PortfolioV0TaskSchema.parse({
+      ...portfolioV0Task,
       eligibility: { minClosedTrades: 20, minTradedNotionalMultiple: 5.0 },
     });
     expect(result.eligibility?.minClosedTrades).toBe(20);
@@ -108,20 +108,20 @@ describe('PortfolioV0IntentSchema', () => {
 
   it('rejects a non-24h window', () => {
     const bad = {
-      ...portfolioV0Intent,
+      ...portfolioV0Task,
       window: { startTs: START_TS, endTs: START_TS + 3_600_000 }, // 1h, not 24h
     };
-    expect(() => PortfolioV0IntentSchema.parse(bad)).toThrow(/24 h/);
+    expect(() => PortfolioV0TaskSchema.parse(bad)).toThrow(/24 h/);
   });
 
   it('rejects an unknown venue', () => {
     const bad = {
-      ...portfolioV0Intent,
+      ...portfolioV0Task,
       spec: {
-        ...portfolioV0Intent.spec,
-        account: { ...portfolioV0Intent.spec.account, venue: 'unknown-venue' },
+        ...portfolioV0Task.spec,
+        account: { ...portfolioV0Task.spec.account, venue: 'unknown-venue' },
       },
     };
-    expect(() => PortfolioV0IntentSchema.parse(bad)).toThrow();
+    expect(() => PortfolioV0TaskSchema.parse(bad)).toThrow();
   });
 });

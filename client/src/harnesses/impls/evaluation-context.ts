@@ -1,7 +1,7 @@
 import type { Task } from '../../types/desired-state.js';
 
 /** Eval `Task.context` key for the restoration job's intended-state IPFS CID (not the eval job's). */
-export const RESTORATION_INTENT_CID_CONTEXT_KEY = 'restorationIntentCid' as const;
+export const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid' as const;
 
 /**
  * Eval `Task.context` key for the restoration envelope's IPFS CID.
@@ -12,18 +12,18 @@ export const RESTORATION_INTENT_CID_CONTEXT_KEY = 'restorationIntentCid' as cons
 export const RESTORATION_ENVELOPE_CID_CONTEXT_KEY = 'restorationEnvelopeCid' as const;
 
 /**
- * Resolve the expected restoration intent CID for `integrity.intent_ref`.
+ * Resolve the expected restoration task CID for `integrity.signedTask_ref`.
  * Test-only overrides win; otherwise the value must be present in `context`.
  * There is no fallback to the evaluation job's `taskCid` (wrong reference).
  */
-export function resolveExpectedRestorationIntentCid(
-  intent: Task,
-  testDeps?: { expectedIntentCid?: string },
+export function resolveExpectedRestorationTaskCid(
+  task: Task,
+  testDeps?: { expectedTaskCid?: string },
 ): { kind: 'resolved'; cid: string } | { kind: 'missing' } {
-  if (testDeps?.expectedIntentCid) {
-    return { kind: 'resolved', cid: testDeps.expectedIntentCid };
+  if (testDeps?.expectedTaskCid) {
+    return { kind: 'resolved', cid: testDeps.expectedTaskCid };
   }
-  const v = intent.context?.[RESTORATION_INTENT_CID_CONTEXT_KEY];
+  const v = task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY];
   if (typeof v === 'string' && v.length > 0) {
     return { kind: 'resolved', cid: v };
   }

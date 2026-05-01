@@ -1,7 +1,7 @@
 import { keccak256, recoverAddress } from 'viem';
 import { canonicalJson } from '../../../engine/canonical-json.js';
 import type { Check } from '../types.js';
-import type { PredictionV0Intent } from '../../../../types/prediction.js';
+import type { PredictionV0Task } from '../../../../types/prediction.js';
 import type { PredictionV0RestorationPayload } from '../../../../types/payloads/prediction-v0.js';
 import type { SignedEnvelope } from '../../../../types/envelope.js';
 
@@ -15,8 +15,8 @@ const MIN_WINDOW_MS = 60_000;
 const MAX_WINDOW_MS = 86_400_000;
 const MAX_RESOLVE_GAP_MS = 3_600_000;
 
-export function checkWindowBounds(intent: PredictionV0Intent): Check {
-  const wDelta = intent.window.endTs - intent.window.startTs;
+export function checkWindowBounds(task: PredictionV0Task): Check {
+  const wDelta = task.window.endTs - task.window.startTs;
   if (wDelta < MIN_WINDOW_MS || wDelta > MAX_WINDOW_MS) {
     return {
       name: 'integrity.window_bounds',
@@ -29,7 +29,7 @@ export function checkWindowBounds(intent: PredictionV0Intent): Check {
       },
     };
   }
-  const rDelta = intent.spec.question.resolveTs - intent.window.endTs;
+  const rDelta = task.spec.question.resolveTs - task.window.endTs;
   if (rDelta < 0 || rDelta > MAX_RESOLVE_GAP_MS) {
     return {
       name: 'integrity.window_bounds',
@@ -105,22 +105,22 @@ export async function checkManifestSignature(
   }
 }
 
-/** Verify the harness's claimed intent CID matches the on-chain request. */
-export function checkIntentRef(manifestIntentCid: string, expectedIntentCid: string): Check {
+/** Verify the harness's claimed task CID matches the on-chain request. */
+export function checkTaskRef(manifestTaskCid: string, expectedTaskCid: string): Check {
   return {
-    name: 'integrity.intent_ref',
-    status: manifestIntentCid === expectedIntentCid ? 'PASS' : 'FAIL',
-    detail: manifestIntentCid === expectedIntentCid ? undefined : { manifestIntentCid, expectedIntentCid },
+    name: 'integrity.signedTask_ref',
+    status: manifestTaskCid === expectedTaskCid ? 'PASS' : 'FAIL',
+    detail: manifestTaskCid === expectedTaskCid ? undefined : { manifestTaskCid, expectedTaskCid },
   };
 }
 
-export function checkIntentRefMissingExpected(): Check {
+export function checkTaskRefMissingExpected(): Check {
   return {
-    name: 'integrity.intent_ref',
+    name: 'integrity.signedTask_ref',
     status: 'INDETERMINATE',
     detail: {
       reason:
-        'context.restorationIntentCid missing; cannot verify submission.task.cid trustlessly',
+        'context.restorationTaskCid missing; cannot verify submission.task.cid trustlessly',
     },
   };
 }

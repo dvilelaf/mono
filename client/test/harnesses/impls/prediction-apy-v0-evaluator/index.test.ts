@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PredictionApyV0Evaluator } from '../../../../src/harnesses/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
 import type { Task } from '../../../../src/types/desired-state.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
@@ -69,7 +69,7 @@ async function makeSignedApyManifestJson(overrides: { submittedAt?: number; task
 
 function makeEvalIntent(
   manifestJson: string,
-  options?: { omitRestorationIntentCid?: boolean; restorationIntentCid?: string; restorationEnvelopeCid?: string },
+  options?: { omitRestorationTaskCid?: boolean; restorationTaskCid?: string; restorationEnvelopeCid?: string },
 ): Task {
   return {
     id: 'eval-apy',
@@ -91,9 +91,9 @@ function makeEvalIntent(
     eligibility: {},
     context: {
       restorationResult: manifestJson,
-      ...(options?.omitRestorationIntentCid
+      ...(options?.omitRestorationTaskCid
         ? {}
-        : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: options?.restorationIntentCid ?? 'expected-cid' }),
+        : { [RESTORATION_TASK_CID_CONTEXT_KEY]: options?.restorationTaskCid ?? 'expected-cid' }),
       ...(options?.restorationEnvelopeCid
         ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
         : {}),
@@ -101,17 +101,17 @@ function makeEvalIntent(
   } as unknown as Task;
 }
 
-function makeCtx(intent: Task, taskCid: string, testDeps: Record<string, unknown> = {}): HarnessContext & { trajectory: TrajectoryCollector } {
+function makeCtx(task: Task, taskCid: string, testDeps: Record<string, unknown> = {}): HarnessContext & { trajectory: TrajectoryCollector } {
   const d = mkdtempSync(join(tmpdir(), 'apy-eval-'));
   return {
-    task: intent,
+    task: task,
     taskCid,
     implStateDir: d,
     workingDir: d,
     log: () => {},
     abort: new AbortController().signal,
     msUntilEndTs: () => 0,
-    trajectory: new TrajectoryCollector({ taskCid: 'test-intent-cid', runId: 'test-run-id' }),
+    trajectory: new TrajectoryCollector({ taskCid: 'test-task-cid', runId: 'test-run-id' }),
     _testDeps: testDeps,
   } as unknown as HarnessContext & { trajectory: TrajectoryCollector };
 }
@@ -119,13 +119,13 @@ function makeCtx(intent: Task, taskCid: string, testDeps: Record<string, unknown
 describe('PredictionApyV0Evaluator', () => {
   it('PASS with stubbed TWA and matching taskCid', async () => {
     const manifest = await makeSignedApyManifestJson();
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
@@ -134,58 +134,58 @@ describe('PredictionApyV0Evaluator', () => {
 
   it('REJECTED when submitted after window', async () => {
     const manifest = await makeSignedApyManifestJson({ submittedAt: 700_000 });
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
     expect(out.gating.verdict).toBe('REJECTED');
   });
 
-  it('FAIL when manifest intent cid does not match context.restorationIntentCid', async () => {
+  it('FAIL when manifest task cid does not match context.restorationTaskCid', async () => {
     const manifest = await makeSignedApyManifestJson({ taskCid: 'wrong' });
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
     expect(out.gating.verdict).toBe('FAIL');
   });
 
-  it('uses context.restorationIntentCid when it differs from ctx.taskCid (eval job vs restoration)', async () => {
+  it('uses context.restorationTaskCid when it differs from ctx.taskCid (eval job vs restoration)', async () => {
     const manifest = await makeSignedApyManifestJson({ taskCid: 'restoration-cid' });
-    const evalIntent = makeEvalIntent(manifest, { restorationIntentCid: 'restoration-cid' });
+    const evalTask = makeEvalIntent(manifest, { restorationTaskCid: 'restoration-cid' });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'evaluation-desired-state-cid', {
+      makeCtx(evalTask, 'evaluation-desired-state-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
     expect(out.gating.verdict).toBe('PASS');
   });
 
-  it('INDETERMINATE when context.restorationIntentCid is missing (legacy eval payload)', async () => {
+  it('INDETERMINATE when context.restorationTaskCid is missing (legacy eval payload)', async () => {
     const manifest = await makeSignedApyManifestJson();
-    const evalIntent = makeEvalIntent(manifest, { omitRestorationIntentCid: true });
+    const evalTask = makeEvalIntent(manifest, { omitRestorationTaskCid: true });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'any-eval-cid', {
+      makeCtx(evalTask, 'any-eval-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
@@ -194,13 +194,13 @@ describe('PredictionApyV0Evaluator', () => {
 
   it('FAIL on bad signature', async () => {
     const manifest = await makeSignedApyManifestJson({ corruptSignature: true });
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
@@ -209,12 +209,12 @@ describe('PredictionApyV0Evaluator', () => {
 
   it('emits venue_io + state_transition + artifact.emit spans on successful run', async () => {
     const manifest = await makeSignedApyManifestJson();
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
-    const ctx = makeCtx(evalIntent, 'expected-cid', {
+    const ctx = makeCtx(evalTask, 'expected-cid', {
       twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
     });
     await ev.run(ctx);
@@ -241,13 +241,13 @@ describe('PredictionApyV0Evaluator', () => {
 
   it('verdictPayload conforms to PredictionApyV0VerdictPayloadSchema on PASS', async () => {
     const manifest = await makeSignedApyManifestJson();
-    const evalIntent = makeEvalIntent(manifest);
+    const evalTask = makeEvalIntent(manifest);
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );
@@ -270,13 +270,13 @@ describe('PredictionApyV0Evaluator', () => {
   it('restorationEnvelope.cid uses threaded context key + sha256 matches manifest JSON', async () => {
     const manifest = await makeSignedApyManifestJson();
     const envelopeCid = 'f01551220deadbeef1234567890abcdef';
-    const evalIntent = makeEvalIntent(manifest, { restorationEnvelopeCid: envelopeCid });
+    const evalTask = makeEvalIntent(manifest, { restorationEnvelopeCid: envelopeCid });
     const ev = new PredictionApyV0Evaluator({
       evaluatorPk: PK,
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalIntent, 'expected-cid', {
+      makeCtx(evalTask, 'expected-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );

@@ -66,7 +66,7 @@ export function buildPredictionTools(deps: PredictionToolDeps): PredictionToolDe
   const readChainlinkPrice: PredictionToolDefinition = {
     name: 'read_chainlink_price',
     description:
-      'Read the current Chainlink price for the feed anchored in this prediction intent. Returns the price as a decimal string plus round metadata.',
+      'Read the current Chainlink price for the feed anchored in this prediction task. Returns the price as a decimal string plus round metadata.',
     schema: ReadChainlinkPriceSchema,
     handler: async () => {
       try {

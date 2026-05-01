@@ -66,7 +66,8 @@ import { PredictionV0BaselineImpl } from '../../src/harnesses/impls/prediction-v
 import { PredictionV0Evaluator } from '../../src/harnesses/impls/prediction-v0-evaluator/index.js';
 import type { HarnessContext } from '../../src/harnesses/types.js';
 import type { Task } from '../../src/types/desired-state.js';
-import type { PredictionV0Intent } from '../../src/types/prediction.js';
+import type { TaskV1 } from '../../src/types/task-document.js';
+import type { PredictionV0Task } from '../../src/types/prediction.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import type { SpanningResult } from '../../src/venues/chainlink/client.js';
@@ -420,7 +421,7 @@ async function main(): Promise<void> {
   let capturedManifest: SignedEnvelope | undefined;
   let capturedTaskCid: string | undefined;
   let capturedWindow: { startTs: number; endTs: number } | undefined;
-  let capturedIntent: PredictionV0Intent | undefined;
+  let capturedIntent: PredictionV0Task | undefined;
   // Block number tracking for getLogs range queries (Anvil limits to 10,000 blocks from fork)
   let phase5StartBlock: bigint | undefined;
   let phase7StartBlock: bigint | undefined;
@@ -631,7 +632,7 @@ async function main(): Promise<void> {
       const resolveTs = endTs + 900_000;
       capturedWindow = { startTs, endTs };
 
-      const predictionIntent: PredictionV0Intent = {
+      const predictionIntent: PredictionV0Task = {
         id: 'pred-v0-e2e-test',
         description: 'Will ETH be above $3500 at resolveTs?',
         solverType: 'prediction.v0',
@@ -655,13 +656,30 @@ async function main(): Promise<void> {
 
       const { createClients: createClientsLocal } = await import('../../src/adapters/mech/safe.js');
       const { submitTask, getMechDeliveryRate, getTimeoutBounds } = await import('../../src/adapters/mech/contracts.js');
-      const { buildTaskPayload, uploadToIpfs, cidToDigestHex } = await import('../../src/adapters/mech/ipfs.js');
+      const { uploadToIpfs, cidToDigestHex } = await import('../../src/adapters/mech/ipfs.js');
+      const { signTaskV1 } = await import('../../src/tasks/signing.js');
 
       const { walletClient: creatorWalletClient } = createClientsLocal(ANVIL_RPC, creatorAgentPk as Hex, base);
 
-      // Build intent payload + upload to IPFS
-      const intentPayload = buildTaskPayload(predictionIntent as unknown as import('../../src/types/desired-state.js').Task);
-      const taskCid = await uploadToIpfs('https://registry.autonolas.tech', intentPayload);
+      // Build signed Task document + upload to IPFS.
+      const creatorAccount = privateKeyToAccount(creatorAgentPk as Hex);
+      const taskDocument: TaskV1 = {
+        schemaVersion: 'task.v1',
+        id: predictionIntent.id,
+        solverType: predictionIntent.solverType,
+        role: 'restoration',
+        description: predictionIntent.description,
+        window: predictionIntent.window,
+        spec: predictionIntent.spec,
+        eligibility: predictionIntent.eligibility,
+        creator: {
+          safeAddress: getAddress(creatorSafe as Address),
+          agentEoa: creatorAccount.address,
+        },
+        createdAt: now,
+      };
+      const signedTask = await signTaskV1(taskDocument, creatorAgentPk as Hex);
+      const taskCid = await uploadToIpfs('https://registry.autonolas.tech', signedTask);
       const taskDataHex = cidToDigestHex(taskCid) as Hex;
 
       // Get pricing from harnessMech (since it's the priorityMech)
@@ -1042,7 +1060,7 @@ async function main(): Promise<void> {
         msUntilEndTs: () => 0,
         trajectory: noopTrajectory(),
         _testDeps: {
-          expectedIntentCid: capturedManifest2.task.cid,
+          expectedTaskCid: capturedManifest2.task.cid,
         },
       } as unknown as HarnessContext;
 
@@ -1187,7 +1205,7 @@ async function main(): Promise<void> {
       const evaluatorSafeAddress = evaluatorSafe as `0x${string}`;
 
       const testWindow = { startTs: 0, endTs: 3_600_000 };
-      const testIntent: PredictionV0Intent = {
+      const testIntent: PredictionV0Task = {
         id: 'test-direct',
         description: 'Direct TypeScript verdict test',
         solverType: 'prediction.v0',
@@ -1283,7 +1301,7 @@ async function main(): Promise<void> {
             oraclePriceAtResolveTs: deps
               ? async () => deps
               : async () => { throw new Error('oracle unreachable (test)'); },
-            expectedIntentCid: 'task-cid-direct',
+            expectedTaskCid: 'task-cid-direct',
           },
         } as unknown as HarnessContext;
       };

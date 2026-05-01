@@ -31,7 +31,7 @@ import type {
   Solution,
   ReadyStatus,
   EnableResult,
-  IntentEnableMetadata,
+  HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/desired-state.js';
@@ -40,7 +40,7 @@ import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../
 import { getUnifiedAccountValue } from '../../../venues/hyperliquid/account-value.js';
 import type { UnifiedAccountValue } from '../../../venues/hyperliquid/account-value.js';
 import {
-  PortfolioV0IntentSchema,
+  PortfolioV0TaskSchema,
   PortfolioV0EligibilitySchema,
 } from '../../../types/portfolio.js';
 
@@ -72,7 +72,7 @@ import type { HlFill } from '../../../venues/hyperliquid/types.js';
 export interface ClaudeMcpHyperliquidConfig {
   claudePath?: string;
   claudeModel?: string;
-  /** Per-intent safety override (from intent context) */
+  /** Per-task safety override (from task context) */
   safetyConfig?: Partial<SafetyConfig>;
   /** Cadence between sessions in ms. Default: 30 min */
   cadenceMs?: number;
@@ -80,13 +80,13 @@ export interface ClaudeMcpHyperliquidConfig {
   sessionMaxMs?: number;
   /**
    * Impl state directory — used by `isReady` and `onEnable` to locate
-   * the api-wallet file outside of a running intent context. Defaults under
+   * the api-wallet file outside of a running task context. Defaults under
    * `~/.jinn-client/engine/impl-state/claude-mcp-hyperliquid` (see `config.engine`).
    */
   implStateDir?: string;
   /** Injected deps for testing */
   _testDeps?: TestDeps;
-  /** CLI `jinn intents` registry without a live fleet */
+  /** CLI `jinn solver-nets` registry without a live fleet */
   stub?: boolean;
 }
 
@@ -120,22 +120,22 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
     return ctx.solverType === 'portfolio.v0' && ctx.role !== 'evaluation';
   }
 
-  async canAttempt(intent: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (intent.solverType !== 'portfolio.v0') {
+  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (task.solverType !== 'portfolio.v0') {
       return { ok: false, reason: 'solverType is not portfolio.v0' };
     }
 
-    // Validate the intent shape
-    const parseResult = PortfolioV0IntentSchema.safeParse(intent);
+    // Validate the task shape
+    const parseResult = PortfolioV0TaskSchema.safeParse(task);
     if (!parseResult.success) {
       return {
         ok: false,
-        reason: `Invalid portfolio.v0 intent: ${parseResult.error.message}`,
+        reason: `Invalid portfolio.v0 task: ${parseResult.error.message}`,
       };
     }
 
     // implStateDir is not available in canAttempt — we can only check
-    // if the intent is structurally valid. API wallet check is done at run() time.
+    // if the task is structurally valid. API wallet check is done at run() time.
     return { ok: true };
   }
 
@@ -158,8 +158,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         ready: false,
         reason: 'HL api-wallet not provisioned',
         nextStep: {
-          description: 'Run `jinn intents enable portfolio.v0 --hl-master <your-HL-master-address>` to generate the api-wallet and complete HL approval.',
-          cli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
+          description: 'Run `jinn solver-nets enable portfolio --hl-master <your-HL-master-address>` to generate the api-wallet and complete HL approval.',
+          cli: 'jinn solver-nets enable portfolio --hl-master 0x...',
         },
       };
     }
@@ -168,8 +168,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         ready: false,
         reason: 'HL api-wallet generated but not approved on HL',
         nextStep: {
-          description: `Approve address ${wallet.address} on Hyperliquid (Settings → API Wallets → Add), then re-run \`jinn intents enable portfolio.v0 --confirm-approved\`.`,
-          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          description: `Approve address ${wallet.address} on Hyperliquid (Settings → API Wallets → Add), then re-run \`jinn solver-nets enable portfolio --confirm-approved\`.`,
+          cli: 'jinn solver-nets enable portfolio --confirm-approved',
           url: 'https://app.hyperliquid-testnet.xyz/API',
         },
       };
@@ -179,18 +179,18 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         ready: false,
         reason: 'HL master address not recorded in api-wallet state',
         nextStep: {
-          description: 'Re-run enable with the master address to record it: `jinn intents enable portfolio.v0 --hl-master 0x...`.',
-          cli: 'jinn intents enable portfolio.v0 --hl-master 0x...',
+          description: 'Re-run enable with the master address to record it: `jinn solver-nets enable portfolio --hl-master 0x...`.',
+          cli: 'jinn solver-nets enable portfolio --hl-master 0x...',
         },
       };
     }
     return { ready: true };
   }
 
-  enableMetadata(): IntentEnableMetadata {
+  enableMetadata(): HarnessEnableMetadata {
     return {
       description:
-        'portfolio.v0 — 24h managed-trading intent executed against a Hyperliquid master account. Requires you to (1) bring an HL master with USDC, and (2) approve a generated api-wallet as an HL agent.',
+        'portfolio.v0 — 24h managed-trading task executed against a Hyperliquid master account. Requires you to (1) bring an HL master with USDC, and (2) approve a generated api-wallet as an HL agent.',
       requiredArgs: [
         { name: 'hl-master', description: 'Your Hyperliquid master address (holds USDC; approves the api-wallet).', required: true },
       ],
@@ -201,7 +201,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
     };
   }
 
-  async onEnable(args: Record<string, string | undefined>): Promise<EnableResult> {
+  async onEnable(ctx: { args: Record<string, string | undefined> }): Promise<EnableResult> {
+    const args = ctx.args;
     const implStateDir = this.resolveImplStateDir();
     const hlMaster = args['hl-master'];
     const confirmApproved = args['confirm-approved'] !== undefined;
@@ -231,7 +232,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         required: [
           { name: 'hl-master', description: 'Your Hyperliquid master address (holds USDC).', required: true },
         ],
-        example: { cli: 'jinn intents enable portfolio.v0 --hl-master 0x...' },
+        example: { cli: 'jinn solver-nets enable portfolio --hl-master 0x...' },
       };
     }
 
@@ -252,7 +253,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
           walletStatePath: walletStatePath(implStateDir),
         },
         nextInvocation: {
-          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          cli: 'jinn solver-nets enable portfolio --confirm-approved',
           purpose: 'Record the operator-confirmed HL approval and enable portfolio.v0 claims.',
         },
       };
@@ -271,7 +272,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
           masterAddress: existing.masterAddress ?? hlMaster,
         },
         nextInvocation: {
-          cli: 'jinn intents enable portfolio.v0 --confirm-approved',
+          cli: 'jinn solver-nets enable portfolio --confirm-approved',
           purpose: 'Record the operator-confirmed HL approval.',
         },
       };
@@ -286,7 +287,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         required: [
           { name: 'hl-master', description: 'Master address was never recorded; pass --hl-master now.', required: true },
         ],
-        example: { cli: 'jinn intents enable portfolio.v0 --hl-master 0x... --confirm-approved' },
+        example: { cli: 'jinn solver-nets enable portfolio --hl-master 0x... --confirm-approved' },
       };
     }
     if (updated.masterAddress !== resolvedMaster) {
@@ -306,24 +307,24 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
     // Intentionally no-op on key material: operators may re-enable later
     // and re-generating the wallet would force a fresh HL approval round-trip.
     // The config-level disable (removing the impl from `harnesses.disabled`)
-    // is handled by the `jinn intents disable` verb, not the impl itself.
+    // is handled by the `jinn solver-nets disable` verb, not the impl itself.
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {
     if (this.config.stub) {
       throw new Error('claude-mcp-hyperliquid: stub registry cannot run (requires live daemon)');
     }
-    const { task: intent, implStateDir, workingDir, log, abort, msUntilEndTs } = ctx;
+    const { task: task, implStateDir, workingDir, log, abort, msUntilEndTs } = ctx;
     const testDeps = this.config._testDeps;
 
     log({ level: 'info', msg: 'claude-mcp-hyperliquid: starting', data: { implStateDir, workingDir } });
 
-    // ── Parse intent ──────────────────────────────────────────────────────────
+    // ── Parse task ──────────────────────────────────────────────────────────
 
-    const portfolioIntent = PortfolioV0IntentSchema.parse(intent);
-    const { masterAddress, venue } = portfolioIntent.spec.account;
-    const eligibility = PortfolioV0EligibilitySchema.parse(portfolioIntent.eligibility ?? {});
-    const window = portfolioIntent.window;
+    const portfolioTask = PortfolioV0TaskSchema.parse(task);
+    const { masterAddress, venue } = portfolioTask.spec.account;
+    const eligibility = PortfolioV0EligibilitySchema.parse(portfolioTask.eligibility ?? {});
+    const window = portfolioTask.window;
 
     // ── Select HL client ──────────────────────────────────────────────────────
 
@@ -352,8 +353,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
 
     // Sanity check: the agent key stored in api-wallet.json was approved by a
     // specific master. HL routes trades to THAT master, regardless of what the
-    // intent's spec says. If the operator switched masters (new wallet, new
-    // approval) without updating the intent, every trade would silently land
+    // task's spec says. If the operator switched masters (new wallet, new
+    // approval) without updating the task, every trade would silently land
     // on the wrong account and pre/post snapshots would read the wrong equity.
     // Fail fast with a clear remedy.
     if (
@@ -363,11 +364,11 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
     ) {
       throw new Error(
         `E_MASTER_MISMATCH: api-wallet.json says the agent ${walletState.address} is approved by ` +
-        `${walletState.masterAddress}, but the intent's spec.account.masterAddress is ${masterAddress}. ` +
+        `${walletState.masterAddress}, but the task's spec.account.masterAddress is ${masterAddress}. ` +
         `HL would route trades to the agent's approver (${walletState.masterAddress}) while pre/post ` +
-        `snapshots would read from the intent's master (${masterAddress}) — silent fund-on-the-wrong-account bug. ` +
-        `Remedy: either (a) update ~/.jinn-client/portfolio-v0-intent.json to use masterAddress=${walletState.masterAddress}, ` +
-        `or (b) approve the agent on the intent's master (${masterAddress}) via the HL UI and update ${implStateDir}/api-wallet.json.`,
+        `snapshots would read from the task's master (${masterAddress}) — silent fund-on-the-wrong-account bug. ` +
+        `Remedy: either (a) update ~/.jinn-client/portfolio-v0-task.json to use masterAddress=${walletState.masterAddress}, ` +
+        `or (b) approve the agent on the task's master (${masterAddress}) via the HL UI and update ${implStateDir}/api-wallet.json.`,
       );
     }
 
@@ -447,12 +448,12 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
           command: jinnMcpCommand,
           args: jinnMcpArgs,
           env: {
-            DESIRED_STATE_ID: intent.id,
-            DESIRED_STATE_DESCRIPTION: intent.description,
-            DESIRED_STATE_CONTEXT: intent.context ? JSON.stringify(intent.context) : '',
-            DESIRED_STATE_TYPE: intent.role ?? '',
-            RESTORATION_REQUEST_ID: intent.restorationRequestId ?? '',
-            REQUEST_ID: intent.restorationRequestId ?? '',
+            DESIRED_STATE_ID: task.id,
+            DESIRED_STATE_DESCRIPTION: task.description,
+            DESIRED_STATE_CONTEXT: task.context ? JSON.stringify(task.context) : '',
+            DESIRED_STATE_TYPE: task.role ?? '',
+            RESTORATION_REQUEST_ID: task.restorationRequestId ?? '',
+            REQUEST_ID: task.restorationRequestId ?? '',
           },
         },
         'jinn-hl': {
@@ -472,8 +473,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
       // Test mode: use injected runner instead of spawning Claude
       allSessions = await _runTestSessions(
         testDeps.runSession,
-        intent,
-        portfolioIntent,
+        task,
+        portfolioTask,
         workingDir,
         abort,
         msUntilEndTs,
@@ -487,7 +488,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         (sessionNum, sessionId) => buildSessionPrompt({
           sessionNum,
           sessionId,
-          intent: portfolioIntent,
+          task: portfolioTask,
           preAccountValue,
           msUntilEndTs: msUntilEndTs(),
         }),
@@ -556,7 +557,7 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
           config: {
             cadenceMs: this.config.cadenceMs,
             sessionMaxMs: this.config.sessionMaxMs,
-            trackedCoins: [], // could be populated from intent context
+            trackedCoins: [], // could be populated from task context
           },
         },
       );
@@ -673,8 +674,8 @@ export class ClaudeMcpHyperliquidImpl implements Harness {
         preAccountValue: String(preValue),
         postAccountValue: String(postValue),
         windowFillCount: windowFills.length,
-        minReturnPct: portfolioIntent.spec.target.minReturnPct,
-        maxDrawdownConstraint: portfolioIntent.spec.constraint.maxDrawdownPct,
+        minReturnPct: portfolioTask.spec.target.minReturnPct,
+        maxDrawdownConstraint: portfolioTask.spec.constraint.maxDrawdownPct,
         minClosedTrades: eligibility.minClosedTrades,
         minTradedNotionalMultiple: eligibility.minTradedNotionalMultiple,
       },
@@ -709,23 +710,23 @@ function buildSnapshotPayload(unified: UnifiedAccountValue): Record<string, unkn
 interface SessionPromptParams {
   sessionNum: number;
   sessionId: string;
-  intent: ReturnType<typeof PortfolioV0IntentSchema.parse>;
+  task: ReturnType<typeof PortfolioV0TaskSchema.parse>;
   preAccountValue: number;
   msUntilEndTs: number;
 }
 
 function buildSessionPrompt(params: SessionPromptParams): string {
-  const { sessionNum, sessionId, intent, preAccountValue, msUntilEndTs } = params;
+  const { sessionNum, sessionId, task, preAccountValue, msUntilEndTs } = params;
   const minsRemaining = Math.round(msUntilEndTs / 60_000);
-  const { minReturnPct } = intent.spec.target;
-  const { maxDrawdownPct } = intent.spec.constraint;
-  const { masterAddress } = intent.spec.account;
+  const { minReturnPct } = task.spec.target;
+  const { maxDrawdownPct } = task.spec.constraint;
+  const { masterAddress } = task.spec.account;
 
   return `EXECUTE IMMEDIATELY. DO NOT WRITE TEXT BEFORE YOUR FIRST TOOL CALL. DO NOT ASK QUESTIONS.
 
 Your first action this turn MUST be a tool call to \`hl_account_unified\`. Begin now.
 
-You are an autonomous trader managing a Hyperliquid perpetuals portfolio. Every turn, you call tools, observe results, and decide the next action. You never defer to a human — there is no human in the loop. The only way to satisfy the intent is to open positions, close them, and repeat enough times to hit the targets below.
+You are an autonomous trader managing a Hyperliquid perpetuals portfolio. Every turn, you call tools, observe results, and decide the next action. You never defer to a human — there is no human in the loop. The only way to satisfy the task is to open positions, close them, and repeat enough times to hit the targets below.
 
 ## Verdict criteria (ALL four must pass for a PASS verdict)
 - Equity return ≥ ${minReturnPct}% over the 24h window
@@ -736,7 +737,7 @@ You are an autonomous trader managing a Hyperliquid perpetuals portfolio. Every 
 Missing any one → REJECTED → zero rewards. Inaction = REJECTED.
 
 ## Context
-- Intent: ${intent.description}
+- Task: ${task.description}
 - Master account: ${masterAddress}
 - Starting equity: $${preAccountValue.toFixed(2)}
 - Session ${sessionNum} (${sessionId})
@@ -776,8 +777,8 @@ Begin with \`hl_account_unified\` now. No preamble.`;
 
 async function _runTestSessions(
   runSession: NonNullable<TestDeps['runSession']>,
-  intent: Task,
-  portfolioIntent: ReturnType<typeof PortfolioV0IntentSchema.parse>,
+  task: Task,
+  portfolioTask: ReturnType<typeof PortfolioV0TaskSchema.parse>,
   workingDir: string,
   abort: AbortSignal,
   msUntilEndTs: () => number,
@@ -799,7 +800,7 @@ async function _runTestSessions(
 
     let stdout = '';
     try {
-      const result = await runSession(sessionId, `Session ${sessionNum} for ${intent.id}`);
+      const result = await runSession(sessionId, `Session ${sessionNum} for ${task.id}`);
       stdout = result.stdout;
     } catch (e) {
       log({ level: 'warn', msg: 'claude-mcp-hyperliquid: test session threw', data: { err: e instanceof Error ? e.message : String(e) } });

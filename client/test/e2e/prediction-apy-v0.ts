@@ -28,7 +28,7 @@ import { createClients } from '../../src/adapters/mech/safe.js';
 import { PredictionApyV0BaselineImpl } from '../../src/harnesses/impls/prediction-apy-v0-baseline/index.js';
 import { PredictionApyV0Evaluator } from '../../src/harnesses/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
 import type { Task } from '../../src/types/desired-state.js';
 import type { HarnessContext } from '../../src/harnesses/types.js';
 import type { PredictionApySubmissionManifest } from '../../src/types/prediction-apy.js';
@@ -248,10 +248,10 @@ async function main(): Promise<void> {
 
       // Ensure adapter tracks this restoration for eval creation path, just like postTask.
       (adapter as any).pendingEvaluations.set(restorationRequestId, {
-        ...intent,
-        context: { ...(intent.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: taskCid },
+        ...signedTask,
+        context: { ...(intent.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid },
       });
-      (adapter as any).originalStates.set(restorationRequestId, { ...intent, role: 'restoration' });
+      (adapter as any).originalStates.set(restorationRequestId, { ...signedTask, role: 'restoration' });
 
       const tip = await publicClient.getBlockNumber();
       const logs = await publicClient.getLogs({ address: MARKETPLACE_ADDRESS, fromBlock: tip - 5n, toBlock: tip });

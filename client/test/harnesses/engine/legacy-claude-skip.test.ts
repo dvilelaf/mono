@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import type { Store } from '@/store/store.js';
 import { withTempStore } from '@test/store.js';
-import { RestorationEngine, type RestorationEngineOptions } from '../../../src/harnesses/engine/engine.js';
-import { IntentState } from '../../../src/harnesses/engine/state.js';
+import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness } from '../../../src/harnesses/types.js';
 import { SkippableError } from '../../../src/harnesses/types.js';
 
-class ExposedEngine extends RestorationEngine {
+class ExposedEngine extends TaskEngine {
   async invokeRunImpl(requestId: string): Promise<void> {
     const intent = this.persistence.getOrThrow(requestId);
     await this.runImpl(intent);
@@ -43,13 +43,13 @@ async function buildEngineWith(store: Store, run: Harness['run'], implName = 'le
     task: { id: 'health-check', description: 'legacy intent' },
   });
   const persistence = (engine as any).persistence;
-  persistence.transition('req-1', IntentState.CLAIMED);
-  persistence.transition('req-1', IntentState.WAITING);
-  persistence.transition('req-1', IntentState.PRE_SNAPSHOT, {
+  persistence.transition('req-1', TaskRunState.CLAIMED);
+  persistence.transition('req-1', TaskRunState.WAITING);
+  persistence.transition('req-1', TaskRunState.PRE_SNAPSHOT, {
     preSnapshotCapturedAt: now - 1_000,
     preSnapshotPayload: { provisioned: true },
   });
-  persistence.transition('req-1', IntentState.RUNNING);
+  persistence.transition('req-1', TaskRunState.RUNNING);
   return { engine, persistence };
 }
 
@@ -68,7 +68,7 @@ describe('legacy-claude skip handling', () => {
       const registry = {
         findFor: () => legacyClaude,
       };
-      const opts: RestorationEngineOptions = {
+      const opts: TaskEngineOptions = {
         store,
         implRegistry: registry,
         paths: {
@@ -92,18 +92,18 @@ describe('legacy-claude skip handling', () => {
         },
       });
       const persistence = (engine as any).persistence;
-      persistence.transition('req-skip-1', IntentState.CLAIMED);
-      persistence.transition('req-skip-1', IntentState.WAITING);
-      persistence.transition('req-skip-1', IntentState.PRE_SNAPSHOT, {
+      persistence.transition('req-skip-1', TaskRunState.CLAIMED);
+      persistence.transition('req-skip-1', TaskRunState.WAITING);
+      persistence.transition('req-skip-1', TaskRunState.PRE_SNAPSHOT, {
         preSnapshotCapturedAt: now - 1_000,
         preSnapshotPayload: { provisioned: true },
       });
-      persistence.transition('req-skip-1', IntentState.RUNNING);
+      persistence.transition('req-skip-1', TaskRunState.RUNNING);
 
       await engine.invokeRunImpl('req-skip-1');
 
       const intent = persistence.getOrThrow('req-skip-1');
-      expect(intent.state).toBe(IntentState.POST_SNAPSHOT);
+      expect(intent.state).toBe(TaskRunState.POST_SNAPSHOT);
       expect(intent.gatingClaim).toMatchObject({
         skipped: true,
         reason: 'claude_unavailable',
@@ -122,7 +122,7 @@ describe('legacy-claude skip handling', () => {
       await expect(engine.invokeRunImpl('req-1')).rejects.toThrow(/rate limit exceeded/);
       const intent = persistence.getOrThrow('req-1');
       // Stayed in RUNNING — no silent skip, no POST_SNAPSHOT transition.
-      expect(intent.state).toBe(IntentState.RUNNING);
+      expect(intent.state).toBe(TaskRunState.RUNNING);
     });
   });
 
@@ -137,7 +137,7 @@ describe('legacy-claude skip handling', () => {
       );
       await expect(engine.invokeRunImpl('req-1')).rejects.toThrow(/Claude quota exhausted/);
       const intent = persistence.getOrThrow('req-1');
-      expect(intent.state).toBe(IntentState.RUNNING);
+      expect(intent.state).toBe(TaskRunState.RUNNING);
     });
   });
 
@@ -152,7 +152,7 @@ describe('legacy-claude skip handling', () => {
       );
       await engine.invokeRunImpl('req-1');
       const intent = persistence.getOrThrow('req-1');
-      expect(intent.state).toBe(IntentState.POST_SNAPSHOT);
+      expect(intent.state).toBe(TaskRunState.POST_SNAPSHOT);
       expect(intent.gatingClaim).toMatchObject({ skipped: true, reason: 'claude_unavailable' });
     });
   });

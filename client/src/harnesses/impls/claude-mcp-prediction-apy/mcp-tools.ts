@@ -55,7 +55,7 @@ export function buildApyPredictionTools(deps: ApyPredictionToolDeps): ApyPredict
   const readAaveReserve: ApyPredictionToolDefinition = {
     name: 'read_aave_reserve',
     description:
-      'Read the current Aave v3 reserve supply APY (basis points) for the pool/reserve in this intent. Returns the converted APY from currentLiquidityRate plus block metadata.',
+      'Read the current Aave v3 reserve supply APY (basis points) for the pool/reserve in this task. Returns the converted APY from currentLiquidityRate plus block metadata.',
     schema: ReadAaveReserveSchema,
     handler: async () => {
       try {

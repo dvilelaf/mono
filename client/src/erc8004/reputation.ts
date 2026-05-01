@@ -58,7 +58,7 @@
  *   - PASS         → score = 100, scoreDecimals = 2 (= 1.00)  → submit feedback.
  *   - FAIL         → score =   0, scoreDecimals = 2 (= 0.00)  → submit feedback.
  *   - REJECTED     → no feedback. The harness was not eligible to attempt
- *                    this intent (e.g. minClosedTrades unmet); a 0-score
+ *                    this task (e.g. minClosedTrades unmet); a 0-score
  *                    feedback would unfairly tarnish their reputation for a
  *                    structural mismatch, not a quality failure.
  *   - INDETERMINATE → no feedback. The evaluator could not rederive

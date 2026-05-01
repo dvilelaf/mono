@@ -174,17 +174,17 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
-  it('defaults desiredStates to an empty list', () => {
+  it('defaults tasks to an empty list', () => {
     return writeConfigFile({}).then((configPath) => {
       const config = loadConfig(configPath);
-      expect(config.desiredStates).toEqual([]);
+      expect(config.tasks).toEqual([]);
     });
   });
 
   it('preserves portfolio.v0 Task fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
-      desiredStates: [
+      tasks: [
         {
           id: 'portfolio-test-1',
           description: 'Achieve 5% equity return on Hyperliquid testnet.',
@@ -206,7 +206,7 @@ describe('loadConfig RPC override handling', () => {
     delete process.env['JINN_NETWORK'];
 
     const config = loadConfig(configPath);
-    const ds = config.desiredStates[0];
+    const ds = config.tasks[0];
 
     expect(ds).toBeDefined();
     expect(ds!.id).toBe('portfolio-test-1');

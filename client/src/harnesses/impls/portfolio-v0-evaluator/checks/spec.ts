@@ -12,7 +12,7 @@ import type { Check } from '../types.js';
 // ── equity_return_target ──────────────────────────────────────────────────────
 
 /**
- * Check that rederived equityReturnPct >= intent spec's minReturnPct.
+ * Check that rederived equityReturnPct >= task spec's minReturnPct.
  */
 export function checkEquityReturnTarget(
   equityReturnPct: number,
@@ -34,7 +34,7 @@ export function checkEquityReturnTarget(
 // ── max_drawdown_constraint ───────────────────────────────────────────────────
 
 /**
- * Check that rederived maxDrawdownPct <= intent spec's maxDrawdownPct constraint.
+ * Check that rederived maxDrawdownPct <= task spec's maxDrawdownPct constraint.
  */
 export function checkMaxDrawdownConstraint(
   maxDrawdownPct: number,

@@ -49,7 +49,7 @@ export interface ApiWalletState {
   /**
    * The HL master that approved this agent, captured during the operator's
    * approve-agent setup. When present, the impl cross-checks this against
-   * the intent's `spec.account.masterAddress` on every run — if they
+   * the task's `spec.account.masterAddress` on every run — if they
    * disagree, it aborts with `E_MASTER_MISMATCH` rather than silently
    * routing trades to the wrong master.
    */

@@ -9,14 +9,28 @@ import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfoli
 import type { TrajectoryCollector } from '../trajectory/index.js';
 import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.js';
 
+export interface RuntimePlugin {
+  name: string;
+  version: string;
+  solverType?: string;
+  root: string;
+  manifestPath: string;
+  sha256: string;
+  cid?: string;
+  role: 'canonical' | 'extra';
+}
+
 // ── HarnessContext ────────────────────────────────────────────────────────
 
 export interface HarnessContext {
   task: Task;
+  solverNet?: { name: string; solverType: string };
+  runtimePlugins?: RuntimePlugin[];
+  solverPluginRoots?: string[];
   /**
    * IPFS CID of this Task payload (from Marketplace / observe).
    * Harnesses' submission manifests should reference the same CID; evaluators
-   * compare it via integrity.intent_ref. May be an empty string when
+   * compare it via integrity.signedTask_ref. May be an empty string when
    * provenance is missing (dev / legacy).
    */
   taskCid?: string;
@@ -96,19 +110,9 @@ export interface Solution {
 // ── Enable / readiness types ──────────────────────────────────────────────────
 
 /**
- * Kind/type slice for contextual impl probes (`isReady`, `enableMetadata`,
- * `onEnable` / `onDisable` delegation on wrappers). Mirrors the `supports()`
- * discriminant.
- */
-export type ImplIntentPeek = {
-  kind: string;
-  type?: 'restoration' | 'evaluation';
-};
-
-/**
- * Context-free readiness probe. "Are this impl's external dependencies
- * satisfied right now, regardless of any specific intent?" Used by
- * `jinn intents list|status` and by the claim-policy gate that refuses
+ * Context-free readiness probe. "Are this Harness's external dependencies
+ * satisfied right now, regardless of any specific Task?" Used by
+ * `jinn solver-nets doctor` and by the claim-policy gate that refuses
  * to spend gas claiming a Task whose Harness cannot execute.
  */
 export interface ReadyStatus {
@@ -118,7 +122,7 @@ export interface ReadyStatus {
   nextStep?: { description: string; cli?: string; url?: string };
 }
 
-/** Use when an impl is built in CLI `stub` mode (no live fleet / signer). */
+/** Use when a Harness is built in CLI `stub` mode (no live fleet / signer). */
 export const REQUIRES_LIVE_DAEMON_READINESS: ReadyStatus = {
   ready: false,
   reason: 'requires live daemon',
@@ -129,9 +133,8 @@ export const REQUIRES_LIVE_DAEMON_READINESS: ReadyStatus = {
 };
 
 /**
- * Argument a solverType-specific enable flow wants from the operator, surfaced
- * via `enableMetadata()`. The generic `jinn intents enable <solverType>` verb
- * parses these from `--key=value` flags without caring what they mean.
+ * Argument a SolverNet-specific enable flow wants from the operator, surfaced
+ * via `enableMetadata()`.
  */
 export interface EnableArgDef {
   name: string;
@@ -140,11 +143,11 @@ export interface EnableArgDef {
 }
 
 /**
- * Metadata that `jinn intents list` uses to teach the operator (or agent)
- * what's needed to enable a kind. Returned without running the flow.
+ * Metadata that `jinn solver-nets doctor` uses to teach the operator (or agent)
+ * what's needed to enable a SolverNet. Returned without running the flow.
  */
-export interface IntentEnableMetadata {
-  /** Human-readable summary of what opting in to this kind entails. */
+export interface HarnessEnableMetadata {
+  /** Human-readable summary of what opting in to this SolverNet entails. */
   description: string;
   requiredArgs?: EnableArgDef[];
   /** External URLs the operator/agent will need (e.g. exchange UI). */
@@ -152,7 +155,7 @@ export interface IntentEnableMetadata {
 }
 
 /**
- * Outcome of a single `jinn intents enable <kind>` invocation.
+ * Outcome of a single `jinn solver-nets enable <name>` invocation.
  *
  * The flow is idempotent: the agent reruns the same command until
  * `status === 'ready'`. Each intermediate state carries enough info for
@@ -183,6 +186,12 @@ export type EnableResult =
       message: string;
       details?: Record<string, unknown>;
     };
+
+export interface HarnessEnableContext {
+  solverNet?: { name: string; solverType: string };
+  runtimePlugins: RuntimePlugin[];
+  args: Record<string, string | undefined>;
+}
 
 // ── Sentinel errors (impl → engine) ───────────────────────────────────────────
 
@@ -222,21 +231,18 @@ export interface Harness {
 
   /**
    * Readiness probe. Zero-dep impls can omit this (treated as `{ ready: true }`).
-   * When `spec` is provided (daemon pre-claim gate, `jinn intents`), wrappers
-   * should delegate to the kind-matched specialist instead of aggregating all.
+   * The optional context lets Harnesses report readiness for a specific
+   * SolverType/role pair without reintroducing global plugin or wrapper state.
    */
-  isReady?(spec?: ImplIntentPeek): Promise<ReadyStatus>;
+  isReady?(ctx?: { solverType: string; role?: 'restoration' | 'evaluation' }): Promise<ReadyStatus>;
 
   /**
-   * Describes what `onEnable` wants from the caller. Consumed by
-   * `jinn intents list` so the agent can tell the operator what a
-   * specific kind's enable flow needs without triggering it first.
-   * With `spec`, wrappers delegate to the specialist for that kind.
+   * Describes what `onEnable` wants from the caller.
    */
-  enableMetadata?(spec?: ImplIntentPeek): IntentEnableMetadata | undefined;
+  enableMetadata?(): HarnessEnableMetadata;
 
   /**
-   * Idempotent enable-state machine. Called by `jinn intents enable <kind>`.
+   * Idempotent enable-state machine. Called by `jinn solver-nets enable <name>`.
    *
    * Contract:
    *   - Zero-dep impls return `{ status: 'ready' }` on every call.
@@ -246,21 +252,23 @@ export interface Harness {
    *   - Subsequent invocations pick up where the previous left off.
    *   - Calling after already-enabled is a no-op that returns `ready`.
    *
-   * `args` is the raw `--key=value` map parsed from the CLI. Impls
+   * `ctx.args` is the raw `--key=value` map parsed from the CLI. Harnesses
    * validate and coerce as needed; missing required args should return
    * `{ status: 'missing_args', required: [...], example: {...} }`.
    *
    * Impls that omit this method cannot be enabled by the generic CLI;
    * they are either always-on (zero-dep) or require manual config.
    */
-  onEnable?(args: Record<string, string | undefined>, spec?: ImplIntentPeek): Promise<EnableResult>;
+  onEnable?(
+    ctx: HarnessEnableContext,
+  ): Promise<EnableResult>;
 
   /**
    * Optional inverse of `onEnable`. Invoked when the operator runs
-   * `jinn intents disable <kind>`. Should NOT destroy unrecoverable
+   * `jinn solver-nets disable <name>`. Should NOT destroy unrecoverable
    * state (generated key material, on-chain registrations); reserve
-   * that for explicit `jinn intents purge` or similar (out of scope
+   * that for explicit `jinn solver-nets purge` or similar (out of scope
    * for this interface).
    */
-  onDisable?(spec?: ImplIntentPeek): Promise<void>;
+  onDisable?(): Promise<void>;
 }

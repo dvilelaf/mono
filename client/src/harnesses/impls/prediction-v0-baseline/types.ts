@@ -4,5 +4,5 @@ export interface StrategyPrediction {
 }
 
 export interface Strategy {
-  predict(intent: import('../../../types/prediction.js').PredictionV0Intent, currentPrice: string): StrategyPrediction;
+  predict(task: import('../../../types/prediction.js').PredictionV0Task, currentPrice: string): StrategyPrediction;
 }

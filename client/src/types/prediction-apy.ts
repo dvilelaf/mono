@@ -1,5 +1,5 @@
 /**
- * prediction.apy.v0 — typed intent spec.
+ * prediction.apy.v0 — typed task spec.
  *
  * Legacy manifest schemas (prediction.apy.v0.submission.v1,
  * prediction.apy.v0.verdict.v1) have been removed per scope §3.4.
@@ -43,7 +43,7 @@ export const PredictionApyV0EligibilitySchema = z.object({
 
 export type PredictionApyV0Eligibility = z.infer<typeof PredictionApyV0EligibilitySchema>;
 
-export const PredictionApyV0IntentSchema = z
+export const PredictionApyV0TaskSchema = z
   .object({
     id: z.string(),
     description: z.string().min(1),
@@ -85,4 +85,4 @@ export const PredictionApyV0IntentSchema = z
     },
   );
 
-export type PredictionApyV0Intent = z.infer<typeof PredictionApyV0IntentSchema>;
+export type PredictionApyV0Task = z.infer<typeof PredictionApyV0TaskSchema>;

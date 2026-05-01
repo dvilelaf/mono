@@ -1,6 +1,6 @@
-import { ZodError } from 'zod';
-import type { Address, Hex, PublicClient, WalletClient } from 'viem';
+import { getAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
 import { keccak256 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
 import type { ExecutionAdapter } from '../adapter.js';
 import type {
@@ -13,15 +13,13 @@ import type {
 import { TransientError, PermanentError, parseTask } from '../../types/index.js';
 import { createClients } from './safe.js';
 import {
-  buildTaskPayload,
   buildResultPayload,
   uploadToIpfs,
   cidToDigestHex,
   fetchFromIpfs,
-  fetchSignedIntentFromIpfs,
+  fetchSignedTaskFromIpfs,
   fetchSignedEnvelopeFromIpfs,
   digestHexToGatewayUrl,
-  parseTaskFromPayload,
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { SignedEnvelopeSchema } from '../../types/envelope.js';
@@ -45,7 +43,9 @@ import type { Store } from '../../store/store.js';
 import { type ClaimPolicy, AcceptAllPolicy } from './claim-policy.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../harnesses/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../harnesses/impls/evaluation-context.js';
+import { signTaskV1 } from '../../tasks/signing.js';
+import type { SignedTaskV1, TaskV1 } from '../../types/task-document.js';
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -214,7 +214,7 @@ export class MechAdapter implements ExecutionAdapter {
         const digest = d.startsWith('0x') ? d.slice(2) : d;
         this.pendingEvaluations.set(requestId, {
           ...pe,
-          context: { ...pe.context, [RESTORATION_INTENT_CID_CONTEXT_KEY]: `f01551220${digest}` },
+          context: { ...pe.context, [RESTORATION_TASK_CID_CONTEXT_KEY]: `f01551220${digest}` },
         });
       }
 
@@ -253,14 +253,14 @@ export class MechAdapter implements ExecutionAdapter {
       attemptId: state.attemptId,
       attemptNumber: state.attemptNumber,
     };
-    // When a pre-built SignedIntentV1 is attached, upload it directly so the
-    // on-chain CID points to the canonical signed intent document rather than
-    // the legacy TaskPayload shape.
-    const ipfsDoc: unknown = state.intent ?? buildTaskPayload(restorationState);
+    const signedTask = state.signedTask ?? await this.signTaskDocument(restorationState);
+    // Upload the canonical signed Task document so watchers can verify and
+    // parse the same task.v1 shape the creator signed.
+    const ipfsDoc: unknown = signedTask;
     const restorationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, ipfsDoc);
     const restorationDataHex = cidToDigestHex(restorationCid);
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
-    const restorationIntentCid = `f01551220${digestNo0x}`;
+    const restorationTaskCid = `f01551220${digestNo0x}`;
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
@@ -290,15 +290,44 @@ export class MechAdapter implements ExecutionAdapter {
 
     // Store for evaluation creation after delivery is claimed. The evaluation
     // job’s IPFS CID is different from the restoration intended-state CID; evaluators
-    // need the latter to verify submission.intent.cid (see context.restorationIntentCid).
+    // need the latter to verify submission.signedTask.cid (see context.restorationTaskCid).
     const stateForEval: Task = {
       ...state,
-      context: { ...(state.context ?? {}), [RESTORATION_INTENT_CID_CONTEXT_KEY]: restorationIntentCid },
+      signedTask,
+      context: { ...(state.context ?? {}), [RESTORATION_TASK_CID_CONTEXT_KEY]: restorationTaskCid },
     };
     this.pendingEvaluations.set(restorationRequestId, stateForEval);
     this.originalStates.set(restorationRequestId, { ...stateForEval, role: 'restoration' });
 
     return restorationRequestId;
+  }
+
+  private async signTaskDocument(state: Task): Promise<SignedTaskV1> {
+    const now = Date.now();
+    const account = privateKeyToAccount(this.config.agentEoaPrivateKey);
+    const extras: Record<string, unknown> = {};
+    if (state.context) extras['context'] = state.context;
+    if (state.attemptId) extras['attemptId'] = state.attemptId;
+    if (state.attemptNumber !== undefined) extras['attemptNumber'] = state.attemptNumber;
+    if (state.restorationRequestId) extras['restorationRequestId'] = state.restorationRequestId;
+
+    const taskDoc = {
+      schemaVersion: 'task.v1',
+      id: state.id,
+      solverType: state.solverType ?? 'legacy',
+      role: state.role ?? 'restoration',
+      description: state.description,
+      window: state.window ?? { startTs: now, endTs: now + 86_400_000 },
+      spec: state.spec ?? {},
+      eligibility: state.eligibility ?? {},
+      creator: {
+        safeAddress: getAddress(this.config.safeAddress),
+        agentEoa: account.address,
+      },
+      createdAt: now,
+      ...extras,
+    } as TaskV1;
+    return signTaskV1(taskDoc, this.config.agentEoaPrivateKey);
   }
 
   async *watchForRequests(): AsyncIterable<TaskRequest> {
@@ -326,21 +355,8 @@ export class MechAdapter implements ExecutionAdapter {
               // IPFS_GATEWAY_PREFIX constant (f01551220) which has worked in production.
               // If the gateway ever switches to dag-pb (0x70) the prefix would be f01701220.
               const taskCid = `f01551220${digest}`;
-              // Try to parse as a typed SignedIntentV1 first (Plan B envelope).
-              // Fall back to the legacy loose payload shape for older on-chain data.
-              let task: Task;
-              try {
-                const signed = await fetchSignedIntentFromIpfs(this.config.ipfsGatewayUrl, taskCid);
-                task = parseTask({ intent: signed });
-              } catch (err) {
-                if (!(err instanceof ZodError)) throw err;
-                // Fallback: pre-envelope legacy payload. Will be removed in Plan C (one-shot cutover).
-                console.debug(
-                  `[adapters/mech] intent.v1 parse failed for CID ${taskCid}; falling back to legacy payload parser`,
-                );
-                const payload = (await fetchFromIpfs(this.config.ipfsGatewayUrl, taskCid)) as Record<string, unknown>;
-                task = parseTaskFromPayload(payload);
-              }
+              const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+              const task = parseTask({ signedTask: signed });
 
               yield {
                 requestId,
@@ -654,7 +670,7 @@ export class MechAdapter implements ExecutionAdapter {
           ...(cachedEnvelopeCid ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: cachedEnvelopeCid } : {}),
         },
       };
-      const evaluationPayload = buildTaskPayload(evaluationState);
+      const evaluationPayload = await this.signTaskDocument(evaluationState);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, evaluationPayload);
       const evaluationDataHex = cidToDigestHex(evaluationCid);
 

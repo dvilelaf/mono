@@ -10,7 +10,7 @@ import type { PredictionApyV0RestorationPayload } from '../../../types/payloads/
  * solverType='prediction.apy.v0' and role='restoration'. The prediction payload
  * lives at envelope.payload per PredictionApyV0RestorationPayloadSchema.
  *
- * Returns both the envelope (for signature / intent provenance) and the
+ * Returns both the envelope (for signature / task provenance) and the
  * typed payload (for prediction fields).
  */
 export function parsePredictionApySubmissionEnvelope(manifestJson: string): {

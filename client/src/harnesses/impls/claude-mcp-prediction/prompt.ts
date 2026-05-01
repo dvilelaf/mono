@@ -5,7 +5,7 @@
  * deterministic behavior to assert against.
  */
 
-import type { PredictionV0Intent } from '../../../types/prediction.js';
+import type { PredictionV0Task } from '../../../types/prediction.js';
 
 function fmtOperator(op: 'GT' | 'GTE' | 'LT' | 'LTE'): string {
   switch (op) {
@@ -16,9 +16,9 @@ function fmtOperator(op: 'GT' | 'GTE' | 'LT' | 'LTE'): string {
   }
 }
 
-export function buildSessionPrompt(intent: PredictionV0Intent, sessionId: string): string {
-  const { oracle, question } = intent.spec;
-  const { window } = intent;
+export function buildSessionPrompt(task: PredictionV0Task, sessionId: string): string {
+  const { oracle, question } = task.spec;
+  const { window } = task;
 
   let questionLine: string;
   if (question.kind === 'threshold') {
@@ -30,11 +30,11 @@ export function buildSessionPrompt(intent: PredictionV0Intent, sessionId: string
   return [
     `Session: ${sessionId}`,
     '',
-    'You are evaluating a Jinn prediction intent. Decide the probability that the outcome will be YES and submit it via the submit_prediction tool.',
+    'You are evaluating a Jinn prediction Task. Decide the probability that the outcome will be YES and submit it via the submit_prediction tool.',
     '',
     `Question: ${questionLine}`,
     '',
-    `Intent window:  [${new Date(window.startTs).toISOString()}, ${new Date(window.endTs).toISOString()}]`,
+    `Task window:  [${new Date(window.startTs).toISOString()}, ${new Date(window.endTs).toISOString()}]`,
     `Resolution at:  ${new Date(question.resolveTs).toISOString()}`,
     `Oracle:         Chainlink ${oracle.feedDescription} on ${oracle.venue}`,
     '',

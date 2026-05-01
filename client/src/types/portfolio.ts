@@ -1,7 +1,7 @@
 /**
- * portfolio.v0 — typed intent spec.
+ * portfolio.v0 — typed task spec.
  *
- * §4 portfolio.v0 concrete intent shape
+ * §4 portfolio.v0 concrete task shape
  *
  * Legacy manifest schemas (portfolio.v0.manifest.v1, portfolio.v0.eval.manifest.v1)
  * have been removed per scope §3.4. Use jinn.execution.v1 SignedEnvelope with
@@ -44,7 +44,7 @@ const SnapshotSchema = z.object({
 
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 
-// ── §4.1 — portfolio.v0 intent spec ──────────────────────────────────────────
+// ── §4.1 — portfolio.v0 task spec ──────────────────────────────────────────
 
 export const PortfolioV0SpecSchema = z.object({
   account: z.object({
@@ -70,13 +70,13 @@ export const PortfolioV0EligibilitySchema = z.object({
 export type PortfolioV0Eligibility = z.infer<typeof PortfolioV0EligibilitySchema>;
 
 /**
- * Full portfolio.v0 intent — composes the generic Task fields with the
+ * Full portfolio.v0 task — composes the generic Task fields with the
  * portfolio-specific spec + eligibility fields.  The 24 h window constraint is
  * enforced by a Zod refinement.
  */
-export const PortfolioV0IntentSchema = z
+export const PortfolioV0TaskSchema = z
   .object({
-    // id is required here — generic Task parsing assigns a UUID if missing; portfolio.v0 intents must already have one assigned.
+    // id is required here — generic Task parsing assigns a UUID if missing; portfolio.v0 tasks must already have one assigned.
     id: z.string(),
     description: z.string().min(1),
     solverType: z.literal('portfolio.v0').optional(),
@@ -89,7 +89,7 @@ export const PortfolioV0IntentSchema = z
     path: ['window'],
   });
 
-export type PortfolioV0Intent = z.infer<typeof PortfolioV0IntentSchema>;
+export type PortfolioV0Task = z.infer<typeof PortfolioV0TaskSchema>;
 
 // ── Rationale entry — kept for use in portfolio-v0 harness impl ─────────────
 

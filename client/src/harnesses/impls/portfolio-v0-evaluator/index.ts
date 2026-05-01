@@ -14,10 +14,10 @@
  *
  * Unified-payload model (Task 7):
  *   - solverType is "portfolio.v0" (same as restoration)
- *   - intent.role === "evaluation"
- *   - Harness's manifest is inlined at intent.context.restorationResult (JSON string)
- *   - Original intent spec is at intent.spec (PortfolioV0Spec) — no IPFS fetch needed
- *   - intent.restorationRequestId carries the on-chain request ID
+ *   - task.role === "evaluation"
+ *   - Harness's manifest is inlined at task.context.restorationResult (JSON string)
+ *   - Original task spec is at task.spec (PortfolioV0Spec) — no IPFS fetch needed
+ *   - task.restorationRequestId carries the on-chain request ID
  */
 
 import { writeFileSync } from 'node:fs';
@@ -38,7 +38,7 @@ import { buildVerificationStub } from '../../engine/verification-stub.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../evaluation-context.js';
 
 import {
-  PortfolioV0IntentSchema,
+  PortfolioV0TaskSchema,
   PortfolioV0EligibilitySchema,
 } from '../../../types/portfolio.js';
 import { SignedEnvelopeSchema } from '../../../types/envelope.js';
@@ -127,7 +127,7 @@ function _assembleUnsignedManifest(params: {
   onchainCreationTx: string;
   onchainCreationBlock: number;
   restorationRequestId: string;
-  intent: Task;
+  task: Task;
   checks: Check[];
   verdict: Verdict;
   score: string;
@@ -141,7 +141,7 @@ function _assembleUnsignedManifest(params: {
 }): Record<string, unknown> {
   const {
     taskCid, onchainCreationTx, onchainCreationBlock, restorationRequestId,
-    intent, checks, verdict, score,
+    task, checks, verdict, score,
     targetPayload, targetEnvelope, rederivPrePayload, rederivFills, rederived,
     evaluatorSafeAddress, evaluatorAgentEoa,
   } = params;
@@ -153,7 +153,7 @@ function _assembleUnsignedManifest(params: {
     tradedNotionalMultiple: '0',
   };
 
-  const intentProvenance = {
+  const taskProvenance = {
     cid: taskCid,
     onchainCreationTx: onchainCreationTx ?? '0x',
     onchainCreationBlock: onchainCreationBlock,
@@ -176,12 +176,12 @@ function _assembleUnsignedManifest(params: {
   })();
 
   return {
-    intent: intentProvenance,
+    task: taskProvenance,
     evaluator: {
       safeAddress: evaluatorSafeAddress,
       agentEoa: evaluatorAgentEoa,
     },
-    window: targetEnvelope?.window ?? intent.window ?? { startTs: 0, endTs: 0 },
+    window: targetEnvelope?.window ?? task.window ?? { startTs: 0, endTs: 0 },
     verdict,
     score,
     scoreBasis: 'calmar.v1',
@@ -275,18 +275,18 @@ export class PortfolioV0Evaluator implements Harness {
   }
 
   async canAttempt(
-    intent: Task,
+    task: Task,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (intent.solverType !== 'portfolio.v0') {
+    if (task.solverType !== 'portfolio.v0') {
       return { ok: false, reason: 'solverType is not portfolio.v0' };
     }
-    if (intent.role !== 'evaluation') {
+    if (task.role !== 'evaluation') {
       return { ok: false, reason: 'Task.role is not evaluation' };
     }
-    if (!intent.restorationRequestId) {
+    if (!task.restorationRequestId) {
       return { ok: false, reason: 'restorationRequestId is required' };
     }
-    const restorationResult = intent.context?.['restorationResult'];
+    const restorationResult = task.context?.['restorationResult'];
     if (typeof restorationResult !== 'string') {
       return { ok: false, reason: 'context.restorationResult (manifest JSON) is required' };
     }
@@ -297,20 +297,20 @@ export class PortfolioV0Evaluator implements Harness {
     if (this.config.stub) {
       throw new Error('portfolio-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
     }
-    const { task: intent, log } = ctx;
+    const { task: task, log } = ctx;
 
     // ── Step 1: Parse harness's SignedEnvelope from inlined context ─────────
     // The envelope JSON is inlined by MechAdapter.tryCreateEvaluationJob at context.restorationResult.
     // Falls back to an error — crash recovery path not yet implemented.
     let targetEnvelope: SignedEnvelope;
     let targetPayload: PortfolioV0RestorationPayload;
-    let targetIntent: ReturnType<typeof PortfolioV0IntentSchema.parse>;
+    let targetTask: ReturnType<typeof PortfolioV0TaskSchema.parse>;
     let hlPortfolioPeriodFn: (user: string) => Promise<{ accountValueHistory: HlGridPoint[] } | null>;
     let hlUserFillsByTimeFn: (user: string, startTime: number, endTime?: number) => Promise<{ fills: HlFill[]; startTimeClamped: boolean }>;
 
     const checks: Check[] = [];
 
-    const inlined = intent.context?.['restorationResult'];
+    const inlined = task.context?.['restorationResult'];
     if (typeof inlined !== 'string') {
       throw new Error(
         'portfolio-v0-evaluator: restorationResult missing from context; crash recovery path not yet implemented',
@@ -325,15 +325,15 @@ export class PortfolioV0Evaluator implements Harness {
         );
       }
       targetPayload = PortfolioV0RestorationPayloadSchema.parse(targetEnvelope.payload);
-      // The original portfolio.v0 intent is directly at intent.spec — no IPFS fetch needed.
-      targetIntent = PortfolioV0IntentSchema.parse(intent);
+      // The original portfolio.v0 task is directly at task.spec — no IPFS fetch needed.
+      targetTask = PortfolioV0TaskSchema.parse(task);
 
       // Determine HL client from venue (or use injected test deps)
       if (this.config._testDeps?.hlPortfolioPeriod && this.config._testDeps?.hlUserFillsByTime) {
         hlPortfolioPeriodFn = this.config._testDeps.hlPortfolioPeriod;
         hlUserFillsByTimeFn = this.config._testDeps.hlUserFillsByTime;
       } else {
-        const venue = targetIntent.spec.account.venue;
+        const venue = targetTask.spec.account.venue;
         const baseUrl = venue === 'hyperliquid-mainnet' ? HL_MAINNET_BASE_URL : HL_TESTNET_BASE_URL;
         const hlClient = new HyperliquidClient(baseUrl);
         hlPortfolioPeriodFn = (user) => hlClient.portfolioPeriod(user, 'allTime');
@@ -341,26 +341,26 @@ export class PortfolioV0Evaluator implements Harness {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to parse envelope/intent', data: { err: msg } });
+      log({ level: 'error', msg: 'portfolio-v0-evaluator: failed to parse envelope/task', data: { err: msg } });
       // We cannot proceed — return a minimal INDETERMINATE output.
       checks.push({
         name: 'availability.manifest_parseable',
         status: 'FAIL',
-        detail: `Failed to parse envelope or intent: ${msg}`,
+        detail: `Failed to parse envelope or task: ${msg}`,
       });
       return this._buildOutput(ctx, checks, null, null, null, null, null, null, null, null, null);
     }
 
-    // Extract provenance fields from the parsed envelope + intent
+    // Extract provenance fields from the parsed envelope + task
     const taskCid = targetEnvelope.task.cid;
     const onchainCreationTx = targetEnvelope.task.onchainCreationTx;
     const onchainCreationBlock = targetEnvelope.task.onchainCreationBlock;
-    const restorationRequestId = intent.restorationRequestId!;
+    const restorationRequestId = task.restorationRequestId!;
 
     log({ level: 'info', msg: 'portfolio-v0-evaluator: starting evaluation', data: { taskCid, restorationRequestId } });
 
 
-    const masterAddress = targetIntent.spec.account.masterAddress;
+    const masterAddress = targetTask.spec.account.masterAddress;
     const { startTs, endTs } = targetEnvelope.window;
 
     // ── Step 2: Re-fetch HL data ──────────────────────────────────────────────
@@ -512,7 +512,7 @@ export class PortfolioV0Evaluator implements Harness {
 
     // ── Eligibility checks ────────────────────────────────────────────────────
 
-    const eligibility = PortfolioV0EligibilitySchema.parse(targetIntent.eligibility ?? {});
+    const eligibility = PortfolioV0EligibilitySchema.parse(targetTask.eligibility ?? {});
     checks.push(checkMinClosedTrades(rederivClosedTrades, eligibility.minClosedTrades));
     checks.push(checkMinTradedNotional(rederivNotional, eligibility.minTradedNotionalMultiple));
 
@@ -530,8 +530,8 @@ export class PortfolioV0Evaluator implements Harness {
 
     // ── Spec checks ───────────────────────────────────────────────────────────
 
-    checks.push(checkEquityReturnTarget(rederivEquityReturn, targetIntent.spec.target.minReturnPct));
-    checks.push(checkMaxDrawdownConstraint(rederivMaxDrawdown, targetIntent.spec.constraint.maxDrawdownPct));
+    checks.push(checkEquityReturnTarget(rederivEquityReturn, targetTask.spec.target.minReturnPct));
+    checks.push(checkMaxDrawdownConstraint(rederivMaxDrawdown, targetTask.spec.constraint.maxDrawdownPct));
 
     // ── Derive verdict ────────────────────────────────────────────────────────
 
@@ -563,7 +563,7 @@ export class PortfolioV0Evaluator implements Harness {
     onchainCreationBlock: number | null | undefined,
     restorationRequestId: string | null | undefined,
   ): Promise<Solution> {
-    const { task: intent, workingDir, log } = ctx;
+    const { task: task, workingDir, log } = ctx;
 
     // Spec §7.5 funding-accrual edge case: if hl_post_snapshot_rederivable is SKIP,
     // the verdict MUST be INDETERMINATE regardless of other check outcomes.
@@ -610,7 +610,7 @@ export class PortfolioV0Evaluator implements Harness {
       onchainCreationTx: onchainCreationTx ?? '0x',
       onchainCreationBlock: onchainCreationBlock ?? 0,
       restorationRequestId: restorationRequestId ?? '0x',
-      intent,
+      task,
       checks,
       verdict,
       score,
@@ -682,10 +682,10 @@ export class PortfolioV0Evaluator implements Harness {
     // For V1 the stub always reports 'valid' (self-signed tier), which means
     // the REJECTED-if-invalid path in engine.pack() never fires in practice
     // until Plan D replaces this stub.
-    const restorationEnvelopeCid = (intent.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
+    const restorationEnvelopeCid = (task.context?.[RESTORATION_ENVELOPE_CID_CONTEXT_KEY] as string | undefined)
       ?? restorationRequestId
       ?? 'bafy-unknown';
-    const restorationResultJson = intent.context?.['restorationResult'];
+    const restorationResultJson = task.context?.['restorationResult'];
     // Use JCS canonical bytes so the sha256 matches the upload pipeline (8l6 fix A).
     const restorationEnvelopeSha256 = typeof restorationResultJson === 'string'
       ? createHash('sha256').update(canonicalJson(JSON.parse(restorationResultJson) as unknown)).digest('hex')

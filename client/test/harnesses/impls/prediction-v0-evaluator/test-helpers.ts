@@ -1,11 +1,11 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import type { PredictionV0Intent } from '../../../../src/types/prediction.js';
+import type { PredictionV0Task } from '../../../../src/types/prediction.js';
 import type { Task } from '../../../../src/types/desired-state.js';
 import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
-import { RESTORATION_INTENT_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
-export function makeValidIntent(overrides: Partial<PredictionV0Intent> = {}): PredictionV0Intent {
+export function makeValidTask(overrides: Partial<PredictionV0Task> = {}): PredictionV0Task {
   return {
     id: 'test-1',
     description: 'ETH > 3500',
@@ -17,7 +17,7 @@ export function makeValidIntent(overrides: Partial<PredictionV0Intent> = {}): Pr
     },
     eligibility: { maxSubmissionDelayMs: 60_000 },
     ...overrides,
-  } as PredictionV0Intent;
+  } as PredictionV0Task;
 }
 
 /**
@@ -39,7 +39,7 @@ export async function makeSignedManifest(overrides: {
     role: 'restoration' as const,
     generatedAt: 1000,
 task: {
-      cid: overrides.taskCid ?? 'intent-cid',
+      cid: overrides.taskCid ?? 'task-cid',
       onchainCreationTx: ('0x' + '0'.repeat(64)) as `0x${string}`,
       onchainCreationBlock: 1,
       requestId: ('0x' + '0'.repeat(64)) as `0x${string}`,
@@ -80,8 +80,8 @@ task: {
 
 export function makeEvalTask(
   envelope: SignedEnvelope | Record<string, unknown>,
-  task: PredictionV0Intent,
-  options?: { omitRestorationIntentCid?: boolean; restorationEnvelopeCid?: string },
+  task: PredictionV0Task,
+  options?: { omitRestorationTaskCid?: boolean; restorationEnvelopeCid?: string },
 ): Task {
   const e = envelope as { task: { cid: string } };
   return {
@@ -95,9 +95,9 @@ export function makeEvalTask(
     eligibility: task.eligibility,
     context: {
       restorationResult: JSON.stringify(envelope),
-      ...(options?.omitRestorationIntentCid
+      ...(options?.omitRestorationTaskCid
         ? {}
-        : { [RESTORATION_INTENT_CID_CONTEXT_KEY]: e.task.cid }),
+        : { [RESTORATION_TASK_CID_CONTEXT_KEY]: e.task.cid }),
       ...(options?.restorationEnvelopeCid
         ? { [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: options.restorationEnvelopeCid }
         : {}),

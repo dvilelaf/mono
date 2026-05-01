@@ -3,7 +3,7 @@
  *
  * Scope: §3.1 trajectory-signing-granularity row — "each span carries
  * jinn.prevSpanHash linking to the previous span's hash; first span
- * links to a run-start genesis value derived from envelope intent CID."
+ * links to a run-start genesis value derived from envelope task CID."
  *
  * Motivation: a crashed run that failed to upload the signed trajectory
  * blob still produces a verifiable-as-prefix trace if spans are recovered
