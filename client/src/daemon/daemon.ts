@@ -9,6 +9,7 @@ import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../erc8004/index.js';
 import type { X402Config } from '../x402/handler.js';
+import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
@@ -55,6 +56,16 @@ export interface DaemonConfig {
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
+
+  /**
+   * Daemon-side Corpus factory. Invoked after the Daemon constructs its
+   * Store so the corpus shares the same SQLite handle. When set, the API
+   * server exposes `POST /v1/artifacts/acquire` so the MCP subprocess can
+   * acquire artifacts without ever holding the agent EOA private key. Built
+   * in `main.ts` once `subgraphUrl` is configured. See
+   * spec/2026-04-30-phase-a-umbrella.md §4.
+   */
+  corpusFactory?: (store: Store) => Corpus;
 
   /** Restoration intent sources polled by CreatorLoop. */
   intentSources?: IntentSource[];
@@ -149,11 +160,15 @@ export class Daemon {
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
     // Start HTTP API server
+    const corpus = this.config.corpusFactory
+      ? this.config.corpusFactory(this.store)
+      : undefined;
     this.apiServer = await startApiServer({
       port: this.apiPort,
       store: this.store,
       x402: this.config.x402,
       status: this.config.status,
+      corpus,
     });
 
     // Backfill remote artifacts from subgraph if configured

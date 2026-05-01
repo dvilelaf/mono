@@ -25,6 +25,8 @@ import {
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import type { Corpus, ArtifactContent } from '../corpus/index.js';
+import { AcquireError, HashMismatchError } from '../corpus/index.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -34,6 +36,18 @@ export interface ApiServerConfig {
   x402?: X402Config;
   /** When set, GET /v1/status includes fleet file + RPC reads. */
   status?: StatusGatherConfig;
+  /**
+   * Daemon-side Corpus instance. When set, exposes
+   * `POST /v1/artifacts/acquire` so the MCP subprocess (and other in-host
+   * consumers) can fetch artifacts without ever seeing the agent EOA private
+   * key. The route is localhost-only by virtue of the bind host below.
+   *
+   * Asymmetry with `search_artifacts`: search is keyless (subgraph + IPFS
+   * gateway only) and stays client-side in the MCP server. Acquire is the
+   * only path that needs the signing key for x402 payments, so it's the only
+   * one that moves to the daemon. See spec/2026-04-30-phase-a-umbrella.md §4.
+   */
+  corpus?: Corpus;
 }
 
 export interface ApiServer {
@@ -157,6 +171,112 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     config.onArtifactPublished?.({ id, title, tags, outcome });
     return c.json({ id, published: true }, 201);
   });
+
+  // ── POST /v1/artifacts/acquire ─────────────────────────────────────────────
+  //
+  // Daemon-side acquire endpoint (jinn-mono-vy37.1.6). The MCP subprocess
+  // proxies its `acquire_artifact` tool through this route so the agent EOA
+  // private key required for x402 payments never leaves daemon process
+  // memory. Localhost-only — see api server bind host below; this route MUST
+  // NOT be exposed across the network without an auth layer because the
+  // daemon will sign x402 payments on the caller's behalf.
+  //
+  // Asymmetry with `search_artifacts`: that path stays client-side because
+  // subgraph queries and IPFS manifest fetches are keyless. Only the buyer
+  // side of x402 needs the signing key, so only the buyer path moves here.
+  // See spec/2026-04-30-phase-a-umbrella.md §4.
+  if (config.corpus) {
+    const corpus = config.corpus;
+    // Single-flight: dedupe concurrent acquires for the same sha256 so two
+    // MCP tool calls within the same restoration don't double-pay or race
+    // the cache. Map entries clear themselves once the inner promise settles.
+    const inFlight = new Map<string, Promise<ArtifactContent>>();
+
+    app.post('/v1/artifacts/acquire', async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        return c.json({ ok: false, reason: 'invalid_args', error: 'invalid JSON body', retryable: false }, 400);
+      }
+
+      const sha256 = body['sha256'];
+      const access = body['access'] as { endpoint?: unknown; priceUsdc?: unknown } | undefined;
+      const envelopeCid = body['envelopeCid'];
+      const artifactType = body['artifactType'];
+
+      if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'sha256 must be a 64-char hex string', retryable: false },
+          400,
+        );
+      }
+      if (
+        !access ||
+        typeof access.endpoint !== 'string' ||
+        typeof access.priceUsdc !== 'string'
+      ) {
+        return c.json(
+          { ok: false, reason: 'invalid_args', error: 'access.endpoint and access.priceUsdc are required strings', sha256, retryable: false },
+          400,
+        );
+      }
+
+      const accessNormalized = { endpoint: access.endpoint, priceUsdc: access.priceUsdc };
+      const hint: { artifactType?: string; envelopeCid?: string } = {};
+      if (typeof artifactType === 'string') hint.artifactType = artifactType;
+      if (typeof envelopeCid === 'string') hint.envelopeCid = envelopeCid;
+
+      const existing = inFlight.get(sha256);
+      const acquirePromise = existing ?? corpus.acquireBySha256(sha256, accessNormalized, hint);
+      if (!existing) inFlight.set(sha256, acquirePromise);
+      try {
+        const out = await acquirePromise;
+        return c.json({
+          ok: true,
+          sha256: out.sha256,
+          content: out.bytes.toString('base64'),
+          artifactType: out.artifactType,
+          source: out.source,
+          paidAmountUsdc: out.paidAmountUsdc,
+          fetchedAt: out.fetchedAt,
+          ...(out.sourceOperator ? { sourceOperator: out.sourceOperator } : {}),
+        });
+      } catch (err) {
+        if (err instanceof HashMismatchError) {
+          return c.json(
+            {
+              ok: false,
+              reason: 'hash_mismatch',
+              sha256,
+              error: err.message,
+              sha256Expected: err.sha256Expected,
+              sha256Actual: err.sha256Actual,
+              source: err.source,
+              ...(err.sourceOperator ? { sourceOperator: err.sourceOperator } : {}),
+              retryable: false,
+            },
+            422,
+          );
+        }
+        if (err instanceof AcquireError) {
+          return c.json(
+            { ok: false, reason: 'origin_null', sha256, error: err.message, retryable: true },
+            502,
+          );
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json(
+          { ok: false, reason: 'origin_null', sha256, error: message, retryable: true },
+          500,
+        );
+      } finally {
+        // Clear single-flight entry only when we created it, so concurrent
+        // callers awaiting the same promise still receive the resolved result.
+        if (!existing) inFlight.delete(sha256);
+      }
+    });
+  }
 
   return new Promise((resolve, reject) => {
     const server = serve({

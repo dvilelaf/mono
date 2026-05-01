@@ -42,6 +42,8 @@ import { buildRestorerImpls } from './restorer/impls/index.js';
 import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoIntentGenerators } from './intents/kinds/index.js';
+import { createCorpus } from './corpus/index.js';
+import { Store } from './store/store.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedIntentSource, StaticConfiguredIntentSource } from './intents/sources.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
@@ -713,6 +715,30 @@ export async function main(): Promise<DaemonStartupInfo> {
       new GeneratedIntentSource(`generated:${kind}`, generator)),
   ];
 
+  // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
+  //
+  // Built once per daemon lifetime; the agent EOA private key stays in this
+  // process's memory and never crosses into the MCP subprocess. The MCP
+  // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
+  // Disabled when subgraphUrl is unset — the API route is then absent and
+  // MCP falls back to local-only behaviour with a warning.
+  const corpusFactory = config.subgraphUrl?.trim()
+    ? (store: Store) =>
+        createCorpus({
+          subgraphUrl: config.subgraphUrl!,
+          ipfsGatewayUrl: config.ipfsGatewayUrl,
+          store,
+          signer: { privateKey: agentPrivateKey },
+          selfSafeAddress: safeAddress,
+        })
+    : undefined;
+  if (!corpusFactory) {
+    console.warn(
+      '[main] Corpus disabled (config.subgraphUrl not set); ' +
+        'MCP acquire_artifact / search_artifacts network branches will be unavailable.',
+    );
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
@@ -724,6 +750,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     subgraphUrl: config.subgraphUrl,
     nodeEndpoint: config.nodeEndpoint,
     creatorSafeAddress: safeAddress,
+    corpusFactory,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
