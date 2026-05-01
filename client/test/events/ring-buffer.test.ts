@@ -40,4 +40,44 @@ describe('EventRingBuffer', () => {
     rb.push(evt('c'));
     expect(seen).toEqual(['a', 'b']);
   });
+
+  it('snapshots events after sinceId', () => {
+    const rb = new EventRingBuffer(10);
+    rb.push(evt('a'));
+    rb.push(evt('b'));
+    rb.push(evt('c'));
+    expect(rb.snapshot({ sinceId: 'a' }).map((e) => e.id)).toEqual(['b', 'c']);
+  });
+
+  it('snapshots returns full buffer when sinceId is unknown', () => {
+    const rb = new EventRingBuffer(10);
+    rb.push(evt('a'));
+    rb.push(evt('b'));
+    expect(rb.snapshot({ sinceId: 'unknown' }).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('limit returns the last N events', () => {
+    const rb = new EventRingBuffer(10);
+    rb.push(evt('a'));
+    rb.push(evt('b'));
+    rb.push(evt('c'));
+    expect(rb.snapshot({ limit: 2 }).map((e) => e.id)).toEqual(['b', 'c']);
+  });
+
+  it('isolates subscriber errors from each other', () => {
+    const rb = new EventRingBuffer(10);
+    const seen: string[] = [];
+    rb.subscribe(() => { throw new Error('first sub crashes'); });
+    rb.subscribe((e) => seen.push(e.id));
+    rb.push(evt('a'));
+    expect(seen).toEqual(['a']);
+  });
+
+  it('returns a defensive copy from snapshot', () => {
+    const rb = new EventRingBuffer(10);
+    rb.push(evt('a'));
+    const snap = rb.snapshot();
+    snap.push(evt('mutated'));
+    expect(rb.snapshot().map((e) => e.id)).toEqual(['a']);
+  });
 });

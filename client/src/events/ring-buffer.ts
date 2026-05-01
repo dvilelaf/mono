@@ -1,3 +1,10 @@
+/**
+ * Bounded in-memory ring buffer of structured daemon events with subscribe/snapshot.
+ *
+ * - `push` records an event and notifies subscribers; subscriber errors are isolated.
+ * - `snapshot` returns a defensive copy filtered by kinds/sinceId/limit.
+ * - Default capacity 1000; trim is amortized O(1) at expected event rates.
+ */
 import type { StructuredEvent, StructuredEventKind } from './types.js';
 
 export interface EventFilter {
@@ -20,7 +27,12 @@ export class EventRingBuffer {
       this.buffer = this.buffer.slice(-this.capacity);
     }
     for (const sub of this.subscribers) {
-      try { sub(event); } catch { /* never let subscriber errors propagate */ }
+      try {
+        sub(event);
+      } catch (err) {
+        // never let subscriber errors propagate, but leave a breadcrumb
+        console.error('[events] subscriber threw:', err instanceof Error ? err.message : err);
+      }
     }
   }
 

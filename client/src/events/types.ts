@@ -1,3 +1,10 @@
+/**
+ * Structured event types for the operator-facing local app.
+ *
+ * Events are produced by the daemon (intent state transitions, errors, lifecycle
+ * markers) and consumed by /v1/events SSE + /v1/events/recent JSON endpoints
+ * served to the operator SPA. See docs/superpowers/specs/2026-05-01-operator-local-app-design.md.
+ */
 import { z } from 'zod';
 
 export const StructuredEventKindSchema = z.enum([
