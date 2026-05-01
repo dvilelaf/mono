@@ -18,7 +18,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
-import { handleSearchArtifacts } from './search-artifacts.js';
+import { handleSearchArtifactsOrLocalFallback } from './search-artifacts.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 
 const server = new McpServer({
@@ -229,14 +229,7 @@ server.tool(
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured', local: [], network: [] }) }],
       };
     }
-    if (!corpus) {
-      // Local-only: still serve the fast path so agents can find their own work.
-      const local = store.searchOwnAndCached({ artifactType: args.kind, limit: args.limit ?? 50 });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ local, network: [], warning: 'corpus not configured (missing JINN_CORPUS_* env vars); network results unavailable' }) }],
-      };
-    }
-    const out = await handleSearchArtifacts(corpus, store, args);
+    const out = await handleSearchArtifactsOrLocalFallback(corpus, store, args);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(out) }],
     };
