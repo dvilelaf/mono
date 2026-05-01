@@ -300,6 +300,7 @@ export async function gatherGatheredStatusRaw(
 
   const earningStore = new FleetStateStore(status.earningDir);
   const fleet = await earningStore.tryLoadExisting();
+  const migrationArchive = await earningStore.loadMigrationArchive();
 
   const vk = chainKey(status.network);
   const chainCfg = getChainConfig(vk, {
@@ -313,6 +314,7 @@ export async function gatherGatheredStatusRaw(
   const raw: GatheredStatusRaw = {
     ...baseRaw,
     fleet,
+    migrationArchive: migrationArchive.entries.length > 0 ? migrationArchive : undefined,
     rpc: { ok: false, error: undefined },
     minMasterEthWei: chainCfg.minEoaGasEth.toString(),
     master: {

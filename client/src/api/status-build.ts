@@ -3,6 +3,7 @@
  */
 
 import type { FleetState } from '../earning/types.js';
+import type { EarningMigrationArchive } from '../earning/store.js';
 import type { PortfolioV0Status } from './portfolio-v0-build.js';
 
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
@@ -60,6 +61,7 @@ export interface GatheredStatusRaw {
   >;
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
+  migrationArchive?: EarningMigrationArchive;
 }
 
 export interface StatusV1Response {
@@ -222,6 +224,9 @@ function buildNextActions(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fl
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of raw.fleet?.services ?? []) {
+      if (s.error) {
+        actions.push(`Service ${s.index}: ${s.error}`);
+      }
       if (s.step !== 'complete') {
         actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
       }

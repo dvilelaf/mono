@@ -66,6 +66,13 @@ function computeAttention(
       exampleCli: 'jinn fund-requirements --json',
     };
   }
+  if (svc.error) {
+    return {
+      kind: 'reconcile_needed',
+      hint: svc.error,
+      exampleCli: 'jinn status --detail',
+    };
+  }
   if (svc.step !== 'complete') {
     return {
       kind: 'reconcile_needed',

@@ -84,6 +84,10 @@ import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
 import { rpcHostForDisplay } from '../preflight/rpc-network.js';
+import {
+  detectDeprecatedTestnetSetup,
+  migrateDeprecatedTestnetSetup,
+} from './testnet-setup-migration.js';
 import type { Account } from 'viem/accounts';
 
 const addr = (value: string): Address => getAddress(value) as Address;
@@ -223,9 +227,17 @@ export class FleetBootstrapper {
           }
         }
       }
+      const pendingSetupMigration = detectDeprecatedTestnetSetup({
+        state,
+        chain: this.chain,
+        stakingMode: this.stakingMode,
+        currentStakingContract: this.config.stakingContract,
+      }).services.length > 0;
       const completedCountBeforeFunding = state.services.filter(s => s.step === 'complete').length;
       const standardFleetAlreadyComplete =
-        this.stakingMode === 'standard' && completedCountBeforeFunding >= this.targetServices;
+        this.stakingMode === 'standard' &&
+        !pendingSetupMigration &&
+        completedCountBeforeFunding >= this.targetServices;
       const requiredMasterEth = this.stakingMode === 'standard'
         ? (standardFleetAlreadyComplete ? 0n : this.config.minEoaGasEth)
         : SELF_BOND_ETH_PER_SERVICE * BigInt(this.targetServices);
@@ -325,6 +337,22 @@ export class FleetBootstrapper {
         await this.store.loadMnemonicKeystore(),
         password,
       );
+
+      if (pendingSetupMigration) {
+        const masterAccount = deriveMasterSigner(mnemonic);
+        const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
+        const migration = await migrateDeprecatedTestnetSetup({
+          stateStore: this.store,
+          state,
+          chain: this.chain,
+          stakingMode: this.stakingMode,
+          currentStakingContract: this.config.stakingContract,
+          distributorAddress: this.config.distributorAddress,
+          publicClient: this.publicClient,
+          masterWallet,
+        });
+        state = migration.state;
+      }
 
       state = await this.reconcileFleetWithChain(state, mnemonic);
 
@@ -456,10 +484,13 @@ export class FleetBootstrapper {
     state: FleetState,
     mnemonic: string,
   ): Promise<FleetState> {
-    const ctx = { stakingContract: this.config.stakingContract };
     let next = state;
     for (const svc of state.services) {
       const signals = await this.gatherChainSignals(svc);
+      const ctx = {
+        stakingContract: this.stakingAddressForService(svc),
+        preserveExistingSetup: this.shouldPreserveExistingSetup(svc),
+      };
       const result = reconcileServiceAgainstChain(this.stakingMode, svc, signals, ctx);
       if (result) {
         const abandoned = previousSafeBeingAbandoned(svc, result.patch);
@@ -524,7 +555,7 @@ export class FleetBootstrapper {
     }
 
     const id = svc.service_id;
-    const stakingAddr = this.config.stakingContract as Address;
+    const stakingAddr = this.stakingAddressForService(svc);
     const registryAddr = this.config.serviceRegistry as Address;
 
     let stakingState: number | 'revert' | 'inconclusive' = 0;
@@ -607,7 +638,7 @@ export class FleetBootstrapper {
       svc.service_id !== null &&
       (svc.step === 'complete' || svc.step === 'mech_deployed' || svc.step === 'staked')
     ) {
-      const onChainState = await this.getStakingState(svc.service_id);
+      const onChainState = await this.getStakingState(svc.service_id, svc.staking_address);
       if (onChainState === 2) {
         console.error(
           `[jinn-earning] Noticed service ${svc.service_id} (fleet index ${index}) evicted on-chain; running distributor reStake to restake.`,
@@ -735,7 +766,7 @@ export class FleetBootstrapper {
 
     // Idempotency: if this service already has an id and is already staked, skip
     if (svc.service_id !== null) {
-      const stakingState = await this.getStakingState(svc.service_id);
+      const stakingState = await this.getStakingState(svc.service_id, svc.staking_address);
       if (stakingState === 1) {
         console.error(`[fleet-bootstrap] Service ${index} already staked, skipping`);
         return this.store.updateService(index, { step: 'staked' });
@@ -825,6 +856,7 @@ export class FleetBootstrapper {
 
     const svc = state.services.find(s => s.index === index)!;
     const serviceId = svc.service_id!;
+    const stakingAddress = this.stakingAddressForService(svc);
 
     // `reStake()` is operator-scoped: the master EOA must match the
     // distributor's recorded `mapServiceIdCuratingAgents[serviceId]` entry.
@@ -836,7 +868,7 @@ export class FleetBootstrapper {
     const reStakeData = encodeFunctionData({
       abi: STOLAS_DISTRIBUTOR_ABI,
       functionName: 'reStake',
-      args: [this.config.stakingContract as Address, BigInt(serviceId)],
+      args: [stakingAddress, BigInt(serviceId)],
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: calling distributor.reStake() for evicted service ${serviceId}`);
@@ -1620,10 +1652,23 @@ export class FleetBootstrapper {
     console.error(`[fleet-bootstrap] Preflight passed: ${slotsRemaining} slots remaining`);
   }
 
-  private async getStakingState(serviceId: number): Promise<number> {
+  private stakingAddressForService(svc: ServiceState): Address {
+    return addr(svc.staking_address ?? this.config.stakingContract);
+  }
+
+  private shouldPreserveExistingSetup(svc: ServiceState): boolean {
+    if (this.stakingMode !== 'standard' || !svc.staking_address) return false;
+    try {
+      return getAddress(svc.staking_address) !== getAddress(this.config.stakingContract);
+    } catch {
+      return true;
+    }
+  }
+
+  private async getStakingState(serviceId: number, stakingAddress?: string | null): Promise<number> {
     return Number(
       await this.publicClient.readContract({
-        address: this.config.stakingContract as Address,
+        address: addr(stakingAddress ?? this.config.stakingContract),
         abi: STAKING_ABI,
         functionName: 'getStakingState',
         args: [BigInt(serviceId)],
