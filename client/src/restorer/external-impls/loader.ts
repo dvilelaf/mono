@@ -19,6 +19,7 @@ import type { ScopedSecrets } from '../capability/index.js';
 import type { RestorerImpl } from '../types.js';
 import type { ExternalImplEntry, SignerTrust } from './types.js';
 import { verifyPackageHash } from './package-hash.js';
+import { isInsidePackageDir } from '../../util/path-safety.js';
 
 /**
  * Daemon-side mirror of the SDK's `ExternalRestorerEnv`. Kept local
@@ -50,7 +51,8 @@ export type LoadFailureReason =
   | 'impl-construction-failed'
   | 'impl-identity-mismatch'
   | 'impl-supports-mismatch'
-  | 'impl-package-hash-mismatch';
+  | 'impl-package-hash-mismatch'
+  | 'impl-entry-escape';
 
 export type LoadResult =
   | { kind: 'ok'; impl: RestorerImpl; manifest: JinnManifest }
@@ -110,6 +112,18 @@ export async function loadExternalImpl({
   }
 
   const entryAbs = join(entry.entry, manifest.entry);
+  // Defence-in-depth against `..` traversal: the schema regex forbids
+  // `..` segments, but we also enforce containment at runtime in case
+  // the schema changes or the manifest is loaded from a non-validated
+  // source. (Finding 4a.)
+  if (!isInsidePackageDir(entry.entry, entryAbs)) {
+    return {
+      kind: 'error',
+      reason: 'impl-entry-escape',
+      detail: `manifest.entry=${manifest.entry} resolves outside the package root`,
+    };
+  }
+
   let mod: { default?: ExternalRestorerFactory };
   try {
     mod = (await import(pathToFileURL(entryAbs).href)) as {

@@ -179,3 +179,54 @@ describe('loadExternalImpl — package-hash verification', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Finding 4a — manifest.entry path traversal
+// ---------------------------------------------------------------------------
+
+describe('loadExternalImpl — manifest.entry path traversal', () => {
+  it('rejects manifest.entry that escapes the package root', async () => {
+    const root = join(TMP, 'escape-impl');
+    mkdirSync(join(root, 'dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'dist', 'index.js'),
+      `export default (env) => ({ name: env.implName, version: env.implVersion, supports: () => false, run: async () => ({}) });`,
+    );
+    const sk = ed.utils.randomSecretKey();
+    const pk = await ed.getPublicKeyAsync(sk);
+    const pkB64 = Buffer.from(pk).toString('base64');
+
+    const packageHash = computePackageHash(root);
+    // The schema regex now rejects `..` so `loadManifest` itself fails
+    // first with `impl-load-failed` (schema validation error). Either
+    // failure mode is correct: the contract is that the loader does
+    // NOT import an arbitrary path on disk.
+    const manifest = {
+      schemaVersion: '1.0.0' as const,
+      name: '@escape/restorer',
+      version: '0.1.0',
+      supportedKinds: ['prediction.v0>=1.0.0'],
+      entry: './../../etc/passwd.js',
+      package: { cid: 'bafyfake', hash: packageHash },
+      capabilities: {},
+      signature: { alg: 'ed25519' as const, publicKey: pkB64, sig: '' },
+    };
+    const body = canonicaliseManifest(manifest);
+    const sig = await ed.signAsync(new TextEncoder().encode(body), sk);
+    manifest.signature.sig = Buffer.from(sig).toString('base64');
+    writeFileSync(
+      join(root, 'jinn.manifest.json'),
+      JSON.stringify(manifest, null, 2),
+    );
+
+    const result = await loadExternalImpl({
+      entry: { name: '@escape/restorer', entry: root },
+      trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
+      env: envFor('@escape/restorer'),
+    });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(['impl-entry-escape', 'impl-load-failed']).toContain(result.reason);
+    }
+  });
+});
