@@ -525,7 +525,12 @@ export async function main(): Promise<DaemonStartupInfo> {
   if (externalEntries.length > 0) {
     for (const entry of externalEntries) {
       const result = await loadExternalImpl({
-        entry: { name: entry.name, entry: entry.entry, package: entry.package },
+        entry: {
+          name: entry.name,
+          entry: entry.entry,
+          package: entry.package,
+          version: entry.version,
+        },
         trustedSigners,
         env: {
           implName: entry.name,

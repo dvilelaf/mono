@@ -309,6 +309,14 @@ export const JinnConfigSchema = z.object({
             name: z.string(),
             entry: z.string(),
             package: z.string().optional(),
+            /**
+             * Optional pinned version. When set, the loader rejects the
+             * impl if its manifest's `version` does not match this string
+             * exactly — guards against silent upgrades of an on-disk
+             * package without an explicit operator config change
+             * (Finding 10).
+             */
+            version: z.string().optional(),
           }),
         )
         .optional(),

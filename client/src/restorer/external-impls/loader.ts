@@ -52,7 +52,8 @@ export type LoadFailureReason =
   | 'impl-identity-mismatch'
   | 'impl-supports-mismatch'
   | 'impl-package-hash-mismatch'
-  | 'impl-entry-escape';
+  | 'impl-entry-escape'
+  | 'impl-version-mismatch';
 
 export type LoadResult =
   | { kind: 'ok'; impl: RestorerImpl; manifest: JinnManifest }
@@ -108,6 +109,18 @@ export async function loadExternalImpl({
       kind: 'error',
       reason: 'impl-identity-mismatch',
       detail: `entry.name=${entry.name} != manifest.name=${manifest.name}`,
+    };
+  }
+
+  // Operator-pinned version: if the entry pins a specific version, the
+  // manifest MUST match it exactly. Prevents silent upgrades of the
+  // on-disk package without an explicit operator config change.
+  // (Finding 10.)
+  if (entry.version !== undefined && manifest.version !== entry.version) {
+    return {
+      kind: 'error',
+      reason: 'impl-version-mismatch',
+      detail: `entry.version=${entry.version} != manifest.version=${manifest.version}`,
     };
   }
 

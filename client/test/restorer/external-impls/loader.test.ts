@@ -230,3 +230,30 @@ describe('loadExternalImpl — manifest.entry path traversal', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Finding 10 — operator-pinned version mismatch
+// ---------------------------------------------------------------------------
+
+describe('loadExternalImpl — pinned version', () => {
+  it('rejects a manifest version that does not match entry.version', async () => {
+    const result = await loadExternalImpl({
+      entry: { name: '@fake/restorer', entry: PKG_ROOT, version: '0.0.1' },
+      trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
+      env: envFor('@fake/restorer'),
+    });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.reason).toBe('impl-version-mismatch');
+    }
+  });
+
+  it('accepts a manifest when entry.version matches exactly', async () => {
+    const result = await loadExternalImpl({
+      entry: { name: '@fake/restorer', entry: PKG_ROOT, version: '0.1.0' },
+      trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
+      env: envFor('@fake/restorer'),
+    });
+    expect(result.kind).toBe('ok');
+  });
+});
