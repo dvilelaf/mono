@@ -129,6 +129,14 @@ export function reconcileStandardService(
 
   // Crashed after assigning service_id but before stake confirmed — or stale id
   if (svc.step === 'awaiting_stake' && chain.stakingState === 0) {
+    if (ctx.preserveExistingSetup) {
+      return {
+        message: `[jinn-earning] Service ${index}: existing setup appears inactive before bootstrap completed, but it uses a non-default setup address. Leaving local service id and wallet fields unchanged for recovery/support.`,
+        patch: {
+          error: 'Existing setup appears inactive; local setup was preserved for recovery.',
+        },
+      };
+    }
     return {
       message: `[jinn-earning] Service ${index}: local step was awaiting_stake but service_id=${id} is not staked on-chain. Clearing stale id/Safe/mech; next bootstrap will call distributor stake() cleanly.`,
       patch: clearServiceIdentity(),

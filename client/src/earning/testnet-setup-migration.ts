@@ -187,6 +187,7 @@ async function retireOldSetup(
     };
   }
 
+  let txHash: Hex | null = null;
   try {
     const stakingProxy = getAddress(params.svc.staking_address);
     const operation = pad(stakingProxy as Hex, { size: 32 });
@@ -196,7 +197,7 @@ async function retireOldSetup(
       args: [stakingProxy as Address, BigInt(params.svc.service_id), operation],
     }) as Hex;
 
-    const txHash = await params.sendTransaction(
+    txHash = await params.sendTransaction(
       params.masterWallet,
       params.publicClient,
       {
@@ -222,7 +223,7 @@ async function retireOldSetup(
   } catch (error) {
     return {
       retire_status: 'failed',
-      retire_tx_hash: null,
+      retire_tx_hash: txHash,
       retire_error: error instanceof Error ? error.message : String(error),
     };
   }

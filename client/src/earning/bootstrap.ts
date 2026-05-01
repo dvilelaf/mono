@@ -630,6 +630,14 @@ export class FleetBootstrapper {
     let svc = state.services.find(s => s.index === index);
     if (!svc) throw new Error(`Service ${index} not found in state`);
 
+    if (
+      this.stakingMode === 'standard' &&
+      svc.error &&
+      this.shouldPreserveExistingSetup(svc)
+    ) {
+      return state;
+    }
+
     // Eviction recovery: even for "complete" services, check if on-chain shows
     // evicted (state=2). If so, unstake and reset to awaiting_stake so the
     // bootstrap restakes fresh. Only applies to standard mode (distributor-managed).
@@ -638,7 +646,18 @@ export class FleetBootstrapper {
       svc.service_id !== null &&
       (svc.step === 'complete' || svc.step === 'mech_deployed' || svc.step === 'staked')
     ) {
-      const onChainState = await this.getStakingState(svc.service_id, svc.staking_address);
+      let onChainState: number;
+      try {
+        onChainState = await this.getStakingState(svc.service_id, svc.staking_address);
+      } catch (error) {
+        if (this.shouldPreserveExistingSetup(svc)) {
+          console.error(
+            `[jinn-earning] Service ${index}: existing setup staking state could not be checked automatically. Leaving local service id and wallet fields unchanged for recovery/support.`,
+          );
+          return state;
+        }
+        throw error;
+      }
       if (onChainState === 2) {
         console.error(
           `[jinn-earning] Noticed service ${svc.service_id} (fleet index ${index}) evicted on-chain; running distributor reStake to restake.`,

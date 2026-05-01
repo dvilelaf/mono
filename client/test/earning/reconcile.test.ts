@@ -113,6 +113,22 @@ describe('reconcileStandardService', () => {
     expect(r?.patch.error).toContain('preserved');
   });
 
+  it('preserves non-default awaiting_stake setup when it appears inactive', () => {
+    const svc = baseSvc({
+      service_id: 3,
+      step: 'awaiting_stake',
+      safe_address: '0x' + '22'.repeat(20),
+      staking_address: '0x' + '77'.repeat(20),
+    });
+    const r = reconcileStandardService(1, svc, emptySignals({ stakingState: 0 }), {
+      stakingContract: svc.staking_address!,
+      preserveExistingSetup: true,
+    });
+    expect(r?.patch.service_id).toBeUndefined();
+    expect(r?.patch.safe_address).toBeUndefined();
+    expect(r?.patch.error).toContain('preserved');
+  });
+
   it('clears stale service_id when local awaiting_stake but not staked on-chain', () => {
     const svc = baseSvc({ service_id: 5, step: 'awaiting_stake' });
     const r = reconcileStandardService(1, svc, emptySignals({ stakingState: 0 }), {

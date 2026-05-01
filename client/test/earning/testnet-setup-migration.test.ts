@@ -42,6 +42,7 @@ async function runMigration(overrides: {
   state?: FleetState;
   stakingState?: bigint;
   sendThrows?: Error;
+  waitThrows?: Error;
 } = {}) {
   const earningDir = await mkdtemp(path.join(os.tmpdir(), 'jinn-migrate-'));
   const store = new FleetStateStore(earningDir);
@@ -56,6 +57,9 @@ async function runMigration(overrides: {
     return ('0x' + 'ab'.repeat(32)) as `0x${string}`;
   });
   const waitForReceipt = vi.fn(async () => ({ status: 'success' as const }));
+  if (overrides.waitThrows) {
+    waitForReceipt.mockRejectedValue(overrides.waitThrows);
+  }
 
   const result = await migrateDeprecatedTestnetSetup({
     stateStore: store,
@@ -128,6 +132,19 @@ describe('automatic testnet setup migration', () => {
     expect(archive.entries).toHaveLength(1);
     expect(archive.entries[0]!.retire_status).toBe('failed');
     expect(archive.entries[0]!.retire_error).toContain('retire rejected');
+  });
+
+  it('records the retirement tx hash when receipt waiting fails after broadcast', async () => {
+    const { earningDir, store } = await runMigration({
+      waitThrows: new Error('receipt timeout'),
+    });
+    dirs.push(earningDir);
+
+    const archive = await store.loadMigrationArchive();
+    expect(archive.entries).toHaveLength(1);
+    expect(archive.entries[0]!.retire_status).toBe('failed');
+    expect(archive.entries[0]!.retire_tx_hash).toBe('0x' + 'ab'.repeat(32));
+    expect(archive.entries[0]!.retire_error).toContain('receipt timeout');
   });
 
   it('records already inactive old setups without sending a retirement transaction', async () => {
