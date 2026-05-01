@@ -12,6 +12,17 @@ export interface SignTypedDataArgs {
   message: Record<string, unknown>;
 }
 
+/**
+ * The runtime gate on `ScopedSigner.signTypedData` is enforced
+ * daemon-side: the daemon constructs the signer with an allow-list
+ * derived from the manifest's `capabilities.signer.typedDataDomains`
+ * (see {@link TypedDataAllowEntry} on `manifest.ts`) and refuses any
+ * domain not on the list. An impl that ships no `typedDataDomains`
+ * entry cannot call `signTypedData` at all (default-deny). The
+ * `ScopedSigner` interface itself is unchanged — the gate lives in
+ * the construction args, not the contract surface.
+ */
+
 export interface SendAllowedCallArgs {
   to: Address;
   data: Hex;

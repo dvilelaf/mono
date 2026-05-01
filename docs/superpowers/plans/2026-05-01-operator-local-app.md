@@ -1,5 +1,13 @@
 # Operator Local App — v1-Slim Implementation Plan
 
+> **v1.x update (jinn-mono-zqm2).** After this plan landed, `jinn quickstart`
+> was removed and `jinn run` now subsumes the zero-to-running flow (init,
+> funding check, bootstrap, foreground daemon). The MCP tool was renamed
+> `jinn_run`. Tasks below that reference `jinn quickstart` describe the
+> surface as it existed when this plan was written; today the same flow is
+> reached via `jinn run`. See `client/README.md` for the current operator
+> path.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace `client/src/dashboard/index.html` with a richer single-page app served by the daemon, hosting four regions (Status, Visibility, Setup, Agent) with an embedded Auto-Mode Claude Code session, and add the daemon endpoints/lifecycle that support it.

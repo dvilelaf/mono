@@ -18,11 +18,13 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { dirname, isAbsolute, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { loadPlugInManifest } from '../../restorer/plug-ins/manifest.js';
+import type { Slot } from '../../restorer/plug-ins/types.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -68,11 +70,19 @@ function emitError(
 // Programmatic API (used by tests; mirrors the CLI dispatcher)
 // ---------------------------------------------------------------------------
 
+/**
+ * Optional prompt injection for testing. Called with a question string,
+ * returns the user's answer (or a resolved string for non-interactive paths).
+ */
+export type PromptFn = (question: string) => Promise<string>;
+
 export interface RunPlugInsArgs {
   argv: readonly string[];
   configPath?: string;
   stdout?: { write(s: string): void };
   stderr?: { write(s: string): void };
+  /** Injectable prompt function. Defaults to readline-based TTY prompt. */
+  prompt?: PromptFn;
 }
 
 export async function runPlugIns({
@@ -80,6 +90,7 @@ export async function runPlugIns({
   configPath = DEFAULT_CONFIG_PATH,
   stdout,
   stderr,
+  prompt,
 }: RunPlugInsArgs): Promise<number> {
   const out = stdout ?? { write: (s: string) => process.stdout.write(s) };
   const err = stderr ?? { write: (s: string) => process.stderr.write(s) };
@@ -92,7 +103,7 @@ export async function runPlugIns({
     case 'list':
       return list(configPath, out);
     case 'add':
-      return add(argv.slice(1), configPath, err);
+      return add(argv.slice(1), configPath, err, prompt);
     case 'remove':
       return remove(argv.slice(1), configPath, err);
     case 'show':
@@ -119,22 +130,68 @@ function list(
   return 0;
 }
 
+/** Default TTY prompt implementation using readline. */
+function defaultPrompt(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (!process.stdin.isTTY) {
+      // Non-interactive: return empty string (will be treated as 'n').
+      resolve('');
+      return;
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+/** Slot types that require operator confirmation because they run executable code. */
+const EXECUTABLE_SLOT_TYPES = new Set(['mcp-tool', 'memory-backend', 'hook']);
+
+/** Build a human-readable summary of executable slots for the confirmation prompt. */
+function summariseExecutableSlots(slots: readonly Slot[]): string {
+  const lines: string[] = [];
+  for (const slot of slots) {
+    if (slot.type === 'mcp-tool') {
+      lines.push(`  mcp-tool: ${slot.command} ${slot.args.join(' ')}`);
+    } else if (slot.type === 'memory-backend') {
+      lines.push(`  memory-backend: ${slot.command} ${slot.args.join(' ')}`);
+    } else if (slot.type === 'hook') {
+      lines.push(`  hook (${slot.event}): ${slot.entry}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 async function add(
   rest: readonly string[],
   configPath: string,
   stderr: { write(s: string): void },
+  promptFn?: PromptFn,
 ): Promise<number> {
-  const name = rest[0];
+  // Parse flags: --yes and --entry <path>, ignore unknown flags gracefully.
+  const { values, positionals } = parseArgs({
+    args: rest as string[],
+    options: {
+      entry: { type: 'string' },
+      yes: { type: 'boolean', default: false },
+    },
+    allowPositionals: true,
+    strict: false,
+  });
+
+  const name = positionals[0];
   if (!name) {
     stderr.write(`error: name required\n`);
     return 1;
   }
-  const entryFlagIdx = rest.findIndex((a) => a === '--entry');
-  const entry = entryFlagIdx >= 0 ? rest[entryFlagIdx + 1] : undefined;
+  const entry = values.entry as string | undefined;
   if (!entry) {
     stderr.write(`error: --entry <path> required\n`);
     return 1;
   }
+  const yes = Boolean(values.yes);
   const absEntry = isAbsolute(entry) ? entry : resolve(process.cwd(), entry);
 
   let manifest;
@@ -149,6 +206,30 @@ async function add(
       `error: name "${name}" mismatches manifest name "${manifest.name}"\n`,
     );
     return 1;
+  }
+
+  // Check for executable slots: mcp-tool, memory-backend, hook.
+  const executableSlots = (manifest.slots as readonly Slot[]).filter(
+    (s) => EXECUTABLE_SLOT_TYPES.has(s.type),
+  );
+  if (executableSlots.length > 0) {
+    const summary = summariseExecutableSlots(executableSlots);
+    stderr.write(
+      `warning: plug-in "${name}" declares executable slot(s) that will run on your machine:\n${summary}\n`,
+    );
+    if (!yes) {
+      const ask = promptFn ?? defaultPrompt;
+      let answer: string;
+      try {
+        answer = await ask('Install anyway? [y/N] ');
+      } catch {
+        answer = '';
+      }
+      if (!answer.trim().toLowerCase().startsWith('y')) {
+        stderr.write(`error: confirmation_required\n`);
+        return 1;
+      }
+    }
   }
 
   const cfg = readConfig(configPath);
@@ -227,10 +308,13 @@ Subcommands:
 
 Options:
   --config <path>                   Config file (default: ~/.jinn-client/config.json)
+  --yes                             Skip confirmation prompt for executable slots
+                                    (mcp-tool, memory-backend, hook)
 
 Examples:
   jinn plug-ins list
   jinn plug-ins add @example/news-explorer --entry ./node_modules/@example/news-explorer
+  jinn plug-ins add @example/news-explorer --entry ./node_modules/@example/news-explorer --yes
   jinn plug-ins remove @example/news-explorer
   jinn plug-ins show @example/news-explorer
 `;
@@ -260,13 +344,13 @@ async function run(ctx: CommandContext): Promise<void> {
     filteredArgv.push(a);
   }
 
-  // Use process.stdout/stderr in production (writer is a CommandContext shim
-  // that may not differentiate streams; runPlugIns talks directly).
+  // Route stdout via ctx.writer (structured output shim) and stderr via
+  // process.stderr directly so the two streams are not mixed.
   const code = await runPlugIns({
     argv: filteredArgv,
     configPath,
     stdout: { write: (s: string) => ctx.writer.write(s) },
-    stderr: { write: (s: string) => ctx.writer.write(s) },
+    stderr: { write: (s: string) => process.stderr.write(s) },
   });
   if (code !== 0) {
     // Mirror impls.ts: emit a JSON error envelope on non-zero exit so callers
@@ -284,7 +368,3 @@ const command: CommandModule = {
 };
 
 export default command;
-
-// Suppress unused-import warning when parseArgs is added back for richer flag
-// parsing in a follow-up.
-void parseArgs;

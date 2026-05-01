@@ -22,6 +22,13 @@ export interface ExternalImplEntry {
    * (e.g. `node_modules/@example/forecaster`).
    */
   entry: string;
+  /**
+   * Optional operator-pinned version. When set, the loader rejects
+   * the impl if `manifest.version` does not match this string exactly.
+   * Lets operators pin a specific package version in config without
+   * relying on `node_modules/` discipline.
+   */
+  version?: string;
 }
 
 export interface SignerTrust {

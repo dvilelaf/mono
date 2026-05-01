@@ -1,12 +1,13 @@
 /**
  * Manifest signature verifier (ed25519).
  *
- * Canonicalisation: stable JSON of the manifest with the `signature`
+ * Canonicalisation: RFC 8785 JCS over the manifest with the `signature`
  * field stripped. Authors sign the resulting bytes.
  */
 
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
+import { canonicalJson } from '../engine/canonical-json.js';
 import type { JinnManifest, SignerTrustEntry } from './types.js';
 
 // @noble/ed25519 v3 needs sha512 wired for synchronous use; the
@@ -15,12 +16,14 @@ import type { JinnManifest, SignerTrustEntry } from './types.js';
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
 /**
- * Canonicalise a manifest for signing/verification: stable JSON with
- * sorted top-level keys and signature stripped.
+ * Canonicalise a manifest for signing/verification: RFC 8785 JCS with
+ * the signature field stripped. Recursive (nested objects sort their
+ * own keys), so a third-party verifier with any standard JCS library
+ * can reproduce the signing pre-image byte-for-byte.
  */
 export function canonicaliseManifest(manifest: JinnManifest): string {
   const { signature: _omit, ...body } = manifest;
-  return JSON.stringify(body, Object.keys(body).sort());
+  return canonicalJson(body);
 }
 
 function b64ToBytes(s: string): Uint8Array {

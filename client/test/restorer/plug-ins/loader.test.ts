@@ -55,7 +55,7 @@ describe('loadPlugIns', () => {
     expect(r.registry.phaseAgentOverrides[0].plugInName).toBe('@x/p');
   });
 
-  it('emits last-installed-wins ordering for collisions', async () => {
+  it('first-installed-wins: collision drops second plug-in and records error', async () => {
     const pA = fakePkg('@x/a', [
       {
         type: 'phase-agent-override',
@@ -79,9 +79,15 @@ describe('loadPlugIns', () => {
       ],
       learnerVersion: '0.1.0',
     });
-    expect(r.warnings.some((w) => /collision/i.test(w))).toBe(true);
+    // The collision is an error, not a warning: the second plug-in is dropped.
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0].plugInName).toBe('@x/b');
+    expect(r.errors[0].reason).toMatch(/collision/i);
+    // Only the first plug-in's slot is registered.
     expect(r.registry.phaseAgentOverrides).toHaveLength(1);
-    expect(r.registry.phaseAgentOverrides[0].plugInName).toBe('@x/b');
+    expect(r.registry.phaseAgentOverrides[0].plugInName).toBe('@x/a');
+    // No spurious warnings about the collision.
+    expect(r.warnings.every((w) => !/collision/i.test(w))).toBe(true);
   });
 
   it('records load errors but continues with other plug-ins', async () => {

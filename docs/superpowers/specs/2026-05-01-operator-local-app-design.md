@@ -113,7 +113,7 @@ The "what is the daemon doing right now and what just happened" surface. Two sub
 
 Wraps the operator's first-run journey as a visible state machine. The 11-step earning bootstrap is the spine; non-blocking steps run autonomously and just show progress; blocking steps surface a single card with the action zone.
 
-**Top of region.** A "Start me up" primary button that triggers the equivalent of `jinn quickstart` (preflight + init + bootstrap). When pressed, the region expands and shows live progress.
+**Top of region.** A "Start me up" primary button that triggers the same flow as `jinn run` (preflight + init + bootstrap, then start the daemon). When pressed, the region expands and shows live progress.
 
 **Card list, top-to-bottom.**
 1. wallet — keystore creation. If missing, prompt for password (form). Once created, shows master address.
@@ -177,6 +177,16 @@ The headline command is `jinn run`. No new top-level commands.
   - If complete, panel renders Status + Visibility + Agent; daemon loops start.
 - `jinn run --no-ui` — suppresses auto-open. Headless / scripted / CI.
 - `jinn auth`, `jinn quickstart`, `jinn bootstrap`, `jinn init`, all other CLI verbs — unchanged. Power users and existing scripts continue to work.
+
+> **v1.x update (jinn-mono-zqm2).** `jinn quickstart` was removed and `jinn run`
+> now subsumes its zero-to-running flow (auto-resolve password, init wallet,
+> bootstrap fleet, start daemon, panel). The bullet list above reflects the
+> original v1-Slim design — read `jinn quickstart` there as historical
+> context. The CLI surface today: `jinn run` is the one-shot first-run command;
+> `jinn auth`, `jinn bootstrap`, `jinn init` remain as power-user step-by-step
+> escape hatches. The MCP tool was renamed `jinn_run`. See
+> `client/README.md` and `docs/operator-testnet.md` for the current operator
+> path.
 
 The bare `jinn` invocation continues to print help. Changing it would require its own deprecation cycle.
 

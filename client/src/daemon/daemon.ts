@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
@@ -9,6 +10,7 @@ import { PeerSync } from '../api/peers.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import { queryArtifacts, queryNodes, getMetadataValue, type SubgraphConfig } from '../erc8004/index.js';
 import type { X402Config } from '../x402/handler.js';
+import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { RestorationEngine, type RestorationEngineOptions } from '../restorer/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
@@ -28,6 +30,21 @@ export interface DaemonConfig {
   /** Engine tick interval (ms) for re-driving in-flight intents. Defaults to 5000. */
   pollIntervalMs?: number;
   apiPort?: number;
+  /**
+   * Bind host for the HTTP API server. Defaults to `127.0.0.1` so the
+   * daemon API is unreachable across the network unless operators opt in.
+   * Cost-mutating routes additionally require a bearer token.
+   */
+  apiBindHost?: string;
+  /**
+   * Bearer token required on cost-mutating API routes (`POST /artifacts`,
+   * `POST /v1/artifacts/acquire`). main.ts generates one at startup
+   * (or reads from `DAEMON_API_TOKEN`) and passes it here. When omitted
+   * (e.g. unit tests that don't exercise the cost-mutating routes), the
+   * Daemon synthesizes a random per-process token so the server still
+   * has something to compare against.
+   */
+  apiToken?: string;
   peers?: string[];
   signer?: EthHttpSigner;
   subgraphUrl?: string;
@@ -56,6 +73,39 @@ export interface DaemonConfig {
 
   /** Passed to HTTP API for GET /v1/status (fleet + RPC hints). */
   status?: StatusGatherConfig;
+
+  /**
+   * Daemon-side Corpus factory. Invoked after the Daemon constructs its
+   * Store so the corpus shares the same SQLite handle. When set, the API
+   * server exposes `POST /v1/artifacts/acquire` so the MCP subprocess can
+   * acquire artifacts without ever holding the agent EOA private key. Built
+   * in `main.ts` once `subgraphUrl` is configured. See
+   * spec/2026-04-30-phase-a-umbrella.md §4.
+   */
+  corpusFactory?: (store: Store) => Corpus;
+
+  /**
+   * If provided, the Daemon uses this already-started API server instead of
+   * starting its own. Used by the setup-mode flow in main.ts where the API
+   * needs to come up before bootstrap completes so the operator dashboard is
+   * reachable while the fleet is still bootstrapping (e.g. awaiting funding).
+   *
+   * The Daemon does NOT close an injected API server — ownership stays with
+   * the caller (main.ts's shutdown handler closes it explicitly).
+   */
+  apiServer?: ApiServer;
+
+  /**
+   * If provided, the Daemon uses this Store instead of constructing a new one
+   * from `dbPath`. Used by the setup-mode flow in main.ts where the API
+   * server needs the Store before the Daemon is constructed; sharing one
+   * Store instance avoids two parallel SQLite connections + schema setups
+   * on the same file.
+   *
+   * When supplied, the Daemon does NOT close the Store on stop() —
+   * ownership stays with the caller.
+   */
+  store?: Store;
 
   /** Restoration intent sources polled by CreatorLoop. */
   intentSources?: IntentSource[];
@@ -94,16 +144,30 @@ export class Daemon {
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
   private apiServer?: ApiServer;
+  private ownsApiServer = false;
+  private ownsStore = false;
   private peerSync?: PeerSync;
   private readonly apiPort: number;
+  private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private jinnClaimLoop?: JinnClaimLoop;
 
   constructor(private readonly config: DaemonConfig) {
-    this.store = new Store(config.dbPath);
+    if (config.store) {
+      this.store = config.store;
+      this.ownsStore = false;
+    } else {
+      this.store = new Store(config.dbPath);
+      this.ownsStore = true;
+    }
     this.adapter = config.adapter;
     this.apiPort = config.apiPort ?? parseInt(process.env['JINN_API_PORT'] ?? String(DEFAULT_API_PORT));
+    // When the embedder didn't supply a token (e.g. a unit test that doesn't
+    // exercise the cost-mutating routes), fall back to a fresh random token
+    // so the API server still has something to compare bearer headers
+    // against. Production callers (main.ts) always pass an explicit token.
+    this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
     const intentSources = config.intentSources
       ?? (config.desiredStates ? [new StaticConfiguredIntentSource(config.desiredStates)] : []);
     this.creatorLoop = new CreatorLoop(
@@ -149,13 +213,27 @@ export class Daemon {
     this.cachedShutdownState = 'running';
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
-    // Start HTTP API server
-    this.apiServer = await startApiServer({
-      port: this.apiPort,
-      store: this.store,
-      x402: this.config.x402,
-      status: this.config.status,
-    });
+    // Start HTTP API server (or adopt the one main.ts started early in
+    // setup-mode). When injected, ownership stays with the caller — see
+    // DaemonConfig.apiServer.
+    const corpus = this.config.corpusFactory
+      ? this.config.corpusFactory(this.store)
+      : undefined;
+    if (this.config.apiServer) {
+      this.apiServer = this.config.apiServer;
+      this.ownsApiServer = false;
+    } else {
+      this.apiServer = await startApiServer({
+        port: this.apiPort,
+        store: this.store,
+        apiToken: this.apiToken,
+        x402: this.config.x402,
+        status: this.config.status,
+        bindHost: this.config.apiBindHost,
+        corpus,
+      });
+      this.ownsApiServer = true;
+    }
 
     // Backfill remote artifacts from subgraph if configured
     const subgraphUrl = this.config.subgraphUrl ?? process.env['JINN_SUBGRAPH_URL'];
@@ -305,7 +383,11 @@ export class Daemon {
 
     // Stop the adapter to unblock any pending async iterators
     await this.adapter.stop();
-    await this.apiServer?.close();
+    // Only close the API server if we started it. When main.ts injected a
+    // pre-started server (setup-mode flow), it owns shutdown.
+    if (this.ownsApiServer) {
+      await this.apiServer?.close();
+    }
 
     const timeout = this.config.shutdownTimeoutMs ?? 30000;
     await Promise.race([
@@ -316,7 +398,11 @@ export class Daemon {
     this.store.setShutdownState('clean');
     this.cachedShutdownState = 'clean';
     emitEvent(this.store, { kind: 'shutdown', outcome: 'ok', detail: 'Daemon stopped cleanly' }, 'daemon');
-    this.store.close();
+    // Only close the Store if we own it. When main.ts injected one, the
+    // caller's shutdown handler closes it after the Daemon stops.
+    if (this.ownsStore) {
+      this.store.close();
+    }
   }
 
   getShutdownState(): string | null {

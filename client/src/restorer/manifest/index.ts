@@ -5,4 +5,5 @@ export type {
   SignerTrustEntry,
   CapabilityAllowEntry,
   ManifestRpcAllow,
+  TypedDataAllowEntry,
 } from './types.js';

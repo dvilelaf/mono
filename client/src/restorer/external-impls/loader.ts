@@ -18,6 +18,8 @@ import {
 import type { ScopedSecrets } from '../capability/index.js';
 import type { RestorerImpl } from '../types.js';
 import type { ExternalImplEntry, SignerTrust } from './types.js';
+import { verifyPackageHash } from './package-hash.js';
+import { isInsidePackageDir } from '../../util/path-safety.js';
 
 /**
  * Daemon-side mirror of the SDK's `ExternalRestorerEnv`. Kept local
@@ -48,7 +50,10 @@ export type LoadFailureReason =
   | 'impl-load-failed'
   | 'impl-construction-failed'
   | 'impl-identity-mismatch'
-  | 'impl-supports-mismatch';
+  | 'impl-supports-mismatch'
+  | 'impl-package-hash-mismatch'
+  | 'impl-entry-escape'
+  | 'impl-version-mismatch';
 
 export type LoadResult =
   | { kind: 'ok'; impl: RestorerImpl; manifest: JinnManifest }
@@ -85,6 +90,20 @@ export async function loadExternalImpl({
     return { kind: 'error', reason: 'impl-trust' };
   }
 
+  // Recompute the package-content hash and compare to the manifest's
+  // claim. This binds the signed manifest to the bytes on disk —
+  // without it a signed manifest could be paired with arbitrary code
+  // so long as the manifest itself is unmodified. See Finding 2 in the
+  // PR review.
+  const hashOk = await verifyPackageHash(entry.entry, manifest);
+  if (!hashOk) {
+    return {
+      kind: 'error',
+      reason: 'impl-package-hash-mismatch',
+      detail: `recomputed package hash does not match manifest.package.hash (${manifest.package.hash})`,
+    };
+  }
+
   if (manifest.name !== entry.name) {
     return {
       kind: 'error',
@@ -93,7 +112,31 @@ export async function loadExternalImpl({
     };
   }
 
+  // Operator-pinned version: if the entry pins a specific version, the
+  // manifest MUST match it exactly. Prevents silent upgrades of the
+  // on-disk package without an explicit operator config change.
+  // (Finding 10.)
+  if (entry.version !== undefined && manifest.version !== entry.version) {
+    return {
+      kind: 'error',
+      reason: 'impl-version-mismatch',
+      detail: `entry.version=${entry.version} != manifest.version=${manifest.version}`,
+    };
+  }
+
   const entryAbs = join(entry.entry, manifest.entry);
+  // Defence-in-depth against `..` traversal: the schema regex forbids
+  // `..` segments, but we also enforce containment at runtime in case
+  // the schema changes or the manifest is loaded from a non-validated
+  // source. (Finding 4a.)
+  if (!isInsidePackageDir(entry.entry, entryAbs)) {
+    return {
+      kind: 'error',
+      reason: 'impl-entry-escape',
+      detail: `manifest.entry=${manifest.entry} resolves outside the package root`,
+    };
+  }
+
   let mod: { default?: ExternalRestorerFactory };
   try {
     mod = (await import(pathToFileURL(entryAbs).href)) as {
