@@ -2151,6 +2151,7 @@ async function main(): Promise<void> {
           safe: safeAddress as `0x${string}`,
           runner,
           daemonApiUrl: 'http://127.0.0.1:7331',
+          daemonApiToken: 'e2e-test-token',
         })) {
           implRegistry.register(impl);
         }
@@ -2179,6 +2180,7 @@ async function main(): Promise<void> {
           dbPath: daemonDbPath,
           shutdownTimeoutMs: 10000,
           apiPort: 7331,
+          apiToken: 'e2e-test-token',
           restorationEngine: {
             implRegistry,
             paths: {

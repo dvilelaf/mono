@@ -543,6 +543,7 @@ export async function main(): Promise<DaemonStartupInfo> {
     runner,
     storePath: config.dbPath,
     daemonApiUrl: `http://127.0.0.1:${config.apiPort}`,
+    daemonApiToken: apiToken,
     implStateDirRoot: config.engine.implStateDirRoot,
   })) {
     implRegistry.register(impl);

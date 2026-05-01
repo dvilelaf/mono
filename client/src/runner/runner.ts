@@ -8,6 +8,14 @@ export interface RunnerContext {
   storePath?: string;
   daemonApiUrl?: string;
   /**
+   * Bearer token required by the daemon's cost-mutating API routes
+   * (`POST /artifacts`, `POST /v1/artifacts/acquire`). Forwarded into the
+   * MCP subprocess via `DAEMON_API_TOKEN` and attached to fetch headers.
+   * When omitted, MCP calls those routes without an Authorization header
+   * and the daemon will respond 401.
+   */
+  daemonApiToken?: string;
+  /**
    * Optional corpus configuration forwarded to the MCP subprocess so its
    * `search_artifacts` tool can hit the keyless subgraph + IPFS gateway.
    * `acquire_artifact` no longer needs anything from this block — it

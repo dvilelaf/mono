@@ -40,6 +40,7 @@ export async function handleAcquireArtifact(
   daemonApiUrl: string | undefined,
   store: Store,
   args: AcquireArtifactArgs,
+  daemonApiToken?: string,
 ): Promise<AcquireArtifactResult> {
   const own = store.getServedArtifact(args.sha256);
   if (own) {
@@ -84,12 +85,16 @@ export async function handleAcquireArtifact(
   }
 
   // Proxy to daemon. Mirrors the fetch shape of the
-  // `submit_restoration_result` proxy at mcp/server.ts.
+  // `submit_restoration_result` proxy at mcp/server.ts. Bearer token is
+  // attached when supplied; the daemon's `requireBearer` middleware would
+  // reject without it.
   let response: Response;
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (daemonApiToken) headers['Authorization'] = `Bearer ${daemonApiToken}`;
     response = await fetch(`${daemonApiUrl}/v1/artifacts/acquire`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         sha256: args.sha256,
         access: args.access,

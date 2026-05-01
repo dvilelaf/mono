@@ -35,6 +35,11 @@ export interface LegacyClaudeConfig {
   /** Daemon API URL for MCP server */
   daemonApiUrl?: string;
   /**
+   * Bearer token for daemon API cost-mutating routes. Forwarded to the MCP
+   * subprocess via `DAEMON_API_TOKEN` env var.
+   */
+  daemonApiToken?: string;
+  /**
    * When true (e.g. synthetic registry), `isReady` reports the daemon is required.
    * Production daemon should omit.
    */
@@ -89,6 +94,7 @@ export class LegacyClaudeImpl implements RestorerImpl {
       timeoutMs: this.config.timeoutMs ?? 300_000,
       storePath: this.config.storePath,
       daemonApiUrl: this.config.daemonApiUrl,
+      daemonApiToken: this.config.daemonApiToken,
     };
 
     let result: RestorationResult;

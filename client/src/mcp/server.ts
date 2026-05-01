@@ -41,6 +41,9 @@ const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
 const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
+// Bearer token for daemon API cost-mutating routes. Empty string when
+// unset (e.g. legacy harness wiring) — the daemon will respond 401.
+const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
 // Build a query-only corpus capability when the daemon supplied the keyless
@@ -143,9 +146,11 @@ server.tool(
     // Publish via daemon API if available.
     if (daemonApiUrl) {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (daemonApiToken) headers['Authorization'] = `Bearer ${daemonApiToken}`;
         const response = await fetch(`${daemonApiUrl}/artifacts`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(artifact),
         });
         if (!response.ok) {
@@ -260,7 +265,12 @@ server.tool(
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured' }) }],
       };
     }
-    const result = await handleAcquireArtifact(daemonApiUrl || undefined, store, args);
+    const result = await handleAcquireArtifact(
+      daemonApiUrl || undefined,
+      store,
+      args,
+      daemonApiToken || undefined,
+    );
     if (result.ok) {
       const out = result.content;
       return {

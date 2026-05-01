@@ -68,6 +68,11 @@ export class ClaudeRunner implements Runner {
               : '',
             STORE_PATH: context.storePath ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
+            // Bearer token for the daemon's cost-mutating routes. MCP
+            // subprocess attaches this as `Authorization: Bearer <token>`
+            // on fetches to `POST /v1/artifacts/acquire` and
+            // `POST /artifacts`. Empty string when unset → daemon returns 401.
+            DAEMON_API_TOKEN: context.daemonApiToken ?? '',
             // Subgraph + IPFS gateway only — both keyless. The agent EOA
             // private key NEVER leaves the daemon process; acquire_artifact
             // proxies through DAEMON_API_URL instead.
