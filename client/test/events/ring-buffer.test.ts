@@ -80,4 +80,15 @@ describe('EventRingBuffer', () => {
     snap.push(evt('mutated'));
     expect(rb.snapshot().map((e) => e.id)).toEqual(['a']);
   });
+
+  it('clear() empties the buffer but retains subscribers', () => {
+    const rb = new EventRingBuffer(10);
+    const seen: string[] = [];
+    rb.subscribe((e) => seen.push(e.id));
+    rb.push(evt('a'));
+    rb.clear();
+    expect(rb.snapshot()).toEqual([]);
+    rb.push(evt('b'));
+    expect(seen).toEqual(['a', 'b']);
+  });
 });

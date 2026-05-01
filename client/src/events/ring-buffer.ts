@@ -54,4 +54,9 @@ export class EventRingBuffer {
     this.subscribers.add(sub);
     return () => this.subscribers.delete(sub);
   }
+
+  /** Drop all buffered events; subscribers are retained. Intended for test isolation. */
+  clear(): void {
+    this.buffer = [];
+  }
 }
