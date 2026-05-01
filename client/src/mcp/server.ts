@@ -245,7 +245,7 @@ server.tool(
 
 server.tool(
   'acquire_artifact',
-  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; falls through to network with x402 payment when necessary. Returns base64-encoded bytes and the fetch source.',
+  'Fetch artifact bytes by sha256. Hits local-store (own served) and corpus cache fast paths first; proxies to the daemon for network fetches (the daemon owns the agent EOA private key for x402 payments). Returns base64-encoded bytes and the fetch source.',
   {
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     access: z.object({
@@ -261,39 +261,9 @@ server.tool(
         content: [{ type: 'text' as const, text: JSON.stringify({ error: 'no store configured' }) }],
       };
     }
-    if (!corpus) {
-      // Local-only: still allow self-store + cache hits to satisfy the request.
-      const own = store.getServedArtifact(args.sha256);
-      if (own) {
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({
-            sha256: args.sha256,
-            bytes: own.content.toString('base64'),
-            artifactType: own.artifactType,
-            source: 'self-store',
-            paidAmountUsdc: '0',
-          }) }],
-        };
-      }
-      const cached = store.getNetworkArtifact(args.sha256);
-      if (cached) {
-        store.touchNetworkArtifactUsage(args.sha256, new Date().toISOString());
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({
-            sha256: args.sha256,
-            bytes: cached.content.toString('base64'),
-            artifactType: cached.artifactType,
-            source: 'cache',
-            paidAmountUsdc: '0',
-          }) }],
-        };
-      }
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: 'corpus not configured and artifact not in local store' }) }],
-      };
-    }
-    try {
-      const out = await handleAcquireArtifact(corpus, store, args);
+    const result = await handleAcquireArtifact(daemonApiUrl || undefined, store, args);
+    if (result.ok) {
+      const out = result.content;
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({
           sha256: out.sha256,
@@ -304,11 +274,22 @@ server.tool(
           ...(out.sourceOperator ? { sourceOperator: out.sourceOperator } : {}),
         }) }],
       };
-    } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: `acquire failed: ${err instanceof Error ? err.message : String(err)}` }) }],
-      };
     }
+    // Structured failure — surface daemon-side reason verbatim so callers can
+    // discriminate hash_mismatch (don't retry) vs origin_null (transient).
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: result.error,
+          reason: result.reason,
+          sha256: result.sha256,
+          retryable: result.retryable,
+          ...(result.message ? { message: result.message } : {}),
+          ...(result.sourceOperator ? { sourceOperator: result.sourceOperator } : {}),
+        }),
+      }],
+    };
   },
 );
 
