@@ -292,9 +292,58 @@ async function fetchJupiterLendExchangeRate(receiptMint: string): Promise<number
   }
 }
 
+// DefiLlama pool IDs per position (selected for largest TVL when multiple pools share a symbol).
+// Pools verified on 2026-05-02 via https://yields.llama.fi/pools.
+// To re-verify: curl -s https://yields.llama.fi/pools | jq '.data[] | select(.pool=="<id>")'
+const DEFILLAMA_POOL_IDS: Record<string, string> = {
+  "Steakhouse Prime Instant": "b55f43a8-f444-4cd8-a3a4-0a4e786ba566",
+  "Staked Ethena USDe":       "66985a81-9c51-46ca-9977-42b4fe7bc6df",
+  "Savings USDS":             "d8c4eff5-c8a9-46fc-a888-057c4c668e72",
+  "Lido Staked ETH":          "747c1d2a-c668-4682-b9f9-296708a3dd90",
+  "Syrup USDT":               "8edfdf02-cdbb-43f7-bca6-954e5fe56813",
+  "Jupiter Lend USDT":        "a2fbc7ec-22c2-43fe-aa42-49f854aa940d",
+  "Jupiter Lend WSOL":        "86d5dc3c-682f-4227-b1c9-7e51c6e60cda",
+};
+
+// Manual APY for off-chain / tradfi positions DefiLlama doesn't track.
+// Override via env (COINBASE_EARN_APY / REVOLUT_GBP_APY) when rates change.
+function manualApy(name: string): string | null {
+  if (name === "Coinbase Earn (Stablecoins)") return process.env.COINBASE_EARN_APY ?? "4.1";
+  if (name === "Revolut GBP Savings") return process.env.REVOLUT_GBP_APY ?? "4.25";
+  return null;
+}
+
+async function fetchDefillamaApys(): Promise<Map<string, number>> {
+  const apys = new Map<string, number>();
+  try {
+    const res = await fetch("https://yields.llama.fi/pools");
+    if (!res.ok) throw new Error(`DefiLlama ${res.status}`);
+    const json = (await res.json()) as { data: Array<{ pool: string; apy: number | null }> };
+    const wantedIds = new Set(Object.values(DEFILLAMA_POOL_IDS));
+    for (const p of json.data) {
+      if (wantedIds.has(p.pool) && p.apy != null) apys.set(p.pool, p.apy);
+    }
+  } catch (err) {
+    console.error(`DefiLlama fetch failed: ${(err as Error).message} — APY will be NULL`);
+  }
+  return apys;
+}
+
+function apyFor(positionName: string, llamaApys: Map<string, number>): string | null {
+  const poolId = DEFILLAMA_POOL_IDS[positionName];
+  if (poolId) {
+    const v = llamaApys.get(poolId);
+    if (v != null) return String(v);
+  }
+  return manualApy(positionName);
+}
+
 async function main() {
   const now = new Date();
   let count = 0;
+
+  const llamaApys = await fetchDefillamaApys();
+  console.log(`DefiLlama: ${llamaApys.size}/${Object.keys(DEFILLAMA_POOL_IDS).length} APYs resolved`);
 
   // Fetch positions from Zerion — supports both EVM and Solana wallets
   const allWallets = [...new Set(POSITIONS.map((p) => p.wallet))];
@@ -334,6 +383,10 @@ async function main() {
     }
   }
 
+  // Track which positions got a live (Zerion/Solana) row so we don't double-write
+  // a stale manual fallback alongside a successful fetch.
+  const liveNames = new Set<string>();
+
   // Match and insert each tracked position
   for (const pos of POSITIONS) {
     // Try Zerion first
@@ -356,10 +409,12 @@ async function main() {
         tokenBalance: String(quantity),
         tokenPrice: String(price),
         valueUsd: String(value),
+        apy: apyFor(pos.name, llamaApys),
         snapshotAt: now,
         metadata: { wallet: pos.wallet, source: "zerion" },
       });
       console.log(`  ${pos.name}: ${quantity.toFixed(2)} ${pos.token} = $${value.toFixed(2)} (zerion)`);
+      liveNames.add(pos.name);
       count++;
     } else if (pos.chain === "solana" && solanaPositions.has(pos.token)) {
       // Use Solana RPC + Raydium price API fallback for Jupiter Lend tokens
@@ -373,10 +428,12 @@ async function main() {
         tokenBalance: String(quantity),
         tokenPrice: String(price),
         valueUsd: String(value),
+        apy: apyFor(pos.name, llamaApys),
         snapshotAt: now,
         metadata: { wallet: pos.wallet, source: `solana_rpc+${priceSource}` },
       });
       console.log(`  ${pos.name}: ${quantity.toFixed(4)} ${pos.token} = $${value.toFixed(2)} (${priceSource})`);
+      liveNames.add(pos.name);
       count++;
     } else {
       console.log(`  ${pos.name} (${pos.token}): not found via Zerion or Solana RPC`);
@@ -405,6 +462,10 @@ async function main() {
   ];
 
   for (const mp of manualPositions) {
+    if (liveNames.has(mp.name)) {
+      console.log(`  [skip manual] ${mp.name} already has a live row this snapshot`);
+      continue;
+    }
     await db.insert(yieldPositions).values({
       name: mp.name,
       protocol: mp.protocol,
@@ -413,6 +474,7 @@ async function main() {
       tokenBalance: mp.balance,
       tokenPrice: mp.price,
       valueUsd: mp.value,
+      apy: apyFor(mp.name, llamaApys),
       snapshotAt: now,
       metadata: { source: "manual_screenshot", date: "2026-04-08" },
     });
