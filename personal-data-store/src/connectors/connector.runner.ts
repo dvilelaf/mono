@@ -11,8 +11,12 @@ export async function runConnector(connector: Connector, options?: SyncOptions):
 
   try {
     const result = await connector.sync(options);
+    const hasErrors = !!result.errors?.length;
     await db.update(connectorRuns).set({
-      status: "success", finishedAt: new Date(), recordsSynced: result.recordsSynced,
+      status: hasErrors ? "partial" : "success",
+      finishedAt: new Date(),
+      recordsSynced: result.recordsSynced,
+      error: hasErrors ? result.errors!.join(" | ") : null,
     }).where(eq(connectorRuns.id, run.id));
     return result;
   } catch (err) {
