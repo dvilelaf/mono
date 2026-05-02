@@ -15,7 +15,7 @@ export interface TaskSessionInputs {
   taskId: string;
   /** IPFS CID of the full Task payload (if known) for provenance */
   taskCid?: string;
-  /** SolverType (e.g. 'portfolio.v0', 'prediction.v0') */
+  /** SolverType (e.g. 'portfolio.v0', 'prediction.v1') */
   solverType?: string;
   /** Operator-private impl-state directory; passed to the plugin via env IMPL_STATE_DIR */
   implStateDir: string;

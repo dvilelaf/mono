@@ -52,7 +52,7 @@ function ensureSolverNets(cfg: ConfigShape): Record<string, SolverNetConfig> {
 function predictionDefault(): SolverNetConfig {
   return {
     enabled: true,
-    solverType: 'prediction.v0',
+    solverType: 'prediction.v1',
     canonicalPlugin: 'bundled:jinn-prediction-plugin',
     harness: 'claude-code-learner',
     plugins: [],

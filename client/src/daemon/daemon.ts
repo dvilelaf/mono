@@ -410,26 +410,49 @@ export class Daemon {
   }
 
   /**
-   * Bridge loop: consumes adapter.watchForRequests() and routes each request to
-   * the TaskEngine via observe() + process().
+   * Bridge loop: consumes adapter.watchForTasks(), claims eligible Tasks, and
+   * routes each internal request to the TaskEngine via observe() + process().
    *
    * For tasks without solverType, the engine dispatches to the legacy-claude Harness.
    * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
    * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
    *
-   * On-chain provenance (taskCid, onchainCreationTx, onchainCreationBlock) is
-   * populated from the TaskRequest when available (MechAdapter sets these
-   * from the MarketplaceRequest event log). Adapter paths that don't populate them
-   * fall back to safe defaults with a warning.
+   * On-chain provenance is populated from TaskCreated and TaskAttemptCreated.
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
 
-    for await (const request of this.adapter.watchForRequests()) {
+    for await (const taskAnnouncement of this.adapter.watchForTasks()) {
       if (this.engineStopped) break;
-      if (!request.requestId) continue;
+      if (!taskAnnouncement.taskId) continue;
 
-      const solverType = request.task.solverType ?? undefined;
+      const solverType = taskAnnouncement.task.solverType ?? undefined;
+      const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
+      const accept = await engine.canAcceptTask({ solverType, taskRole });
+      if (!accept.ok) {
+        console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
+        continue;
+      }
+
+      let request;
+      try {
+        request = await this.adapter.claimTask(taskAnnouncement.taskId);
+        this.store.recordOwnActivity(request.requestId, 'claimed');
+      } catch (err) {
+        console.error(
+          `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
+          err instanceof Error ? err.message : err,
+        );
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: taskAnnouncement.taskId,
+          solverType,
+          outcome: 'failed',
+          detail: err instanceof Error ? err.message : String(err),
+        }, 'daemon');
+        continue;
+      }
+
       const windowStartTs = request.task.window?.startTs ?? Date.now();
       const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
@@ -447,6 +470,8 @@ export class Daemon {
       try {
         await engine.observe({
           requestId: request.requestId,
+          taskId: request.taskId ?? taskAnnouncement.taskId,
+          attemptIndex: request.attemptIndex,
           taskCid: request.taskCid ?? '',
           onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
           onchainCreationBlock: request.onchainCreationBlock ?? 0,

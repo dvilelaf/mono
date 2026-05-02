@@ -85,7 +85,7 @@ export interface Solution {
 
   /**
    * Full solution payload for Harnesses whose solverType has a non-portfolio payload
-   * schema (e.g. prediction.v0, prediction.apy.v0).
+   * schema (e.g. prediction.v1, prediction.apy.v0).
    *
    * When set, engine.pack() uses this directly as the envelope payload
    * (validated against the solverType's solution schema) instead of building the

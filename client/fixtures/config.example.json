@@ -7,7 +7,7 @@
     {
       "id": "health-check",
       "description": "The service is running and participating in the Jinn protocol loop.",
-      "solverType": "prediction.v0",
+      "solverType": "prediction.v1",
       "role": "restoration",
       "spec": {}
     }
@@ -15,7 +15,7 @@
   "solverNets": {
     "prediction": {
       "enabled": true,
-      "solverType": "prediction.v0",
+      "solverType": "prediction.v1",
       "canonicalPlugin": "bundled:jinn-prediction-plugin",
       "harness": "claude-code-learner",
       "plugins": [],

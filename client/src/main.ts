@@ -62,7 +62,6 @@ import { HarnessRegistry } from './harnesses/engine/registry.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
-import { ClaimRegistryClient } from './adapters/claim-registry/client.js';
 import { createClients } from './adapters/mech/safe.js';
 import { collectTestnetAutoTaskGenerators } from './solver-types/index.js';
 import { loadSolverNets } from './solver-nets/registry.js';
@@ -139,7 +138,6 @@ const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
   testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
   testnetMechDeploymentPath: config.testnetMechDeploymentPath,
   testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-  testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
 }), {
   minEoaGasWei: config.minEoaGasWei,
   minSafeEthWei: config.minSafeEthWei,
@@ -275,7 +273,6 @@ async function bootstrap(): Promise<{
     testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
     testnetMechDeploymentPath: config.testnetMechDeploymentPath,
     testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-    testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
     debug: config.debug,
     masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
     minEoaGasWei: config.minEoaGasWei,
@@ -418,7 +415,6 @@ async function bootstrap(): Promise<{
         testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
       });
       if (migration.migrated.length > 0 || migration.failed.length > 0) {
         console.log(
@@ -645,7 +641,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
         testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
         testnetMechDeploymentPath: config.testnetMechDeploymentPath,
         testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
         engine: config.engine,
       },
     });
@@ -1073,31 +1068,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     evictionRecovery,
   };
 
-  // Claim deps: use the network default when bundled, with env override for
-  // emergency redeploys or custom test deployments.
-  const claimRegistryAddress = (
-    process.env['JINN_CLAIM_REGISTRY_ADDRESS']
-    ?? CHAIN_CONFIG.claimRegistry
-    ?? ''
-  ) as `0x${string}` | '';
-  const claimDeps = claimRegistryAddress
-    ? {
-        registryClient: new ClaimRegistryClient(
-          agentClients.publicClient,
-          agentClients.walletClient,
-          claimRegistryAddress as `0x${string}`,
-          safeAddress,
-        ),
-        marketplaceClaimer: adapter,
-      }
-    : undefined;
-
-  if (claimRegistryAddress) {
-    console.log(`[main] ClaimRegistry: ${claimRegistryAddress}`);
-  } else {
-    console.log('[main] ClaimRegistry: not configured (claim step will use NotImplementedError fallback)');
-  }
-
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
   //
   // When the bootstrap has minted an ERC-8004 IdentityRegistry NFT for the
@@ -1192,8 +1162,8 @@ export async function main(): Promise<DaemonStartupInfo | void> {
     agentEoa: agentEoaAddress,
     safeAddress,
     agentPrivateKey,
-    predictionV0WindowMs: config.predictionV0WindowMs,
-    predictionV0ResolveGapMs: config.predictionV0ResolveGapMs,
+    predictionV1WindowMs: config.predictionV1WindowMs,
+    predictionV1ResolveGapMs: config.predictionV1ResolveGapMs,
   });
   for (const line of autoTaskLogLines) {
     console.log(line);
@@ -1259,7 +1229,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
       testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
       testnetMechDeploymentPath: config.testnetMechDeploymentPath,
       testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-      testnetClaimRegistryDeploymentPath: config.testnetClaimRegistryDeploymentPath,
       engine: config.engine,
     },
     rewardClaim:
@@ -1301,7 +1270,6 @@ export async function main(): Promise<DaemonStartupInfo | void> {
         workingDirRoot: config.engine.workingDirRoot,
         implStateDirRoot: config.engine.implStateDirRoot,
       },
-      claimDeps,
       packagingDeps,
       envelopeDeps,
       deliveryDeps,

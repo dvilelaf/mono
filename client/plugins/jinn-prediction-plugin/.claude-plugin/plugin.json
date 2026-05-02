@@ -1,9 +1,9 @@
 {
   "name": "jinn-prediction-plugin",
   "version": "0.1.0",
-  "description": "Prediction SolverPlugin for prediction.v0 tasks.",
+  "description": "Prediction SolverPlugin for prediction.v1 tasks.",
   "jinn": {
-    "solverType": "prediction.v0",
+    "solverType": "prediction.v1",
     "schemas": {
       "task": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12,7 +12,7 @@
         "properties": {
           "id": { "type": "string" },
           "description": { "type": "string" },
-          "solverType": { "const": "prediction.v0" },
+          "solverType": { "const": "prediction.v1" },
           "role": { "enum": ["restoration", "evaluation"] },
           "spec": {
             "type": "object",

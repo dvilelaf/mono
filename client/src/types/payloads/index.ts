@@ -4,8 +4,8 @@ import {
   PortfolioV0VerdictPayloadSchema,
 } from './portfolio-v0.js';
 import {
-  PredictionV0RestorationPayloadSchema,
-  PredictionV0VerdictPayloadSchema,
+  PredictionV1RestorationPayloadSchema,
+  PredictionV1VerdictPayloadSchema,
 } from './prediction-v0.js';
 import {
   PredictionApyV0RestorationPayloadSchema,
@@ -28,9 +28,9 @@ export const SOLVER_TYPE_PAYLOADS: Record<string, Record<Role, z.ZodSchema>> = {
     restoration: PortfolioV0RestorationPayloadSchema,
     verdict: PortfolioV0VerdictPayloadSchema,
   },
-  'prediction.v0': {
-    restoration: PredictionV0RestorationPayloadSchema,
-    verdict: PredictionV0VerdictPayloadSchema,
+  'prediction.v1': {
+    restoration: PredictionV1RestorationPayloadSchema,
+    verdict: PredictionV1VerdictPayloadSchema,
   },
   'prediction.apy.v0': {
     restoration: PredictionApyV0RestorationPayloadSchema,

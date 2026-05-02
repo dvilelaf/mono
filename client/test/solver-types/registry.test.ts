@@ -3,7 +3,7 @@ import {
   SOLVER_TYPES,
   knownSolverTypes,
   unknownSolverTypeMessage,
-  PREDICTION_V0_KIND,
+  PREDICTION_V1_KIND,
   collectTestnetAutoTaskGenerators,
 } from '../../src/solver-types/index.js';
 
@@ -11,7 +11,7 @@ describe('SOLVER_TYPES manifest', () => {
   it('knownSolverTypes returns stable insertion order', () => {
     expect(knownSolverTypes()).toEqual([
       'portfolio.v0',
-      'prediction.v0',
+      'prediction.v1',
       'prediction.apy.v0',
       'learner-loop-test',
     ]);
@@ -72,13 +72,13 @@ describe('SOLVER_TYPES manifest', () => {
     expect(out.spec).not.toHaveProperty('kind');
   });
 
-  it('prediction.v0 parseSpec works without readCurrent when threshold is not a current[±…] sentinel', async () => {
+  it('prediction.v1 parseSpec works without readCurrent when threshold is not a current[±…] sentinel', async () => {
     const raw = {
       id: 'p-1',
       description: 'x',
       window: { startTs: 1, endTs: 120_000 },
       spec: {
-        kind: PREDICTION_V0_KIND,
+        kind: PREDICTION_V1_KIND,
         oracle: {
           venue: 'chainlink-base-sepolia',
           feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1',
@@ -88,17 +88,17 @@ describe('SOLVER_TYPES manifest', () => {
       },
       eligibility: {},
     };
-    const out = await SOLVER_TYPES['prediction.v0']!.parseSpec(raw);
+    const out = await SOLVER_TYPES['prediction.v1']!.parseSpec(raw);
     expect(out.spec).not.toHaveProperty('kind');
   });
 
-  it('prediction.v0 parseSpec requires readCurrent for current[±…] threshold sentinel', async () => {
+  it('prediction.v1 parseSpec requires readCurrent for current[±…] threshold sentinel', async () => {
     const raw = {
       id: 'p-1',
       description: 'x',
       window: { startTs: 1, endTs: 120_000 },
       spec: {
-        kind: PREDICTION_V0_KIND,
+        kind: PREDICTION_V1_KIND,
         oracle: {
           venue: 'chainlink-base-sepolia',
           feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1',
@@ -108,16 +108,16 @@ describe('SOLVER_TYPES manifest', () => {
       },
       eligibility: {},
     };
-    await expect(SOLVER_TYPES['prediction.v0']!.parseSpec(raw)).rejects.toThrow(/readCurrent/);
+    await expect(SOLVER_TYPES['prediction.v1']!.parseSpec(raw)).rejects.toThrow(/readCurrent/);
   });
 
-  it('prediction.v0 parseSpec resolves with readCurrent', async () => {
+  it('prediction.v1 parseSpec resolves with readCurrent', async () => {
     const raw = {
       id: 'p-1',
       description: 'x',
       window: { startTs: 1, endTs: 120_000 },
       spec: {
-        kind: PREDICTION_V0_KIND,
+        kind: PREDICTION_V1_KIND,
         oracle: {
           venue: 'chainlink-base-sepolia',
           feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1',
@@ -127,7 +127,7 @@ describe('SOLVER_TYPES manifest', () => {
       },
       eligibility: {},
     };
-    const out = await SOLVER_TYPES['prediction.v0']!.parseSpec(raw, {
+    const out = await SOLVER_TYPES['prediction.v1']!.parseSpec(raw, {
       readCurrent: vi.fn(async () => '999'),
     });
     expect(out.spec).not.toHaveProperty('kind');
@@ -141,8 +141,8 @@ describe('SOLVER_TYPES manifest', () => {
       env: { ...process.env, JINN_ENABLE_APY_AUTO_TASKS: '1' },
     });
     expect(generators.length).toBe(2);
-    expect(generators.map((g) => g.solverType)).toEqual(['prediction.v0', 'prediction.apy.v0']);
-    expect(logLines.some((l) => l.includes('prediction.v0'))).toBe(true);
+    expect(generators.map((g) => g.solverType)).toEqual(['prediction.v1', 'prediction.apy.v0']);
+    expect(logLines.some((l) => l.includes('prediction.v1'))).toBe(true);
     expect(logLines.some((l) => l.includes('prediction.apy.v0'))).toBe(true);
   });
 });

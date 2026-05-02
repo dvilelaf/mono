@@ -43,6 +43,8 @@ export class ConcurrentTransitionError extends Error {
 export const TASK_RUNS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS task_runs (
   request_id              TEXT PRIMARY KEY,
+  task_id                 TEXT,
+  attempt_index           INTEGER,
   task_cid              TEXT NOT NULL,
   onchain_creation_tx     TEXT NOT NULL,
   onchain_creation_block  INTEGER NOT NULL,
@@ -107,6 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_window_start_ts
 /** Input when first observing an task from an on-chain event. */
 export interface PersistedTaskRunInput {
   requestId: string;
+  taskId?: string;
+  attemptIndex?: number;
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
@@ -128,6 +132,8 @@ export interface PersistedTaskRunInput {
 /** Full persisted task row (all columns). */
 export interface PersistedTaskRun {
   requestId: string;
+  taskId: string | null;
+  attemptIndex: number | null;
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
@@ -216,6 +222,8 @@ export type TaskRunPatch = Partial<{
 
 interface RawRow {
   request_id: string;
+  task_id: string | null;
+  attempt_index: number | null;
   task_cid: string;
   onchain_creation_tx: string;
   onchain_creation_block: number;
@@ -266,6 +274,8 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
+    { column: 'task_id',             ddl: 'ALTER TABLE task_runs ADD COLUMN task_id TEXT' },
+    { column: 'attempt_index',       ddl: 'ALTER TABLE task_runs ADD COLUMN attempt_index INTEGER' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -296,6 +306,8 @@ function parseJson<T>(raw: string | null): T | null {
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
+    taskId: row.task_id,
+    attemptIndex: row.attempt_index,
     taskCid: row.task_cid,
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
@@ -349,16 +361,18 @@ export class TaskRunPersistence {
   insertDiscovered(input: PersistedTaskRunInput): void {
     this.db.prepare(`
       INSERT OR IGNORE INTO task_runs (
-        request_id, task_cid, onchain_creation_tx, onchain_creation_block,
+        request_id, task_id, attempt_index, task_cid, onchain_creation_tx, onchain_creation_block,
         solver_type, task_role, state, state_updated_at, window_start_ts, window_end_ts,
         task_payload
       ) VALUES (
-        @requestId, @taskCid, @onchainCreationTx, @onchainCreationBlock,
+        @requestId, @taskId, @attemptIndex, @taskCid, @onchainCreationTx, @onchainCreationBlock,
         @solverType, @taskRole, 'DISCOVERED', @now, @windowStartTs, @windowEndTs,
         @taskPayload
       )
     `).run({
       requestId: input.requestId,
+      taskId: input.taskId ?? null,
+      attemptIndex: input.attemptIndex ?? null,
       taskCid: input.taskCid,
       onchainCreationTx: input.onchainCreationTx,
       onchainCreationBlock: input.onchainCreationBlock,

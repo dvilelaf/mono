@@ -135,8 +135,6 @@ export const JinnConfigSchema = z.object({
   /** Optional Base Sepolia stOLAS deployment artifact path */
   testnetStolasDeploymentPath: z.string().optional(),
 
-  /** Optional Base Sepolia ClaimRegistry deployment artifact path */
-  testnetClaimRegistryDeploymentPath: z.string().optional(),
 
   /**
    * Optional deployment artifact for the v0 MVI L1 stack
@@ -149,7 +147,7 @@ export const JinnConfigSchema = z.object({
   /**
    * Optional deployment artifact for the v0 MVI L2 emitter
    * (deployment-jinn-mvi-l2-{network}.json). Provides the
-   * JinnClaimEmitter address on the measurement chain (Base / Base Sepolia).
+   * TaskClaimEmitter address on the measurement chain (Base / Base Sepolia).
    */
   jinnMviL2DeploymentPath: z.string().optional(),
 
@@ -188,7 +186,7 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * JinnClaimEmitter address on the L2 measurement chain (Base / Base
+   * TaskClaimEmitter address on the L2 measurement chain (Base / Base
    * Sepolia). Resolved from jinnMviL2DeploymentPath when omitted.
    * Env: JINN_CLAIM_EMITTER_ADDRESS.
    */
@@ -267,18 +265,18 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * prediction.v0 auto-generator submission window (ms). Default 600000 (10 min).
+   * prediction.v1 auto-generator submission window (ms). Default 600000 (10 min).
    * Docker acceptance gate sets 120000 to keep cycles tight.
-   * Env: JINN_PREDICTION_V0_WINDOW_MS
+   * Env: JINN_PREDICTION_V1_WINDOW_MS
    */
-  predictionV0WindowMs: z.number().int().positive().optional(),
+  predictionV1WindowMs: z.number().int().positive().optional(),
 
   /**
-   * prediction.v0 auto-generator gap from window end → resolveTs (ms).
+   * prediction.v1 auto-generator gap from window end → resolveTs (ms).
    * Default 300000 (5 min). Docker acceptance gate sets 60000.
-   * Env: JINN_PREDICTION_V0_RESOLVE_GAP_MS
+   * Env: JINN_PREDICTION_V1_RESOLVE_GAP_MS
    */
-  predictionV0ResolveGapMs: z.number().int().positive().optional(),
+  predictionV1ResolveGapMs: z.number().int().positive().optional(),
 
   /**
    * Operator-controlled Harness inventory.
@@ -345,7 +343,7 @@ export const JinnConfigSchema = z.object({
   })).default({
     prediction: {
       enabled: true,
-      solverType: 'prediction.v0',
+      solverType: 'prediction.v1',
       canonicalPlugin: 'bundled:jinn-prediction-plugin',
       harness: 'claude-code-learner',
       plugins: [],
@@ -518,14 +516,14 @@ function timestampForBackup(date = new Date()): string {
 }
 
 function solverNetSlugFor(solverType: string): string {
-  if (solverType === 'prediction.v0') return 'prediction';
+  if (solverType === 'prediction.v1') return 'prediction';
   if (solverType === 'prediction.apy.v0') return 'prediction-apy';
   if (solverType === 'portfolio.v0') return 'portfolio';
   return solverType.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
 }
 
 function defaultCanonicalPluginFor(solverType: string): string {
-  if (solverType === 'prediction.v0') return 'bundled:jinn-prediction-plugin';
+  if (solverType === 'prediction.v1') return 'bundled:jinn-prediction-plugin';
   return `bundled:${solverType.replace(/[^a-zA-Z0-9._-]+/g, '-')}-plugin`;
 }
 
@@ -593,8 +591,8 @@ export function migrateHarnessConfigFileValues(
   if (!solverNets['prediction']) {
     solverNets['prediction'] = {
       enabled: true,
-      solverType: 'prediction.v0',
-      canonicalPlugin: normalizeSolverNetPlugin(undefined, 'prediction.v0'),
+      solverType: 'prediction.v1',
+      canonicalPlugin: normalizeSolverNetPlugin(undefined, 'prediction.v1'),
       harness: 'claude-code-learner',
       plugins: [],
       taskGenerator: { enabled: true },
@@ -677,9 +675,6 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_TESTNET_L2_DEPLOYMENT']) merged.testnetL2DeploymentPath = env['JINN_TESTNET_L2_DEPLOYMENT'];
   if (env['JINN_TESTNET_TOKEN_DEPLOYMENT']) merged.testnetL2TokenDeploymentPath = env['JINN_TESTNET_TOKEN_DEPLOYMENT'];
   if (env['JINN_TESTNET_MECH_DEPLOYMENT']) merged.testnetMechDeploymentPath = env['JINN_TESTNET_MECH_DEPLOYMENT'];
-  if (env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT']) {
-    merged.testnetClaimRegistryDeploymentPath = env['JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT'];
-  }
   if (env['JINN_MVI_L1_DEPLOYMENT']) merged.jinnMviL1DeploymentPath = env['JINN_MVI_L1_DEPLOYMENT'];
   if (env['JINN_MVI_L2_DEPLOYMENT']) merged.jinnMviL2DeploymentPath = env['JINN_MVI_L2_DEPLOYMENT'];
   if (env['JINN_ETHEREUM_RPC_URL']) merged.ethereumRpcUrl = env['JINN_ETHEREUM_RPC_URL'];
@@ -715,13 +710,13 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
   }
-  if (env['JINN_PREDICTION_V0_WINDOW_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V0_WINDOW_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV0WindowMs = parsed;
+  if (env['JINN_PREDICTION_V1_WINDOW_MS']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_WINDOW_MS'].trim());
+    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1WindowMs = parsed;
   }
-  if (env['JINN_PREDICTION_V0_RESOLVE_GAP_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV0ResolveGapMs = parsed;
+  if (env['JINN_PREDICTION_V1_RESOLVE_GAP_MS']) {
+    const parsed = Number(env['JINN_PREDICTION_V1_RESOLVE_GAP_MS'].trim());
+    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1ResolveGapMs = parsed;
   }
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
@@ -871,7 +866,6 @@ const TRACKED_ENV_VARS = [
   'JINN_TESTNET_L2_DEPLOYMENT',
   'JINN_TESTNET_TOKEN_DEPLOYMENT',
   'JINN_TESTNET_MECH_DEPLOYMENT',
-  'JINN_TESTNET_CLAIM_REGISTRY_DEPLOYMENT',
   'JINN_L2_PROOF_RPC_URL',
   'JINN_MVI_L1_DEPLOYMENT',
   'JINN_MVI_L2_DEPLOYMENT',
@@ -890,8 +884,8 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
-  'JINN_PREDICTION_V0_WINDOW_MS',
-  'JINN_PREDICTION_V0_RESOLVE_GAP_MS',
+  'JINN_PREDICTION_V1_WINDOW_MS',
+  'JINN_PREDICTION_V1_RESOLVE_GAP_MS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',
