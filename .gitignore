@@ -11,3 +11,12 @@ node_modules/
 
 # Per-operator dev helpers (not collaborative)
 client/start-daemon.sh
+
+# macOS
+.DS_Store
+
+# Growth recruitment materials (not collaborative / contains PII)
+growth/docs/initial-network-recruitment/
+growth/docs/Initial Network Recruitment-handoff.zip
+growth/docs/Intro to Jinn*.pdf
+growth/skills/
