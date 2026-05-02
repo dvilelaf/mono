@@ -38,7 +38,7 @@ describe('runCreate (forecaster pattern)', () => {
 
     const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
     expect(pkg.name).toBe('@example/test-forecaster');
-    expect(pkg.dependencies['@jinn-network/harness-sdk']).toBeTruthy();
+    expect(pkg.dependencies['@jinn-network/sdk']).toBe('^0.1.0');
 
     const manifest = JSON.parse(
       readFileSync(join(pkgRoot, 'jinn.manifest.json'), 'utf8'),

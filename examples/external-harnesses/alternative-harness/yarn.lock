@@ -179,15 +179,15 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-examples/alternative-harness@workspace:."
   dependencies:
-    "@jinn-network/harness-sdk": "portal:../../../packages/harness-sdk"
+    "@jinn-network/sdk": "portal:../../../packages/sdk"
     typescript: "npm:^5.4.0"
     vitest: "npm:^2.1.9"
   languageName: unknown
   linkType: soft
 
-"@jinn-network/harness-sdk@portal:../../../packages/harness-sdk::locator=%40jinn-examples%2Falternative-harness%40workspace%3A.":
+"@jinn-network/sdk@portal:../../../packages/sdk::locator=%40jinn-examples%2Falternative-harness%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/harness-sdk@portal:../../../packages/harness-sdk::locator=%40jinn-examples%2Falternative-harness%40workspace%3A."
+  resolution: "@jinn-network/sdk@portal:../../../packages/sdk::locator=%40jinn-examples%2Falternative-harness%40workspace%3A."
   languageName: node
   linkType: soft
 

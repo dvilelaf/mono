@@ -1,6 +1,7 @@
+import type { SolverPluginManifest } from './types.js';
+
 import * as AjvModule from 'ajv/dist/2020.js';
 import * as addFormatsModule from 'ajv-formats';
-import type { SolverPluginManifest } from './types.js';
 
 const AjvCtor = ((AjvModule as unknown as { default?: unknown }).default ?? AjvModule) as new (
   opts: Record<string, unknown>,
@@ -32,14 +33,12 @@ export function validateSolverPluginManifest(input: unknown): SolverPluginManife
   }
   const jinn = input['jinn'];
   assertRecord(jinn, 'manifest.jinn');
-  if (typeof jinn['solverType'] !== 'string' || jinn['solverType'].length === 0) {
-    throw new Error('manifest.jinn.solverType is required');
+  if ('solverType' in jinn || 'schemas' in jinn) {
+    throw new Error('SolverNet contracts own canonical solverType and schemas; plugin manifests must declare manifest.jinn.supports only');
   }
-  const schemas = jinn['schemas'];
-  assertRecord(schemas, 'manifest.jinn.schemas');
-  for (const name of ['task', 'solution', 'verdict'] as const) {
-    assertRecord(schemas[name], `manifest.jinn.schemas.${name}`);
-    ajv.compile(schemas[name]);
+  const supports = jinn['supports'];
+  if (!Array.isArray(supports) || supports.length === 0 || supports.some((item) => typeof item !== 'string' || item.length === 0)) {
+    throw new Error('manifest.jinn.supports must be a non-empty string array');
   }
   return input as unknown as SolverPluginManifest;
 }

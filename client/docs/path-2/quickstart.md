@@ -26,7 +26,7 @@ The scaffolder asks three questions if you don't pass them as flags: pattern (fo
 
 ```
 @yourname/your-package/
-├── package.json                # depends on @jinn-network/harness-sdk
+├── package.json                # depends on @jinn-network/sdk/harness
 ├── jinn.manifest.json          # signed at publish time
 ├── src/
 │   └── index.ts                # default-exports the factory
@@ -55,7 +55,7 @@ The scaffolded `src/index.ts` exports a factory matching the chosen pattern's sk
 The default-export shape (per `spec/2026-05-external-harnesses.md` §3.2):
 
 ```ts
-import type { Harness, ExternalHarnessEnv } from '@jinn-network/harness-sdk';
+import type { Harness, ExternalHarnessEnv } from '@jinn-network/sdk/harness';
 
 export default function createHarness(env: ExternalHarnessEnv): Harness {
   return {
@@ -108,6 +108,6 @@ Restart the daemon. At boot, the loader walks `harnesses.externalImpls`, dynamic
 
 ## Next
 
-- [sdk-reference.md](./sdk-reference.md) — the full `@jinn-network/harness-sdk` surface.
+- [sdk-reference.md](./sdk-reference.md) — the full `@jinn-network/sdk/harness` surface.
 - [publishing.md](./publishing.md) — manifest signing, IPFS publish, CI config.
 - [patterns/](./patterns/README.md) — three worked-pattern walkthroughs.

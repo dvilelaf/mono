@@ -2,6 +2,7 @@ import type { JinnConfig } from '../config.js';
 import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
+import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export interface SolverNetConfig {
   enabled: boolean;
@@ -16,6 +17,7 @@ export interface LoadedSolverNet {
   name: string;
   enabled: boolean;
   solverType: string;
+  contract: SolverNetContract;
   harness: string;
   canonicalPlugin: RuntimePlugin;
   plugins: RuntimePlugin[];
@@ -30,6 +32,7 @@ function runtimePluginFrom(
     name: plugin.name,
     version: plugin.version,
     solverType: plugin.solverType,
+    supports: plugin.supports,
     root: plugin.root,
     manifestPath: plugin.manifestPath,
     sha256: plugin.sha256,
@@ -72,18 +75,23 @@ export async function loadSolverNets(
   const registry = new SolverNetRegistry();
   for (const [name, net] of Object.entries(config.solverNets)) {
     if (!net.enabled) continue;
-    const canonical = await resolveSolverPlugin(net.canonicalPlugin);
-    if (canonical.solverType !== net.solverType) {
+    const contract = getSolverNetContract(net.solverType);
+    if (!contract) {
+      throw new Error(`SolverNet ${name} has no registered SolverNetContract for ${net.solverType}`);
+    }
+    const canonicalEntry = net.canonicalPlugin ?? contract.referencePlugins[0];
+    const canonical = await resolveSolverPlugin(canonicalEntry);
+    if (!canonical.supports.includes(net.solverType)) {
       throw new Error(
-        `SolverNet ${name} solverType mismatch: config=${net.solverType} plugin=${canonical.solverType}`,
+        `SolverNet ${name} solverType mismatch: config=${net.solverType} plugin supports=${canonical.supports.join(',')}`,
       );
     }
     const extras = [];
     for (const entry of net.plugins) {
       const plugin = await resolveSolverPlugin(entry);
-      if (plugin.solverType !== net.solverType) {
+      if (!plugin.supports.includes(net.solverType)) {
         throw new Error(
-          `SolverNet ${name} extra plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin=${plugin.solverType}`,
+          `SolverNet ${name} extra plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
         );
       }
       extras.push(runtimePluginFrom(plugin, 'extra'));
@@ -92,6 +100,7 @@ export async function loadSolverNets(
       name,
       enabled: net.enabled,
       solverType: net.solverType,
+      contract,
       harness: net.harness,
       canonicalPlugin: runtimePluginFrom(canonical, 'canonical'),
       plugins: extras,

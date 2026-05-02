@@ -1,5 +1,3 @@
-import type { JSONSchemaType } from 'ajv';
-
 export type SolverPluginSourceKind =
   | 'bundled'
   | 'local'
@@ -21,12 +19,8 @@ export interface SolverPluginManifest {
   version: string;
   description?: string;
   jinn: {
-    solverType: string;
-    schemas: {
-      task: JSONSchemaType<unknown> | Record<string, unknown>;
-      solution: JSONSchemaType<unknown> | Record<string, unknown>;
-      verdict: JSONSchemaType<unknown> | Record<string, unknown>;
-    };
+    supports: string[];
+    capabilities?: Record<string, unknown>;
     mcpServers?: Record<string, unknown>;
     skills?: string[];
   };
@@ -36,7 +30,8 @@ export interface SolverPluginManifest {
 export interface LoadedSolverPlugin {
   name: string;
   version: string;
-  solverType: string;
+  supports: string[];
+  solverType?: string;
   source: string;
   sourceKind: SolverPluginSourceKind;
   root: string;

@@ -86,7 +86,8 @@ export async function resolveSolverPlugin(
   return {
     name: entryName(entry, manifest.name),
     version: manifest.version,
-    solverType: manifest.jinn.solverType,
+    supports: manifest.jinn.supports,
+    solverType: manifest.jinn.supports[0],
     source,
     sourceKind: kind,
     root,

@@ -1,7 +1,7 @@
 import type { Task } from '../types/task.js';
 
-/** Returns a freshly-built Task for this tick, or null to skip. */
-export type TaskGenerator = () => Promise<Task | null>;
+/** Returns freshly-built Tasks for this tick, or null to skip. */
+export type TaskGenerator = () => Promise<Task | Task[] | null>;
 
 export type TaskPostingPolicy =
   | { kind: 'once_per_safe' }
@@ -53,20 +53,23 @@ export class GeneratedTaskSource implements TaskSource {
   ) {}
 
   async collect(_now: Date): Promise<TaskCandidate[]> {
-    const task = await this.generator();
-    if (!task) return [];
-    const bucketKey = task.window
-      ? `${task.window.startTs}:${task.window.endTs}`
-      : task.id;
-    return [{
-      task,
-      sourceKey: this.sourceKey,
-      postingPolicy: { kind: 'once_per_bucket', bucketKey },
-      sourceMeta: {
-        solverType: task.solverType,
-        bucketKey,
-        note: 'generated',
-      },
-    }];
+    const generated = await this.generator();
+    if (!generated) return [];
+    const tasks = Array.isArray(generated) ? generated : [generated];
+    return tasks.map((task) => {
+      const bucketKey = task.window
+        ? `${task.window.startTs}:${task.window.endTs}`
+        : task.id;
+      return {
+        task,
+        sourceKey: this.sourceKey,
+        postingPolicy: { kind: 'once_per_bucket' as const, bucketKey },
+        sourceMeta: {
+          solverType: task.solverType,
+          bucketKey,
+          note: 'generated',
+        },
+      };
+    });
   }
 }

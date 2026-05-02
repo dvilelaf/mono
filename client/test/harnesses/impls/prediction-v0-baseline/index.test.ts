@@ -69,12 +69,12 @@ describe('PredictionV1BaselineImpl', () => {
     expect(out.informational?.oracleSnapshot).toMatchObject({ feed: expect.any(String), answer: expect.any(String) });
   });
 
-  it('populates solutionPayload matching PredictionV1RestorationPayloadSchema', async () => {
-    const { PredictionV1RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
+  it('populates solutionPayload matching PredictionV0RestorationPayloadSchema', async () => {
+    const { PredictionV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
     const impl = new PredictionV1BaselineImpl({ _testDeps: stubDeps('3600') });
     const out = await impl.run(makeCtx());
     expect(out.solutionPayload).toBeDefined();
-    const parsed = PredictionV1RestorationPayloadSchema.safeParse(out.solutionPayload);
+    const parsed = PredictionV0RestorationPayloadSchema.safeParse(out.solutionPayload);
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.prediction.probability).toBe('0.55');

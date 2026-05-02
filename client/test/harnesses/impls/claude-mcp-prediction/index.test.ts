@@ -92,10 +92,10 @@ describe('ClaudeMcpPredictionImpl (mocked session)', () => {
     expect(payload.rationale).toBe('Current price suggests upside');
     expect(payload.modelId).toContain('claude-mcp-prediction');
 
-    // solutionPayload must match PredictionV1RestorationPayloadSchema
-    const { PredictionV1RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
+    // solutionPayload must match PredictionV0RestorationPayloadSchema
+    const { PredictionV0RestorationPayloadSchema } = await import('../../../../src/types/payloads/prediction-v0.js');
     expect(out.solutionPayload).toBeDefined();
-    const parsed = PredictionV1RestorationPayloadSchema.safeParse(out.solutionPayload);
+    const parsed = PredictionV0RestorationPayloadSchema.safeParse(out.solutionPayload);
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.prediction.probability).toBe('0.6200');

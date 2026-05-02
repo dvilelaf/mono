@@ -1,6 +1,6 @@
-# Path 2 SDK reference (`@jinn-network/harness-sdk`)
+# Path 2 SDK reference (`@jinn-network/sdk/harness`)
 
-Field-by-field reference for the public surface external Harness authors target. The canonical source is `packages/harness-sdk/src/`; this doc is a derivation. If this doc and the source disagree, the source wins.
+Field-by-field reference for the public surface external Harness authors target. The canonical source is `packages/sdk/src/`; this doc is a derivation. If this doc and the source disagree, the source wins.
 
 ## Stability commitment
 
@@ -9,13 +9,13 @@ Per `spec/2026-04-30-plug-in-surface.md` §3.1 and `spec/2026-05-external-harnes
 - The SDK follows strict semver. Breaking changes to a re-exported type, a function signature, or an enumerated value MUST land as a major bump.
 - Minor bumps are additive only. A new field on `ExternalHarnessEnv`, a new optional method on `Harness`, a new capability handle on `HarnessContext` ships as a minor; pre-existing Harnesses keep loading unchanged.
 - **12-week deprecation window.** From the day a major lands on npm, the prior major remains supported for 12 weeks. During the window, the daemon accepts manifests declaring either major; after the window, only the new major loads.
-- Deprecations announced in `packages/harness-sdk/CHANGELOG.md`, in a `console.warn` line in the daemon's load path, and in the maintainer revocation-list metadata.
+- Deprecations announced in `packages/sdk/CHANGELOG.md`, in a `console.warn` line in the daemon's load path, and in the maintainer revocation-list metadata.
 
-External Harness authors depend on `@jinn-network/harness-sdk`, **not** on `@jinn-network/client` directly.
+External Harness authors depend on `@jinn-network/sdk/harness`, **not** on `@jinn-network/client` directly.
 
 ## `Harness`
 
-The interface every harness (and evaluator) implements. Source: `packages/harness-sdk/src/index.ts`.
+The interface every harness (and evaluator) implements. Source: `packages/sdk/src/index.ts`.
 
 ```ts
 export interface Harness {
@@ -58,7 +58,7 @@ export default function createHarness(env: ExternalHarnessEnv): Harness {
 
 ## `HarnessContext`
 
-Passed to `run()` for every attempt. Source: `packages/harness-sdk/src/index.ts`.
+Passed to `run()` for every attempt. Source: `packages/sdk/src/index.ts`.
 
 ```ts
 export interface HarnessContext {
@@ -230,4 +230,4 @@ Throw `SkippableError` from `run()` when you cannot solve a Task for a structura
 
 ## Generated from source
 
-This doc tracks `packages/harness-sdk/src/`. When you add a new public type to the SDK, edit the source first; this doc follows. If you find a discrepancy, treat the source as authoritative and file a doc patch.
+This doc tracks `packages/sdk/src/`. When you add a new public type to the SDK, edit the source first; this doc follows. If you find a discrepancy, treat the source as authoritative and file a doc patch.

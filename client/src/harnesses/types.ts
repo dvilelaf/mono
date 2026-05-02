@@ -13,6 +13,7 @@ export interface RuntimePlugin {
   name: string;
   version: string;
   solverType?: string;
+  supports?: string[];
   root: string;
   manifestPath: string;
   sha256: string;

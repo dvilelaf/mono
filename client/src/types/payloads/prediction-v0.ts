@@ -1,5 +1,5 @@
 /**
- * prediction.v1 payloads — restoration + verdict, for use inside
+ * prediction.v0 payloads — restoration + verdict, for use inside
  * jinn.execution.v1 envelopes.
  */
 
@@ -9,7 +9,7 @@ const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefi
 
 // ── Restoration payload ───────────────────────────────────────────────────────
 
-export const PredictionV1RestorationPayloadSchema = z.object({
+export const PredictionV0RestorationPayloadSchema = z.object({
   prediction: z.object({
     probability: z.string().regex(/^(0(\.\d+)?|1(\.0+)?)$/, 'must be a decimal in [0,1]'),
     submittedAt: z.number().int(),
@@ -33,7 +33,7 @@ export const PredictionV1RestorationPayloadSchema = z.object({
     .optional(),
 });
 
-export type PredictionV1RestorationPayload = z.infer<typeof PredictionV1RestorationPayloadSchema>;
+export type PredictionV0RestorationPayload = z.infer<typeof PredictionV0RestorationPayloadSchema>;
 
 // ── Verdict payload ───────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ const VerificationOfRestorationSchema = z.object({
   overall: z.enum(['valid', 'invalid']),
 });
 
-export const PredictionV1VerdictPayloadSchema = z.object({
+export const PredictionV0VerdictPayloadSchema = z.object({
   restorationEnvelope: z.object({
     cid: z.string().min(1),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -84,9 +84,4 @@ export const PredictionV1VerdictPayloadSchema = z.object({
   checks: z.array(CheckSchema),
 });
 
-export type PredictionV1VerdictPayload = z.infer<typeof PredictionV1VerdictPayloadSchema>;
-
-export const PredictionV0RestorationPayloadSchema = PredictionV1RestorationPayloadSchema;
-export const PredictionV0VerdictPayloadSchema = PredictionV1VerdictPayloadSchema;
-export type PredictionV0RestorationPayload = PredictionV1RestorationPayload;
-export type PredictionV0VerdictPayload = PredictionV1VerdictPayload;
+export type PredictionV0VerdictPayload = z.infer<typeof PredictionV0VerdictPayloadSchema>;

@@ -23,7 +23,7 @@ import {
   PredictionV1TaskSchema,
 } from '../../../types/prediction.js';
 import { SignedEnvelopeSchema } from '../../../types/envelope.js';
-import { PredictionV1RestorationPayloadSchema, type PredictionV1RestorationPayload } from '../../../types/payloads/prediction-v0.js';
+import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
 import {
   oraclePriceAtResolveTs,
   scaleToDecimal,
@@ -116,7 +116,7 @@ export class PredictionV1Evaluator implements Harness {
         `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v1/restoration`,
       );
     }
-    const payload: PredictionV1RestorationPayload = PredictionV1RestorationPayloadSchema.parse(envelope.payload);
+    const payload: PredictionV0RestorationPayload = PredictionV0RestorationPayloadSchema.parse(envelope.payload);
 
     // 3. Fetch Chainlink spanning round
     let spanning: SpanningResult;

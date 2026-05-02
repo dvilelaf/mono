@@ -1,4 +1,4 @@
-import type { ExternalHarnessEnv } from '@jinn-network/harness-sdk';
+import type { ExternalHarnessEnv } from '@jinn-network/sdk';
 import type { HarnessAdapter, HarnessPromptArgs } from './harness.js';
 
 /**
