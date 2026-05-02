@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/sdk",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Stable SDK surface for Jinn SolverNets, Harnesses, plugins, and typed payloads.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -39,7 +39,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "yarn build && yarn test",
+    "pack:smoke": "yarn pack -o jinn-sdk.tgz && node scripts/smoke-test-pack.mjs",
+    "release:sdk": "node scripts/release-sdk.mjs"
   },
   "dependencies": {
     "zod": "^3.22.0"

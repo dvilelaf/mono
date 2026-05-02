@@ -1,30 +1,28 @@
-name: npm Publish
+name: SDK npm Publish
 
 on:
   push:
     branches: [main]
-    paths: ['client/**']
+    paths: ['packages/sdk/**']
   release:
     types: [published]
 
-# Trusted publishing (OIDC): register this single workflow on npmjs for
-# @jinn-network/client. npm allows one trusted publisher config per package.
+# Trusted publishing (OIDC): register this workflow on npmjs for
+# @jinn-network/sdk.
 permissions:
   contents: read
   id-token: write
 
 defaults:
   run:
-    working-directory: client
+    working-directory: packages/sdk
 
 jobs:
   publish:
-    name: Publish package
-    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v')
+    name: Publish SDK package
+    if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'sdk-v')
     runs-on: ubuntu-latest
     environment: npm-publish
-    env:
-      JINN_BUILD_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v5
 
@@ -35,10 +33,6 @@ jobs:
       - run: npm install -g npm@11.5.1
       - run: corepack enable
       - run: yarn install --immutable
-      # Keep the publish test environment aligned with CI. Some client unit
-      # tests spawn a local Anvil fork and fail with `spawn anvil ENOENT`
-      # unless Foundry is installed.
-      - uses: foundry-rs/foundry-toolchain@v1
 
       - name: Resolve publish metadata
         id: meta
@@ -53,17 +47,17 @@ jobs:
           else
             RELEASE_TAG="${{ github.event.release.tag_name }}"
             case "${RELEASE_TAG}" in
-              client-v*)
-                PUBLISH_VERSION="${RELEASE_TAG#client-v}"
+              sdk-v*)
+                PUBLISH_VERSION="${RELEASE_TAG#sdk-v}"
                 ;;
               *)
-                echo "::error::Stable client releases must use tags shaped like client-vX.Y.Z"
-                exit 1
+                echo "::notice::Skipping non-SDK release tag ${RELEASE_TAG}"
+                exit 0
                 ;;
             esac
 
             if [ "${PUBLISH_VERSION}" != "${PACKAGE_VERSION}" ]; then
-              echo "::error::Release tag version ${PUBLISH_VERSION} does not match client/package.json version ${PACKAGE_VERSION}"
+              echo "::error::Release tag version ${PUBLISH_VERSION} does not match packages/sdk/package.json version ${PACKAGE_VERSION}"
               exit 1
             fi
 
@@ -84,8 +78,9 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
-      - run: yarn build
+      - run: yarn typecheck
       - run: yarn test
+      - run: yarn build
 
       - name: Publish canary
         if: steps.meta.outputs.dist_tag == 'canary'
