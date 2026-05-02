@@ -7,7 +7,7 @@
  *   span[2] — jinn.artifact.emit (links to span[1])
  *
  * Each span carries the required jinn.prevSpanHash set according to the
- * hash-chain rules: span[0].prevSpanHash = computeGenesisHash(intentCid),
+ * hash-chain rules: span[0].prevSpanHash = computeGenesisHash(taskCid),
  * span[n].prevSpanHash = computePrevSpanHash(span[n-1]).
  *
  * The trajectory fixture is intentionally NOT signed — conformance checks
@@ -18,12 +18,16 @@ import { computeGenesisHash, computePrevSpanHash } from '../../../src/trajectory
 import type { JinnTrajectoryV1 } from '../../../src/trajectory/schema.js';
 import type { Span } from '../../../src/trajectory/schema.js';
 
-// Stable test artifact CID for the emit span.
+// Stable test artifact identifiers for the emit span.
+// Post jinn-mono-vy37.1.2 the trajectory↔artifact linkage is keyed by sha256
+// (artifacts no longer carry IPFS CIDs). The legacy CID is retained as an
+// extra attribute only because some older tests still reference it.
 export const FIXTURE_ARTIFACT_CID = 'bafy-test-artifact-emit-001';
+export const FIXTURE_ARTIFACT_SHA256 = 'c'.repeat(64);
 export const FIXTURE_EMIT_SPAN_ID = 'eeee000000000001';
 
-export function buildGoodTrajectoryFixture(intentCid: string): JinnTrajectoryV1 {
-  const genesis = computeGenesisHash(intentCid);
+export function buildGoodTrajectoryFixture(taskCid: string): JinnTrajectoryV1 {
+  const genesis = computeGenesisHash(taskCid);
 
   // span[0] — jinn.phase
   const span0: Span = {
@@ -82,7 +86,7 @@ export function buildGoodTrajectoryFixture(intentCid: string): JinnTrajectoryV1 
       'jinn.prevSpanHash': prevHash2,
       'jinn.artifact.cid': FIXTURE_ARTIFACT_CID,
       'jinn.artifact.artifactType': 'output.portfolio.v0',
-      'jinn.artifact.sha256': 'a'.repeat(64),
+      'jinn.artifact.sha256': FIXTURE_ARTIFACT_SHA256,
     },
     events: [],
     status: { code: 'OK' },

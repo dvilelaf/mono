@@ -1,6 +1,6 @@
 # Jinn Network
 
-Monorepo for the Jinn protocol — a training protocol for agentic intents.
+Monorepo for the Jinn protocol — a training protocol for agentic tasks.
 Operators run a headless daemon that observes marketplace requests, executes
 them via Claude Code, and earns on-chain rewards for measured work.
 
@@ -14,19 +14,19 @@ TL;DR for human operators:
 ```bash
 npm install -g @jinn-network/client@latest
 jinn auth           # one-time: pick runtime mode + authenticate Claude
-jinn quickstart     # creates wallet, funds via CDP faucet, starts the daemon
+jinn run            # creates wallet, funds via CDP faucet, starts the daemon
 ```
 
 TL;DR for agent-assisted operators (Claude Code / Codex / Cursor / Gemini):
 
 ```bash
 npm install -g @jinn-network/client@latest
-jinn plugin install     # wires the jinn-operator skill + MCP into your agent
+jinn integrations install     # wires the jinn-operator skill + MCP into your agent
 ```
 
 Then open your agent and paste:
 
-> Set up a Jinn Network testnet operator on this machine. Run `jinn quickstart`,
+> Set up a Jinn Network testnet operator on this machine. Run `jinn run`,
 > fund the master address via CDP if needed, and report back when the daemon is
 > running. Keep me in the loop if anything needs my input.
 
@@ -40,7 +40,7 @@ source, and testing. [`CLAUDE.md`](CLAUDE.md) has the architecture overview.
 ## I want to read the protocol design
 
 - Phase 1a/1b design: [`spec/2026-04-06-phase-1a-design.md`](spec/2026-04-06-phase-1a-design.md)
-- Portfolio.v0 intent kind: [`spec/2026-04-17-portfolio-v0-design.md`](spec/2026-04-17-portfolio-v0-design.md)
+- Portfolio.v0 SolverType: [`spec/2026-04-17-portfolio-v0-design.md`](spec/2026-04-17-portfolio-v0-design.md)
 - Client CLI surface: [`spec/2026-04-14-client-surface.md`](spec/2026-04-14-client-surface.md)
 
 ## Monorepo layout

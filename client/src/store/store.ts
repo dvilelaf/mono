@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RESTORATION_INTENTS_SCHEMA } from '../restorer/engine/persistence.js';
+import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -9,7 +9,7 @@ export interface ActivityEventInput {
   requestId?: string | null;
   serviceIndex?: number | null;
   txHash?: string | null;
-  specKind?: string | null;
+  solverType?: string | null;
   outcome?: string | null;
   detail?: string | null;
 }
@@ -21,7 +21,7 @@ export interface ActivityEventRow {
   requestId: string | null;
   serviceIndex: number | null;
   txHash: string | null;
-  specKind: string | null;
+  solverType: string | null;
   outcome: string | null;
   detail: string | null;
 }
@@ -47,14 +47,66 @@ export interface BalanceCacheEntry {
   error?: string | null;
 }
 
-export type IntentPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
+export interface ServedArtifactInput {
+  sha256: string;
+  artifactType: string;
+  requestId?: string | null;
+  envelopeCid?: string | null;
+  content: Buffer;
+  priceUsdc: string;
+  createdAt: string;
+}
 
-export interface IntentPostRecord {
+export interface ServedArtifactRow {
+  sha256: string;
+  artifactType: string;
+  requestId: string | null;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  priceUsdc: string;
+  createdAt: string;
+}
+
+export type NetworkArtifactSource = 'origin' | 'route-resolver' | 'self-store-mirror';
+
+export interface NetworkArtifactInput {
+  sha256: string;
+  artifactType: string;
+  envelopeCid?: string | null;
+  content: Buffer;
+  source: NetworkArtifactSource;
+  sourceOperator?: string | null;
+  sourceEndpoint?: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  /** When set, links this blob to a row from the HTTP catalog / peer sync `artifacts.id`. */
+  peerCatalogId?: string | null;
+}
+
+export interface NetworkArtifactRow {
+  sha256: string;
+  artifactType: string;
+  envelopeCid: string | null;
+  content: Buffer;
+  contentSize: number;
+  source: NetworkArtifactSource;
+  sourceOperator: string | null;
+  sourceEndpoint: string | null;
+  paidAmountUsdc: string;
+  fetchedAt: string;
+  lastUsedAt: string;
+  peerCatalogId: string | null;
+}
+
+export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
+
+export interface TaskPostRecord {
   creatorSafeAddress: string;
   sourceKey: string;
-  policyType: IntentPostingPolicyType;
+  policyType: TaskPostingPolicyType;
   scopeKey: string;
-  desiredStateId: string;
+  taskId: string;
   requestId: string;
   firstPostedAt: string;
   lastPostedAt: string;
@@ -74,7 +126,7 @@ CREATE TABLE IF NOT EXISTS config (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
-  desired_state_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT,
@@ -87,7 +139,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (desired_state_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
 CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
@@ -98,7 +150,7 @@ CREATE TABLE IF NOT EXISTS activity_events (
   request_id TEXT,
   service_index INTEGER,
   tx_hash TEXT,
-  spec_kind TEXT,
+  solver_type TEXT,
   outcome TEXT,
   detail TEXT
 );
@@ -130,21 +182,53 @@ CREATE TABLE IF NOT EXISTS balance_cache (
   error TEXT
 );
 
-CREATE TABLE IF NOT EXISTS intent_posts (
+CREATE TABLE IF NOT EXISTS task_posts (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
   policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
   scope_key TEXT NOT NULL DEFAULT '',
-  desired_state_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   first_posted_at TEXT NOT NULL,
   last_posted_at TEXT NOT NULL,
   post_count INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
-CREATE INDEX IF NOT EXISTS idx_intent_posts_desired_state ON intent_posts (desired_state_id);
+CREATE INDEX IF NOT EXISTS idx_task_posts_task ON task_posts (task_id);
 
-CREATE TABLE IF NOT EXISTS intent_post_locks (
+CREATE TABLE IF NOT EXISTS served_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  request_id TEXT,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  price_usdc TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (request_id);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
+
+CREATE TABLE IF NOT EXISTS network_artifacts (
+  sha256 TEXT PRIMARY KEY,
+  artifact_type TEXT NOT NULL,
+  envelope_cid TEXT,
+  content BLOB NOT NULL,
+  content_size INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('origin', 'route-resolver', 'self-store-mirror')),
+  source_operator TEXT,
+  source_endpoint TEXT,
+  paid_amount_usdc TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL,
+  peer_catalog_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_envelope ON network_artifacts (envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_artifact_type ON network_artifacts (artifact_type);
+CREATE INDEX IF NOT EXISTS idx_network_artifacts_last_used ON network_artifacts (last_used_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
   policy_type TEXT NOT NULL CHECK (policy_type IN ('once_per_safe', 'once_per_bucket', 'interval')),
@@ -169,9 +253,21 @@ export class Store {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
-    this.db.exec(RESTORATION_INTENTS_SCHEMA);
+    this.db.exec(TASK_RUNS_SCHEMA);
     this.ensureRewardClaimsTxIndex();
+    this.ensureNetworkArtifactsPeerCatalogId();
     this.backfillActivityEvents();
+  }
+
+  /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
+  private ensureNetworkArtifactsPeerCatalogId(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(network_artifacts)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'peer_catalog_id')) {
+      this.db.exec(`ALTER TABLE network_artifacts ADD COLUMN peer_catalog_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
+    );
   }
 
   /** Idempotent: older DBs before idx_reward_claims_tx may lack the unique index. */
@@ -222,16 +318,16 @@ export class Store {
     this.db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
   }
 
-  getIntentPostRecord(args: {
+  getTaskPostRecord(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
-  }): IntentPostRecord | null {
+  }): TaskPostRecord | null {
     const row = this.db.prepare(
-      `SELECT creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+      `SELECT creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
               first_posted_at, last_posted_at, post_count
-       FROM intent_posts
+       FROM task_posts
        WHERE creator_safe_address = @creatorSafeAddress
          AND source_key = @sourceKey
          AND policy_type = @policyType
@@ -239,9 +335,9 @@ export class Store {
     ).get(args) as {
       creator_safe_address: string;
       source_key: string;
-      policy_type: IntentPostingPolicyType;
+      policy_type: TaskPostingPolicyType;
       scope_key: string;
-      desired_state_id: string;
+      task_id: string;
       request_id: string;
       first_posted_at: string;
       last_posted_at: string;
@@ -253,7 +349,7 @@ export class Store {
       sourceKey: row.source_key,
       policyType: row.policy_type,
       scopeKey: row.scope_key,
-      desiredStateId: row.desired_state_id,
+      taskId: row.task_id,
       requestId: row.request_id,
       firstPostedAt: row.first_posted_at,
       lastPostedAt: row.last_posted_at,
@@ -261,16 +357,16 @@ export class Store {
     };
   }
 
-  upsertIntentPostRecord(record: IntentPostRecord): void {
+  upsertTaskPostRecord(record: TaskPostRecord): void {
     this.db.prepare(
-      `INSERT INTO intent_posts
-         (creator_safe_address, source_key, policy_type, scope_key, desired_state_id, request_id,
+      `INSERT INTO task_posts
+         (creator_safe_address, source_key, policy_type, scope_key, task_id, request_id,
           first_posted_at, last_posted_at, post_count)
        VALUES
-         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @desiredStateId, @requestId,
+         (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @taskId, @requestId,
           @firstPostedAt, @lastPostedAt, @postCount)
        ON CONFLICT(creator_safe_address, source_key, policy_type, scope_key) DO UPDATE SET
-         desired_state_id = excluded.desired_state_id,
+         task_id = excluded.task_id,
          request_id = excluded.request_id,
          first_posted_at = excluded.first_posted_at,
          last_posted_at = excluded.last_posted_at,
@@ -278,10 +374,10 @@ export class Store {
     ).run(record);
   }
 
-  acquireIntentPostLock(args: {
+  acquireTaskPostLock(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
     ownerToken: string;
     lockedAt: string;
@@ -290,7 +386,7 @@ export class Store {
     const tx = this.db.transaction((params: typeof args) => {
       const existing = this.db.prepare(
         `SELECT owner_token, locked_at
-         FROM intent_post_locks
+         FROM task_post_locks
          WHERE creator_safe_address = @creatorSafeAddress
            AND source_key = @sourceKey
            AND policy_type = @policyType
@@ -299,7 +395,7 @@ export class Store {
 
       if (!existing) {
         this.db.prepare(
-          `INSERT INTO intent_post_locks
+          `INSERT INTO task_post_locks
              (creator_safe_address, source_key, policy_type, scope_key, owner_token, locked_at)
            VALUES
              (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @ownerToken, @lockedAt)`,
@@ -317,7 +413,7 @@ export class Store {
       }
 
       this.db.prepare(
-        `UPDATE intent_post_locks
+        `UPDATE task_post_locks
          SET owner_token = @ownerToken, locked_at = @lockedAt
          WHERE creator_safe_address = @creatorSafeAddress
            AND source_key = @sourceKey
@@ -330,15 +426,15 @@ export class Store {
     return tx(args);
   }
 
-  releaseIntentPostLock(args: {
+  releaseTaskPostLock(args: {
     creatorSafeAddress: string;
     sourceKey: string;
-    policyType: IntentPostingPolicyType;
+    policyType: TaskPostingPolicyType;
     scopeKey: string;
     ownerToken: string;
   }): void {
     this.db.prepare(
-      `DELETE FROM intent_post_locks
+      `DELETE FROM task_post_locks
        WHERE creator_safe_address = @creatorSafeAddress
          AND source_key = @sourceKey
          AND policy_type = @policyType
@@ -371,15 +467,15 @@ export class Store {
 
   recordActivityEvent(event: ActivityEventInput): void {
     this.db.prepare(
-      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail)
-       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @specKind, @outcome, @detail)`,
+      `INSERT INTO activity_events (ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail)
+       VALUES (@ts, @kind, @requestId, @serviceIndex, @txHash, @solverType, @outcome, @detail)`,
     ).run({
       ts: event.ts ?? null,
       kind: event.kind,
       requestId: event.requestId ?? null,
       serviceIndex: event.serviceIndex ?? null,
       txHash: event.txHash ?? null,
-      specKind: event.specKind ?? null,
+      solverType: event.solverType ?? null,
       outcome: event.outcome ?? null,
       detail: event.detail ?? null,
     });
@@ -402,7 +498,7 @@ export class Store {
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(
-      `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+      `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
        FROM activity_events
        ${where}
        ORDER BY id DESC
@@ -414,7 +510,7 @@ export class Store {
       request_id: string | null;
       service_index: number | null;
       tx_hash: string | null;
-      spec_kind: string | null;
+      solver_type: string | null;
       outcome: string | null;
       detail: string | null;
     }>;
@@ -425,7 +521,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));
@@ -436,7 +532,7 @@ export class Store {
     const effectiveLimit = Math.max(0, Math.min(limit, 1000));
     const rows = this.db
       .prepare(
-        `SELECT id, ts, kind, request_id, service_index, tx_hash, spec_kind, outcome, detail
+        `SELECT id, ts, kind, request_id, service_index, tx_hash, solver_type, outcome, detail
          FROM activity_events
          WHERE id > @afterId
          ORDER BY id ASC
@@ -449,7 +545,7 @@ export class Store {
         request_id: string | null;
         service_index: number | null;
         tx_hash: string | null;
-        spec_kind: string | null;
+        solver_type: string | null;
         outcome: string | null;
         detail: string | null;
       }>;
@@ -460,7 +556,7 @@ export class Store {
       requestId: r.request_id,
       serviceIndex: r.service_index,
       txHash: r.tx_hash,
-      specKind: r.spec_kind,
+      solverType: r.solver_type,
       outcome: r.outcome,
       detail: r.detail,
     }));
@@ -603,9 +699,9 @@ export class Store {
     tx();
   }
 
-  getIntentEvidenceHash(requestId: string): string | null {
+  getTaskEvidenceHash(requestId: string): string | null {
     const row = this.db.prepare(
-      'SELECT evidence_hash FROM restoration_intents WHERE request_id = ?',
+      'SELECT evidence_hash FROM task_runs WHERE request_id = ?',
     ).get(requestId) as { evidence_hash: string | null } | undefined;
     return row?.evidence_hash ?? null;
   }
@@ -621,7 +717,7 @@ export class Store {
 
   insertArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     content: string;
@@ -629,8 +725,8 @@ export class Store {
     outcome: 'SUCCESS' | 'FAILURE' | 'UNKNOWN';
   }): void {
     this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, desired_state_id, request_id, title, content, tags, outcome)
-      VALUES (@id, @desiredStateId, @requestId, @title, @content, @tags, @outcome)
+      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, content, tags, outcome)
+      VALUES (@id, @taskId, @requestId, @title, @content, @tags, @outcome)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),
@@ -641,11 +737,11 @@ export class Store {
     tags?: string[];
     outcome?: string;
     requestId?: string;
-    desiredStateId?: string;
+    taskId?: string;
     after?: string;   // ISO timestamp — only return artifacts created after this time
     before?: string;  // ISO timestamp — only return artifacts created before this time
     limit?: number;
-  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; desired_state_id: string; created_at: string }> {
+  }): Array<{ id: string; title: string; content: string; tags: string[]; outcome: string; request_id: string; task_id: string; created_at: string }> {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -659,9 +755,9 @@ export class Store {
       params['requestId'] = query.requestId;
     }
 
-    if (query.desiredStateId) {
-      conditions.push('desired_state_id = @desiredStateId');
-      params['desiredStateId'] = query.desiredStateId;
+    if (query.taskId) {
+      conditions.push('task_id = @taskId');
+      params['taskId'] = query.taskId;
     }
 
     if (query.after) {
@@ -685,8 +781,8 @@ export class Store {
     const limit = query.limit ?? 50;
 
     const rows = this.db.prepare(
-      `SELECT id, title, content, tags, outcome, request_id, desired_state_id, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
-    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; request_id: string; desired_state_id: string; created_at: string }>;
+      `SELECT id, title, content, tags, outcome, request_id, task_id, created_at FROM artifacts ${where} ORDER BY created_at DESC LIMIT ${limit}`
+    ).all(params) as Array<{ id: string; title: string; content: string; tags: string; outcome: string; request_id: string; task_id: string; created_at: string }>;
 
     return rows.map(row => ({
       ...row,
@@ -696,7 +792,7 @@ export class Store {
 
   insertRemoteArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     tags: string[];
@@ -706,8 +802,8 @@ export class Store {
     price?: string;
   }): void {
     this.db.prepare(`
-      INSERT OR REPLACE INTO artifacts (id, desired_state_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
-      VALUES (@id, @desiredStateId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
+      INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
+      VALUES (@id, @taskId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),
@@ -715,14 +811,27 @@ export class Store {
     });
   }
 
-  getArtifactContent(id: string): string | null {
-    const row = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as { content: string | null } | undefined;
-    return row?.content ?? null;
+  /**
+   * Text body for a catalog artifact id: local `artifacts.content`, else a peer-cached
+   * blob in `network_artifacts` (via `peer_catalog_id`).
+   */
+  resolveCatalogArtifactContent(id: string): string | null {
+    const local = this.db.prepare('SELECT content FROM artifacts WHERE id = ?').get(id) as
+      | { content: string | null }
+      | undefined;
+    if (local?.content != null) return local.content;
+
+    const net = this.db.prepare(
+      `SELECT content FROM network_artifacts WHERE peer_catalog_id = ? ORDER BY fetched_at DESC LIMIT 1`,
+    ).get(id) as { content: Buffer } | undefined;
+    if (!net) return null;
+    return net.content.toString('utf-8');
   }
 
-  getRemoteArtifactInfo(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
+  /** Endpoint / owner for a remote (peer-synced) catalog row in `artifacts`. */
+  getRemoteDiscoveryMetadata(id: string): { endpoint: string; ownerAddress: string; price?: string } | null {
     const row = this.db.prepare(
-      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1'
+      'SELECT endpoint, owner_address, price FROM artifacts WHERE id = ? AND remote = 1',
     ).get(id) as { endpoint: string; owner_address: string; price: string | null } | undefined;
     if (!row) return null;
     return {
@@ -740,8 +849,203 @@ export class Store {
     return { ...row, tags: JSON.parse(row.tags) as string[] };
   }
 
-  cacheRemoteContent(id: string, content: string): void {
-    this.db.prepare('UPDATE artifacts SET content = ? WHERE id = ?').run(content, id);
+  saveServedArtifact(input: ServedArtifactInput): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO served_artifacts
+         (sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at)
+       VALUES
+         (@sha256, @artifactType, @requestId, @envelopeCid, @content, @contentSize, @priceUsdc, @createdAt)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      requestId: input.requestId ?? null,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      priceUsdc: input.priceUsdc,
+      createdAt: input.createdAt,
+    });
+  }
+
+  getServedArtifact(sha256: string): ServedArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    };
+  }
+
+  setServedArtifactEnvelopeCid(sha256: string, envelopeCid: string): void {
+    this.db.prepare(
+      `UPDATE served_artifacts SET envelope_cid = ? WHERE sha256 = ?`,
+    ).run(envelopeCid, sha256);
+  }
+
+  getServedArtifactsByRequestId(requestId: string): ServedArtifactRow[] {
+    const rows = this.db.prepare(
+      `SELECT sha256, artifact_type, request_id, envelope_cid, content, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE request_id = ? ORDER BY created_at ASC`,
+    ).all(requestId) as Array<{
+      sha256: string;
+      artifact_type: string;
+      request_id: string | null;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      requestId: row.request_id,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      priceUsdc: row.price_usdc,
+      createdAt: row.created_at,
+    }));
+  }
+
+  saveNetworkArtifact(input: NetworkArtifactInput): void {
+    if (input.peerCatalogId) {
+      this.db.prepare(`DELETE FROM network_artifacts WHERE peer_catalog_id = ?`).run(input.peerCatalogId);
+    }
+    this.db.prepare(
+      `INSERT OR REPLACE INTO network_artifacts
+         (sha256, artifact_type, envelope_cid, content, content_size, source,
+          source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at, peer_catalog_id)
+       VALUES
+         (@sha256, @artifactType, @envelopeCid, @content, @contentSize, @source,
+          @sourceOperator, @sourceEndpoint, @paidAmountUsdc, @fetchedAt, @fetchedAt, @peerCatalogId)`,
+    ).run({
+      sha256: input.sha256,
+      artifactType: input.artifactType,
+      envelopeCid: input.envelopeCid ?? null,
+      content: input.content,
+      contentSize: input.content.length,
+      source: input.source,
+      sourceOperator: input.sourceOperator ?? null,
+      sourceEndpoint: input.sourceEndpoint ?? null,
+      paidAmountUsdc: input.paidAmountUsdc,
+      fetchedAt: input.fetchedAt,
+      peerCatalogId: input.peerCatalogId ?? null,
+    });
+  }
+
+  getNetworkArtifact(sha256: string): NetworkArtifactRow | null {
+    const row = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content, content_size, source,
+              source_operator, source_endpoint, paid_amount_usdc, fetched_at, last_used_at,
+              peer_catalog_id
+       FROM network_artifacts WHERE sha256 = ?`,
+    ).get(sha256) as {
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content: Buffer;
+      content_size: number;
+      source: NetworkArtifactSource;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+      last_used_at: string;
+      peer_catalog_id: string | null;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sha256: row.sha256,
+      artifactType: row.artifact_type,
+      envelopeCid: row.envelope_cid,
+      content: row.content,
+      contentSize: row.content_size,
+      source: row.source,
+      sourceOperator: row.source_operator,
+      sourceEndpoint: row.source_endpoint,
+      paidAmountUsdc: row.paid_amount_usdc,
+      fetchedAt: row.fetched_at,
+      lastUsedAt: row.last_used_at,
+      peerCatalogId: row.peer_catalog_id,
+    };
+  }
+
+  touchNetworkArtifactUsage(sha256: string, ts: string): void {
+    this.db.prepare(
+      `UPDATE network_artifacts SET last_used_at = ? WHERE sha256 = ?`,
+    ).run(ts, sha256);
+  }
+
+  /**
+   * Local fast-path search across own (served) artifacts and cached (network)
+   * artifacts. Used by the MCP `search_artifacts` tool to prepend local
+   * matches to corpus query results.
+   */
+  searchOwnAndCached(filter: { artifactType?: string; limit: number }): Array<{
+    sha256: string;
+    artifactType: string;
+    source: 'served' | 'network';
+    envelopeCid: string | null;
+    createdAt: string;
+  }> {
+    const limit = Math.min(Math.max(1, filter.limit), 500);
+    const ownSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts WHERE artifact_type = @type ORDER BY created_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, created_at FROM served_artifacts ORDER BY created_at DESC LIMIT @limit`;
+    const cachedSql = filter.artifactType
+      ? `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts WHERE artifact_type = @type ORDER BY fetched_at DESC LIMIT @limit`
+      : `SELECT sha256, artifact_type, envelope_cid, fetched_at FROM network_artifacts ORDER BY fetched_at DESC LIMIT @limit`;
+    const params: Record<string, unknown> = { limit };
+    if (filter.artifactType) params['type'] = filter.artifactType;
+
+    const own = this.db.prepare(ownSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      created_at: string;
+    }>;
+    const cached = this.db.prepare(cachedSql).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      fetched_at: string;
+    }>;
+
+    return [
+      ...own.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'served' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.created_at,
+      })),
+      ...cached.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'network' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.fetched_at,
+      })),
+    ];
   }
 
   close(): void {

@@ -174,23 +174,23 @@ describe('loadConfig RPC override handling', () => {
     expect(config.targetServices).toBe(1);
   });
 
-  it('defaults desiredStates to an empty list', () => {
+  it('defaults tasks to an empty list', () => {
     return writeConfigFile({}).then((configPath) => {
       const config = loadConfig(configPath);
-      expect(config.desiredStates).toEqual([]);
+      expect(config.tasks).toEqual([]);
     });
   });
 
-  it('preserves portfolio.v0 RestorationJob fields (window, spec, eligibility) through config parsing', async () => {
+  it('preserves portfolio.v0 Task fields (window, spec, eligibility) through config parsing', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
-      desiredStates: [
+      tasks: [
         {
           id: 'portfolio-test-1',
           description: 'Achieve 5% equity return on Hyperliquid testnet.',
+          solverType: 'portfolio.v0',
           window: { startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 },
           spec: {
-            kind: 'portfolio.v0',
             account: { venue: 'hyperliquid-testnet', masterAddress: '0xdeadbeef' },
             target: { metric: 'equity_return_pct', minReturnPct: 5 },
             constraint: { maxDrawdownPct: 10 },
@@ -206,12 +206,13 @@ describe('loadConfig RPC override handling', () => {
     delete process.env['JINN_NETWORK'];
 
     const config = loadConfig(configPath);
-    const ds = config.desiredStates[0];
+    const ds = config.tasks[0];
 
     expect(ds).toBeDefined();
     expect(ds!.id).toBe('portfolio-test-1');
     expect(ds!.window).toEqual({ startTs: 1_700_000_000_000, endTs: 1_700_086_400_000 });
-    expect(ds!.spec).toMatchObject({ kind: 'portfolio.v0' });
+    expect(ds!.solverType).toBe('portfolio.v0');
+    expect(ds!.spec?.kind).toBeUndefined();
     expect(ds!.eligibility).toEqual({ minClosedTrades: 20, minTradedNotionalMultiple: 5.0 });
   });
 
@@ -460,5 +461,99 @@ describe('buildConfigProvenance', () => {
     expect(typeof prov.earningDir).toBe('string');
     expect(typeof prov.dbPath).toBe('string');
     expect(prov.runtimeMode).toBeNull(); // not set in config or env
+  });
+});
+
+describe('operator config (jinn-mono-vy37.1.3)', () => {
+  const dirs: string[] = [];
+  const ENV_KEYS = [
+    'JINN_OPERATOR_PUBLIC_ENDPOINT',
+    'JINN_OPERATOR_DEFAULT_PRICE_USDC',
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  for (const k of ENV_KEYS) saved[k] = process.env[k];
+
+  afterEach(async () => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeOpConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('parses operator block with defaults', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { publicEndpoint: 'https://op.example.com' },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.publicEndpoint).toBe('https://op.example.com');
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0');
+    expect(cfg.operator?.perArtifactTypePrice).toEqual({});
+  });
+
+  it('honours per-artifact-type prices from the file', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: {
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: '0.001',
+        perArtifactTypePrice: { design_document: '0.5' },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0.001');
+    expect(cfg.operator?.perArtifactTypePrice).toEqual({ design_document: '0.5' });
+  });
+
+  it('env JINN_OPERATOR_PUBLIC_ENDPOINT overrides file', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { publicEndpoint: 'https://from-file.example.com' },
+    });
+    process.env['JINN_OPERATOR_PUBLIC_ENDPOINT'] = 'https://from-env.example.com';
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.publicEndpoint).toBe('https://from-env.example.com');
+  });
+
+  it('env JINN_OPERATOR_DEFAULT_PRICE_USDC overrides file', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: {
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: '0.001',
+      },
+    });
+    process.env['JINN_OPERATOR_DEFAULT_PRICE_USDC'] = '0.005';
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0.005');
+  });
+
+  it('rejects malformed defaultPriceUsdc', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: {
+        publicEndpoint: 'https://op.example.com',
+        defaultPriceUsdc: 'free',
+      },
+    });
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  it('rejects non-URL publicEndpoint', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { publicEndpoint: 'not-a-url' },
+    });
+    expect(() => loadConfig(configPath)).toThrow();
   });
 });

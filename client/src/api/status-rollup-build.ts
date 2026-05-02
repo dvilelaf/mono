@@ -5,6 +5,7 @@
  */
 
 import type { GatheredStatusRaw } from './status-build.js';
+import { isOperationalServiceStep } from '../earning/types.js';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,6 +59,12 @@ export interface StatusDetailV1 {
   } | null;
   /** Most recent on-chain transaction hash recorded in activity events. */
   lastChainTx: string | null;
+  /** Latest automatic setup archive, when one exists. */
+  latestSetupArchive: {
+    updatedAt: string;
+    backupStatePath: string;
+    serviceIndexes: number[];
+  } | null;
   /** Prioritised list of operator actions. Same source as /v1/status nextActions. */
   nextActions: string[];
 }
@@ -141,19 +148,21 @@ function readVersionCommit(): { version: string; commit: string } {
  * Pulls from already-gathered GatheredStatusRaw — no extra I/O.
  */
 export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
-  // Last bootstrap step: take the worst non-complete step across services,
-  // or 'complete' if all are complete, or null if no fleet exists.
+  // Last bootstrap step: take the worst non-operational step across services,
+  // surface safe_binding_pending if present, or 'complete' if all are fully bound.
   let lastBootstrapStep: string | null = null;
   let fleetUpdatedAt: string | null = null;
   if (raw.fleet) {
     fleetUpdatedAt = raw.fleet.updated_at ?? null;
     const services = raw.fleet.services;
     if (services.length > 0) {
-      const incomplete = services.filter(s => s.step !== 'complete');
+      const incomplete = services.filter(s => !isOperationalServiceStep(s.step));
       if (incomplete.length > 0) {
         // Return the step of the first incomplete service (lowest index)
         const sorted = [...incomplete].sort((a, b) => a.index - b.index);
         lastBootstrapStep = sorted[0]!.step;
+      } else if (services.some(s => s.step === 'safe_binding_pending')) {
+        lastBootstrapStep = 'safe_binding_pending';
       } else {
         lastBootstrapStep = 'complete';
       }
@@ -182,6 +191,23 @@ export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
     }
   }
 
+  let latestSetupArchive: StatusDetailV1['latestSetupArchive'] = null;
+  const migrationEntries = raw.migrationArchive?.entries ?? [];
+  if (migrationEntries.length > 0) {
+    const sorted = [...migrationEntries].sort((a, b) =>
+      Date.parse(b.updated_at) - Date.parse(a.updated_at),
+    );
+    const latest = sorted[0]!;
+    latestSetupArchive = {
+      updatedAt: latest.updated_at,
+      backupStatePath: latest.backup_state_path,
+      serviceIndexes: sorted
+        .filter(e => e.backup_state_path === latest.backup_state_path)
+        .map(e => e.service_index)
+        .sort((a, b) => a - b),
+    };
+  }
+
   // Last Claude session: from portfolioV0 (already gathered, no extra I/O)
   let lastClaudeSession: StatusDetailV1['lastClaudeSession'] = null;
   const outcomes = raw.portfolioV0?.recentClaudeOutcomes;
@@ -207,6 +233,7 @@ export function assembleStatusDetailV1(raw: GatheredStatusRaw): StatusDetailV1 {
     lastDaemonEvent,
     lastClaudeSession,
     lastChainTx,
+    latestSetupArchive,
     nextActions,
   };
 }
@@ -230,8 +257,13 @@ function buildNextActionsFromRaw(raw: GatheredStatusRaw): string[] {
       actions.push('Complete earning bootstrap so master_address is recorded.');
     }
     for (const s of fleet.services) {
-      if (s.step !== 'complete') {
+      if (s.error) {
+        actions.push(`Service ${s.index}: ${s.error}`);
+      }
+      if (!isOperationalServiceStep(s.step)) {
         actions.push(`Resume service ${s.index}: local step "${s.step}" — re-run jinn run.`);
+      } else if (s.step === 'safe_binding_pending') {
+        actions.push(`Service ${s.index}: identity binding pending; daemon will retry setAgentWallet on next bootstrap.`);
       }
     }
   }
@@ -259,8 +291,8 @@ export function assembleStatusRollupV1(
 ): StatusRollupV1Response {
   const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
-  const complete = services.filter(s => s.step === 'complete').length;
-  const needsAttention = services.length - complete;
+  const complete = services.filter(s => isOperationalServiceStep(s.step)).length;
+  const needsAttention = services.filter(s => !isOperationalServiceStep(s.step) || s.error).length;
   const network: 'testnet' | 'mainnet' =
     raw.fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const phase = network === 'testnet' ? 'phase-1b' : 'phase-2';

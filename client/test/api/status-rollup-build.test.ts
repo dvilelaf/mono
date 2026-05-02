@@ -80,6 +80,21 @@ describe('assembleStatusRollupV1', () => {
     expect(parsed.exit.blocking).toBe(false);
   });
 
+  it('counts complete services with preserved setup errors as needing attention', () => {
+    const raw = makeRaw();
+    raw.fleet!.services = raw.fleet!.services.map(s => ({
+      ...s,
+      step: 'complete' as const,
+      error: s.index === 1 ? 'Existing setup was preserved for recovery.' : null,
+    }));
+    raw.minMasterEthWei = '1';
+    raw.master.balanceWei = '100';
+    const parsed = assembleStatusRollupV1(raw, { includeDetail: true });
+    expect(parsed.fleet.needsAttention).toBe(1);
+    expect(parsed.exit.blocking).toBe(true);
+    expect(parsed.detail?.nextActions.some(a => a.includes('preserved for recovery'))).toBe(true);
+  });
+
   it('low master ETH is a warning hint, not a blocking exit', () => {
     const raw = makeRaw();
     raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
@@ -169,8 +184,8 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastDaemonEvent reflects most recent activity row', () => {
     const raw = makeRaw();
     raw.recentActivity = [
-      { id: 10, ts: '2026-04-28T10:00:00Z', kind: 'delivered', requestId: 'req-1', serviceIndex: 1, txHash: '0xabc', specKind: null, outcome: 'success' },
-      { id: 9, ts: '2026-04-28T09:00:00Z', kind: 'created', requestId: 'req-0', serviceIndex: null, txHash: null, specKind: null, outcome: null },
+      { id: 10, ts: '2026-04-28T10:00:00Z', kind: 'delivered', requestId: 'req-1', serviceIndex: 1, txHash: '0xabc', solverType: null, outcome: 'success' },
+      { id: 9, ts: '2026-04-28T09:00:00Z', kind: 'created', requestId: 'req-0', serviceIndex: null, txHash: null, solverType: null, outcome: null },
     ];
     const detail = assembleStatusDetailV1(raw);
     expect(detail.lastDaemonEvent?.kind).toBe('delivered');
@@ -181,10 +196,47 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastChainTx is null when no tx hashes in activity', () => {
     const raw = makeRaw();
     raw.recentActivity = [
-      { id: 1, ts: '2026-04-28T10:00:00Z', kind: 'created', requestId: 'r', serviceIndex: null, txHash: null, specKind: null, outcome: null },
+      { id: 1, ts: '2026-04-28T10:00:00Z', kind: 'created', requestId: 'r', serviceIndex: null, txHash: null, solverType: null, outcome: null },
     ];
     const detail = assembleStatusDetailV1(raw);
     expect(detail.lastChainTx).toBeNull();
+  });
+
+  it('detail.latestSetupArchive reflects the most recent setup migration archive', () => {
+    const raw = makeRaw();
+    raw.migrationArchive = {
+      schemaVersion: 1,
+      updated_at: '2026-05-01T00:00:03.000Z',
+      entries: [
+        {
+          migration_id: 'old',
+          kind: 'base-sepolia-standard-setup',
+          chain: 'base-sepolia',
+          service_index: 1,
+          created_at: '2026-05-01T00:00:00.000Z',
+          updated_at: '2026-05-01T00:00:01.000Z',
+          backup_state_path: '/tmp/old.bak',
+          from: { service_id: 1, safe_address: null, mech_address: null, staking_address: null, step: 'complete', agent_id: '7' },
+          to: { staking_address: '0x1111111111111111111111111111111111111111' },
+          retire_status: 'retired',
+        },
+        {
+          migration_id: 'new',
+          kind: 'base-sepolia-standard-setup',
+          chain: 'base-sepolia',
+          service_index: 2,
+          created_at: '2026-05-01T00:00:02.000Z',
+          updated_at: '2026-05-01T00:00:03.000Z',
+          backup_state_path: '/tmp/new.bak',
+          from: { service_id: 2, safe_address: null, mech_address: null, staking_address: null, step: 'complete', agent_id: '8' },
+          to: { staking_address: '0x2222222222222222222222222222222222222222' },
+          retire_status: 'failed',
+        },
+      ],
+    };
+    const detail = assembleStatusDetailV1(raw);
+    expect(detail.latestSetupArchive?.backupStatePath).toBe('/tmp/new.bak');
+    expect(detail.latestSetupArchive?.serviceIndexes).toEqual([2]);
   });
 
   it('detail.lastClaudeSession is null when no portfolioV0 outcomes', () => {
@@ -197,6 +249,7 @@ describe('assembleStatusRollupV1', () => {
   it('detail.lastClaudeSession reflects most recent outcome', () => {
     const raw = makeRaw();
     raw.portfolioV0 = {
+      totals: { delivered: 0, failed: 0, active: 0 },
       inFlight: [],
       recentVerdicts: [],
       recentSnapshots: [],

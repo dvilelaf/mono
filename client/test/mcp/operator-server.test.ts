@@ -9,7 +9,7 @@ const spawnMock = vi.fn();
 const stopRunMock = vi.fn();
 const initRunMock = vi.fn();
 const bootstrapRunMock = vi.fn();
-const submitIntentRunMock = vi.fn();
+const tasksRunMock = vi.fn();
 
 // MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; spawn is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
@@ -42,11 +42,11 @@ const fakeBootstrapCommand: CommandModule = {
   run: bootstrapRunMock,
 };
 
-const fakeSubmitIntentCommand: CommandModule = {
-  name: 'submit-intent',
+const fakeTasksCommand: CommandModule = {
+  name: 'tasks',
   summary: '',
   helpText: '',
-  run: submitIntentRunMock,
+  run: tasksRunMock,
 };
 
 function makeSuccessCommand(name: string, payload: unknown): CommandModule {
@@ -91,15 +91,15 @@ const EXPECTED_TOOLS = [
   'jinn_history',
   'jinn_logs',
   'jinn_rewards',
-  'jinn_intents_list',
-  'jinn_intents_status',
+  'jinn_solver_nets_list',
+  'jinn_solver_nets_show',
   // mutating (require confirm)
-  'jinn_intents_enable',
-  'jinn_intents_disable',
+  'jinn_solver_nets_enable',
+  'jinn_solver_nets_disable',
   'jinn_init',
-  'jinn_quickstart',
+  'jinn_run',
   'jinn_bootstrap',
-  'jinn_submit_intent',
+  'jinn_tasks_submit',
   'jinn_claim_rewards',
   'jinn_update',
   'jinn_start_daemon',
@@ -252,82 +252,108 @@ describe('jinn_logs tool', () => {
   });
 });
 
-describe('jinn_intents_list / status / enable / disable tools', () => {
+describe('jinn_solver_nets_list / status / enable / disable tools', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     vi.useRealTimers();
   });
 
-  it('jinn_intents_list returns content', async () => {
+  it('jinn_solver_nets_list returns content', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_list.handler({}, {});
+    const result = await server._registeredTools.jinn_solver_nets_list.handler({}, {});
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_status requires kind arg', async () => {
+  it('jinn_solver_nets_show requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_status.handler(
-      { kind: 'portfolio.v0' },
+    const result = await server._registeredTools.jinn_solver_nets_show.handler(
+      { name: 'prediction' },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_enable requires kind arg', async () => {
+  it('jinn_solver_nets_enable requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_enable.handler(
-      { kind: 'portfolio.v0', extra_args: undefined },
+    const result = await server._registeredTools.jinn_solver_nets_enable.handler(
+      { name: 'prediction', extra_args: undefined },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 
-  it('jinn_intents_disable requires kind arg', async () => {
+  it('jinn_solver_nets_disable requires name arg', async () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_intents_disable.handler(
-      { kind: 'portfolio.v0' },
+    const result = await server._registeredTools.jinn_solver_nets_disable.handler(
+      { name: 'prediction' },
       {},
     );
     expect(result).toHaveProperty('content');
   });
 });
 
-describe('jinn_quickstart tool', () => {
+describe('jinn_run tool', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     vi.useRealTimers();
   });
 
-  it('returns content from the quickstart command', async () => {
-    const fakeQuickstart = makeSuccessCommand('quickstart', {
+  it('returns a preview envelope by default (no mutation)', async () => {
+    const fakeRun = makeSuccessCommand('run', { schemaVersion: 1, verb: 'run', status: 'ready' });
+    const runSpy = vi.fn(fakeRun.run);
+    const { createOperatorServer } = await import('@/mcp/operator-server.js');
+    const server = createOperatorServer({ runCommand: { ...fakeRun, run: runSpy } });
+    const result = await server._registeredTools.jinn_run.handler(
+      { no_daemon: true },
+      {},
+    ) as { content: Array<{ text: string }>; isError?: boolean };
+
+    // Without confirm: true, the underlying run command must not be invoked.
+    expect(runSpy).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      schemaVersion: number;
+      status: string;
+      tool: string;
+      followUp: { tool: string; arguments: Record<string, unknown> };
+    };
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.status).toBe('preview');
+    expect(parsed.tool).toBe('jinn_run');
+    expect(parsed.followUp.tool).toBe('jinn_run');
+    expect(parsed.followUp.arguments).toMatchObject({ confirm: true, no_daemon: true });
+  });
+
+  it('returns content from the run command when confirm: true', async () => {
+    const fakeRun = makeSuccessCommand('run', {
       schemaVersion: 1,
-      verb: 'quickstart',
+      verb: 'run',
       status: 'ready',
     });
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ quickstartCommand: fakeQuickstart });
-    const result = await server._registeredTools.jinn_quickstart.handler(
-      { no_daemon: true },
+    const server = createOperatorServer({ runCommand: fakeRun });
+    const result = await server._registeredTools.jinn_run.handler(
+      { confirm: true, no_daemon: true },
       {},
     ) as { content: Array<{ text: string }>; isError?: boolean };
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0]!.text) as { verb: string };
-    expect(parsed.verb).toBe('quickstart');
+    expect(parsed.verb).toBe('run');
   });
 
-  it('propagates errors from the quickstart command as MCP errors', async () => {
-    const fakeQuickstart = makeErrorCommand('quickstart', 'invalid_invocation', 'rpc unreachable');
+  it('propagates errors from the run command as MCP errors when confirm: true', async () => {
+    const fakeRun = makeErrorCommand('run', 'invalid_invocation', 'rpc unreachable');
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ quickstartCommand: fakeQuickstart });
-    const result = await server._registeredTools.jinn_quickstart.handler(
-      { no_daemon: false },
+    const server = createOperatorServer({ runCommand: fakeRun });
+    const result = await server._registeredTools.jinn_run.handler(
+      { confirm: true, no_daemon: false },
       {},
     ) as { content: Array<{ text: string }>; isError?: boolean };
 
@@ -335,191 +361,38 @@ describe('jinn_quickstart tool', () => {
     const parsed = JSON.parse(result.content[0]!.text) as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
   });
-});
 
-// ── Structured progress envelope ──────────────────────────────────────────────
-
-describe('quickstart structured progress envelopes', () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    vi.useRealTimers();
-  });
-
-  it('emits NDJSON progress envelopes on stdout when --json-progress is set', async () => {
-    // We import createQuickstartCommand and inject minimal deps so the
-    // progress envelopes are the only stdout output (--no-daemon, fast path).
-    const { createQuickstartCommand } = await import('@/cli/commands/quickstart.js');
-
-    const emittedLines: string[] = [];
-    const writer = {
-      write(s: string): boolean {
-        emittedLines.push(...s.split('\n').filter(Boolean));
-        return true;
+  it('forwards funding_timeout flag onto the run command argv', async () => {
+    let capturedArgv: string[] | undefined;
+    const fakeRun: CommandModule = {
+      name: 'run',
+      summary: '',
+      helpText: '',
+      run: async (ctx: CommandContext) => {
+        capturedArgv = ctx.argv;
+        ctx.writer.write(JSON.stringify({ ok: true }));
+        ctx.exit(0);
       },
     };
-
-    let initCalled = false;
-    let bootstrapCalled = false;
-
-    const cmd = createQuickstartCommand({
-      loadConfig: () => ({ apiPort: 7331 } as ReturnType<typeof import('@/config.js').loadConfig>),
-      getConfigPathFromArgs: () => undefined,
-      checkRpcNetwork: async () => ({ ok: true, network: 'base-sepolia', expectedChainId: 84532 }),
-      rpcNetworkFailureHint: () => '',
-      checkApiPortAvailable: async () => ({ ok: true }),
-      apiPortFailureMessage: () => '',
-      mainFn: async () => ({ status: 'done' }),
-      initRun: async (ctx) => {
-        initCalled = true;
-        ctx.writer.write(JSON.stringify({ master: '0xabc' }));
-        ctx.exit(0);
-      },
-      bootstrapRun: async (ctx) => {
-        bootstrapCalled = true;
-        ctx.writer.write(JSON.stringify({ status: 'complete' }));
-        ctx.exit(0);
-      },
-      doctorRun: async (ctx) => {
-        ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }));
-        ctx.exit(0);
-      },
-      passwordFileIO: {
-        exists: () => false,
-        read: () => '',
-        write: () => undefined,
-        ensureDir: () => undefined,
-      },
-      randomBytesFn: () => Buffer.from('deadbeef'.repeat(8), 'hex'),
-    });
-
-    let exitCode: number | null = null;
-    await cmd.run({
-      argv: ['--json', '--json-progress', '--no-daemon'],
-      stdoutIsTty: false,
-      writer,
-      exit: (code) => { exitCode = code; },
-      env: { HOME: mkdtempSync(join(tmpdir(), 'jinn-qs-')) },
-    });
-
-    expect(exitCode).toBeNull();
-    expect(initCalled).toBe(true);
-    expect(bootstrapCalled).toBe(true);
-
-    // All progress lines before the final summary must be valid NDJSON with type='progress'
-    const progressLines = emittedLines.filter((l) => {
-      try { return (JSON.parse(l) as { type?: string }).type === 'progress'; } catch { return false; }
-    });
-    expect(progressLines.length).toBeGreaterThan(0);
-
-    // Every progress line must have: type, phase, step
-    for (const line of progressLines) {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      expect(parsed).toHaveProperty('type', 'progress');
-      expect(typeof parsed['phase']).toBe('string');
-      expect(typeof parsed['step']).toBe('string');
-    }
-
-    // Must have seen preflight, init, bootstrap, and daemon phases
-    const phases = progressLines.map((l) => (JSON.parse(l) as { phase: string }).phase);
-    expect(phases).toContain('preflight');
-    expect(phases).toContain('init');
-    expect(phases).toContain('bootstrap');
-  });
-
-  it('emits a blocking envelope when funding is required', async () => {
-    vi.useFakeTimers();
-    const { createQuickstartCommand } = await import('@/cli/commands/quickstart.js');
-
-    const emittedLines: string[] = [];
-    const writer = {
-      write(s: string): boolean {
-        emittedLines.push(...s.split('\n').filter(Boolean));
-        return true;
-      },
-    };
-
-    let bootstrapCallCount = 0;
-    const cmd = createQuickstartCommand({
-      loadConfig: () => ({ apiPort: 7331 } as ReturnType<typeof import('@/config.js').loadConfig>),
-      getConfigPathFromArgs: () => undefined,
-      checkRpcNetwork: async () => ({ ok: true, network: 'base-sepolia', expectedChainId: 84532 }),
-      rpcNetworkFailureHint: () => '',
-      checkApiPortAvailable: async () => ({ ok: true }),
-      apiPortFailureMessage: () => '',
-      mainFn: async () => ({}),
-      initRun: async (ctx) => {
-        ctx.writer.write(JSON.stringify({ master: '0xabc' }));
-        ctx.exit(0);
-      },
-      bootstrapRun: async (ctx) => {
-        bootstrapCallCount++;
-        if (bootstrapCallCount === 1) {
-          // First call returns funding_required with an address
-          ctx.writer.write(JSON.stringify({
-            code: 'funding_required',
-            details: { address: '0xFUND_ME' },
-          }));
-          ctx.exit(10);
-        } else {
-          // Subsequent calls simulate a different error to break the poll loop
-          ctx.writer.write(JSON.stringify({ code: 'fatal', message: 'unexpected' }));
-          ctx.exit(50);
-        }
-      },
-      doctorRun: async (ctx) => {
-        ctx.writer.write(JSON.stringify({ ok: true, blockingCount: 0, checks: [] }));
-        ctx.exit(0);
-      },
-      passwordFileIO: {
-        exists: () => false,
-        read: () => '',
-        write: () => undefined,
-        ensureDir: () => undefined,
-      },
-      randomBytesFn: () => Buffer.from('deadbeef'.repeat(8), 'hex'),
-    });
-
-    let exitCode: number | null = null;
-    // Run the command in the background while we advance timers to trigger the poll loop
-    const runPromise = cmd.run({
-      argv: ['--json', '--json-progress', '--no-daemon'],
-      stdoutIsTty: false,
-      writer,
-      exit: (code) => { exitCode = code; },
-      env: { HOME: mkdtempSync(join(tmpdir(), 'jinn-qs-fund-')) },
-    });
-
-    // Advance past the first poll interval (15s) to trigger the second bootstrap call
-    await vi.advanceTimersByTimeAsync(16_000);
-    await runPromise;
-
-    // Should exit with error since the poll loop hits a non-10 error
-    expect(exitCode).not.toBeNull();
-
-    // Must have emitted a blocking=true envelope with addresses.fundingAddress
-    const blockingLines = emittedLines.filter((l) => {
-      try {
-        const p = JSON.parse(l) as { type?: string; blocking?: boolean };
-        return p.type === 'progress' && p.blocking === true;
-      } catch { return false; }
-    });
-    expect(blockingLines.length).toBeGreaterThan(0);
-
-    const blocking = JSON.parse(blockingLines[0]!) as {
-      phase: string;
-      step: string;
-      blocking: boolean;
-      nextAction?: string;
-      addresses?: Record<string, string>;
-    };
-    expect(blocking.phase).toBe('bootstrap');
-    expect(blocking.step).toBe('awaiting_funding');
-    expect(blocking.blocking).toBe(true);
-    expect(typeof blocking.nextAction).toBe('string');
-    expect(blocking.addresses?.fundingAddress).toBe('0xFUND_ME');
+    const { createOperatorServer } = await import('@/mcp/operator-server.js');
+    const server = createOperatorServer({ runCommand: fakeRun });
+    await server._registeredTools.jinn_run.handler(
+      { confirm: true, no_daemon: true, funding_timeout: '15m' },
+      {},
+    );
+    expect(capturedArgv).toContain('--no-daemon');
+    expect(capturedArgv).toContain('--funding-timeout');
+    expect(capturedArgv).toContain('15m');
   });
 });
+
+// ── Structured progress envelopes ────────────────────────────────────────────
+//
+// `jinn quickstart` was removed; structured-progress coverage now lives with
+// `jinn run` in `client/test/cli/run-no-ui.test.ts` and the `main.ts`
+// emitProgress() unit tests. The MCP-side concern is purely that the tool
+// forwards `--json-progress` to the wrapped `jinn run`, which is covered by
+// the `jinn_run tool` block above.
 
 // ── Confirmation boundaries (audit W2 / jinn-mono-964.2) ──────────────────────
 
@@ -596,50 +469,50 @@ describe('mutating MCP tools require explicit confirm', () => {
     expect(result.isError).toBeUndefined();
   });
 
-  it('jinn_submit_intent returns a preview envelope by default and does not call --yes', async () => {
+  it('jinn_tasks_submit returns a preview envelope by default and does not call --yes', async () => {
     let capturedArgv: string[] | undefined;
-    submitIntentRunMock.mockImplementation(async (ctx: CommandContext) => {
+    tasksRunMock.mockImplementation(async (ctx: CommandContext) => {
       capturedArgv = ctx.argv;
-      ctx.writer.write(JSON.stringify({ dryRun: true, verb: 'submit-intent' }));
+      ctx.writer.write(JSON.stringify({ dryRun: true, verb: 'tasks submit' }));
       ctx.exit(0);
     });
 
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ submitIntentCommand: fakeSubmitIntentCommand });
-    const result = await server._registeredTools.jinn_submit_intent.handler(
-      { id: 'abc', description: 'Test intent' },
+    const server = createOperatorServer({ tasksCommand: fakeTasksCommand });
+    const result = await server._registeredTools.jinn_tasks_submit.handler(
+      { id: 'abc', description: 'Test Task' },
       {},
     );
 
     // Underlying CLI was invoked, but in --dry-run mode (preview).
-    expect(submitIntentRunMock).toHaveBeenCalledTimes(1);
+    expect(tasksRunMock).toHaveBeenCalledTimes(1);
     expect(capturedArgv).toContain('--dry-run');
     expect(capturedArgv).not.toContain('--yes');
 
     const parsed = JSON.parse((result.content[0] as { text: string }).text);
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.status).toBe('preview');
-    expect(parsed.tool).toBe('jinn_submit_intent');
+    expect(parsed.tool).toBe('jinn_tasks_submit');
     expect(parsed.followUp).toEqual({
-      tool: 'jinn_submit_intent',
-      arguments: { id: 'abc', description: 'Test intent', confirm: true },
+      tool: 'jinn_tasks_submit',
+      arguments: { id: 'abc', description: 'Test Task', confirm: true },
     });
     // The CLI's own dry-run output is included for transparency.
-    expect(parsed.cliDryRun).toEqual({ dryRun: true, verb: 'submit-intent' });
+    expect(parsed.cliDryRun).toEqual({ dryRun: true, verb: 'tasks submit' });
   });
 
-  it('jinn_submit_intent passes --yes (not --dry-run) when confirm: true', async () => {
+  it('jinn_tasks_submit passes --yes (not --dry-run) when confirm: true', async () => {
     let capturedArgv: string[] | undefined;
-    submitIntentRunMock.mockImplementation(async (ctx: CommandContext) => {
+    tasksRunMock.mockImplementation(async (ctx: CommandContext) => {
       capturedArgv = ctx.argv;
       ctx.writer.write(JSON.stringify({ status: 'submitted' }));
       ctx.exit(0);
     });
 
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer({ submitIntentCommand: fakeSubmitIntentCommand });
-    const result = await server._registeredTools.jinn_submit_intent.handler(
-      { id: 'abc', description: 'Test intent', confirm: true },
+    const server = createOperatorServer({ tasksCommand: fakeTasksCommand });
+    const result = await server._registeredTools.jinn_tasks_submit.handler(
+      { id: 'abc', description: 'Test Task', confirm: true },
       {},
     );
 
@@ -686,8 +559,9 @@ describe('mutating MCP tools require explicit confirm', () => {
 
     const mutatingToolNames = [
       'jinn_init',
+      'jinn_run',
       'jinn_bootstrap',
-      'jinn_submit_intent',
+      'jinn_tasks_submit',
       'jinn_start_daemon',
       'jinn_stop_daemon',
     ];

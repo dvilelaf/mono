@@ -18,10 +18,10 @@ You are coordinating the Orient phase. Your only jobs are: decide what topics ne
 
 Choose from these typical categories; add or omit based on the intent:
 
-1. **intent-parse** — what's the goal, kind, window, spec, eligibility? Always include.
-2. **world-state** — for kinds with a venue (portfolio.v0, prediction.v0, etc.), pull current relevant state. Include if the kind has a venue.
-3. **own-history** — list prior runs of this kind by this operator. Include if `implStateDir/runs/index.json` exists or the harness exposes a knowledge-tree query.
-4. **others-history** — recent runs of this kind by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness exposes the query tool.
+1. **intent-parse** — what's the goal, solverType, window, spec, eligibility? Always include.
+2. **world-state** — for solverTypes with a venue (portfolio.v0, prediction.v0, etc.), pull current relevant state. Include if the solverType has a venue.
+3. **own-history** — list prior runs of this solverType by this operator. Include if `implStateDir/runs/index.json` exists or the harness exposes a knowledge-tree query.
+4. **others-history** — recent runs of this solverType by other operators. Include only if `implStateDir/policy.json` sets `allowCrossOperatorReads: true` AND the harness exposes the query tool.
 
 ## Launch explorers
 
@@ -48,7 +48,7 @@ After all explorers return, read each `workingDir/.orient/<topic>.json` and writ
 
 ```json
 {
-  "intent": { "id": "...", "kind": "...", "window": { "startTs": 0, "endTs": 0 } },
+  "intent": { "id": "...", "solverType": "...", "window": { "startTs": 0, "endTs": 0 } },
   "topics": [
     { "topic": "intent-parse", "artifact": "workingDir/.orient/intent-parse.json", "summary": "...", "flags": [] },
     { "topic": "world-state", "artifact": "workingDir/.orient/world-state.json", "summary": "...", "flags": ["stale"] }

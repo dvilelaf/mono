@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Phase 1b (protocol hardening on testnet) is in progress — see `spec/2026-04-06-phase-1a-design.md` and `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`.
+Jinn Network monorepo. Phase 0 is complete (Base mainnet). Phase 1a (JINN token + DAO + distribution on testnet) is deployed and proven on Sepolia/Base Sepolia. Forward roadmap is the **Phase A umbrella** under the knowledge-market substrate framing — see `spec/2026-04-30-phase-a-umbrella.md`, `docs/superpowers/plans/2026-04-30-phase-a-umbrella-plan.md`, `log/decisions/2026-04-30-knowledge-market-vision-framing.md` (DR-2026-04-30), and GitHub Discussions [#59](https://github.com/Jinn-Network/mono/discussions/59) (substrate vision) + [#57](https://github.com/Jinn-Network/mono/discussions/57) (paired GTM). The original Phase 1b roadmap (`spec/2026-04-06-phase-1a-design.md` §9, `docs/superpowers/plans/2026-04-06-phase-1a-tokenomics.md`) is subsumed: anti-farming decay and ve-JINN are shipped, evidence-schema work executes through Phase A.1, the residual challenge mechanism is re-homed to Phase B.2.
 
 Jinn is a training protocol for agentic intents. It defines a loop (Creation → Execution → Evaluation → Knowledge) where intents are published with fees, participants attempt fulfillment, evaluators verify results, and knowledge accumulates to improve future attempts.
 
@@ -150,8 +150,14 @@ cat > ~/.jinn-client/config.json << 'EOF'
 {
   "rpcUrl": "http://127.0.0.1:8545",
   "claudeModel": "claude-haiku-4-5-20251001",
-  "desiredStates": [
-    { "id": "test-1", "description": "The service is healthy and responding." }
+  "tasks": [
+    {
+      "id": "test-1",
+      "description": "The service is healthy and responding.",
+      "solverType": "prediction.v0",
+      "role": "restoration",
+      "spec": {}
+    }
   ]
 }
 EOF
@@ -189,7 +195,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
 | subgraphUrl      | JINN_SUBGRAPH_URL        | (none)                            |
-| desiredStates    | JINN_DESIRED_STATES      | [health-check]                    |
+| tasks            | JINN_TASKS               | []                                |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
@@ -219,8 +225,8 @@ Three layers, top to bottom:
 
 The daemon runs three concurrent loops:
 
-1. **CreatorLoop** — posts each desired state once via `JinnRouter.createRestorationJob()`
-2. **Engine watcher + `RestorationEngine`** — consumes `adapter.watchForRequests()`, drives the restorer state machine (claim → run via registered `RestorerImpl` → package → `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`)
+1. **CreatorLoop** — posts each Task once via the deployed `JinnRouter.createRestorationJob()` boundary
+2. **Engine watcher + TaskEngine** — consumes `adapter.watchForRequests()`, resolves the Task's SolverNet, selects a Harness, runs it, packages the Solution, then calls `mech.deliverToMarketplace()` + `JinnRouter.claimDelivery()`
 3. **DeliveryWatcherLoop** — watches for deliveries, calls `JinnRouter.claimDelivery()`, then creates evaluation jobs via `JinnRouter.createEvaluationJob()`
 
 Each JinnRouter call increments activity counters for the Safe multisig. The OLAS staking contract reads these counters at checkpoints to determine reward eligibility.
@@ -252,7 +258,9 @@ State persists to `~/.jinn-client/earning/earning_state.json`. Safe to interrupt
 
 - **Phase 0** (complete): Prove on OLAS ecosystem, single chain (Base), OLAS Mech Marketplace + JinnRouter, optimistic evidence, no JINN token
 - **Phase 1a** (complete): Fork OLAS contracts with minimal changes, deploy JINN token + Treasury + distribution on Sepolia/Base Sepolia, multisig governance, testnet iteration
-- **Phase 1b** (in progress): Protocol hardening on testnet — anti-farming decay, challenge mechanism, ve-JINN gauge voting, evidence schema, full client integration, extended testnet operation
+- **Phase A** (in progress): Knowledge-market substrate framing per DR-2026-04-30. A.1 operational loop (corpus library + gating leak fix + manifest hygiene + cache + MCP rewiring) shipped; A.2 plug-in surface, A.3 campaign infra, A.4 campaign-launch underway. See `spec/2026-04-30-phase-a-umbrella.md`. Subsumes the original Phase 1b roadmap; anti-farming decay + ve-JINN already shipped, residual challenge mechanism re-homed to Phase B.2.
+- **Phase B** (parallel after A.1): Trust infrastructure — B.1 verifiability tier activation, B.2 evaluator economics + signal-design (includes challenge mechanism)
+- **Phase C** (gated by community formation): Flagship marketplace API — the canonical app the team ships in-house
 - **Phase 2**: Mainnet launch — fair-launch JINN, multi-chain (Base, Arbitrum), ZK-requiring distribution contracts
 - **Phase 3**: Autonomous — full ve-JINN governance, USDC revenue exceeds JINN emissions
 
@@ -280,9 +288,9 @@ yarn install
 yarn test            # Hardhat tests
 ```
 
-## Adding intent kinds
+## Adding SolverTypes
 
-To add a new **in-repo** `spec.kind` (typed spec, `jinn submit-intent --spec-file`, optional auto-generators, and restorer/evaluator pairing), follow [`docs/runbooks/add-intent-kind.md`](docs/runbooks/add-intent-kind.md). Kind parsing dispatches through `client/src/intents/kinds/index.ts` (`SPEC_KINDS`); testnet auto-posting is wired via `getTestnetAutoConfig` + `collectTestnetAutoIntentGenerators` in the same module. Restorer selection is separate — see `client/src/cli/intent-registry-access.ts` and `client/src/restorer/impls/index.ts` (`buildRestorerImpls`).
+To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-file`, optional auto-generators, and Harness/evaluator pairing), follow [`docs/runbooks/add-solver-type.md`](docs/runbooks/add-solver-type.md). SolverType definitions live under `client/src/solver-types/`; Task documents live under `client/src/tasks/`; Harness selection is owned by SolverNet config and `client/src/harnesses/impls/index.ts` (`buildHarnesses`).
 
 ## Spec Conventions
 

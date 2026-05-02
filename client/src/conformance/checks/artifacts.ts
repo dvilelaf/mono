@@ -19,7 +19,7 @@ import type { CheckResult, ConformanceContext } from '../types.js';
  * Layer: 1
  *
  * Required artifact types per scope §3.1 K9:
- *   - `output.<kind>` — always required for restoration role
+ *   - `output.<solverType>` — always required for restoration role
  *   - `system_snapshot` — always required for restoration role
  *   - `trajectory` — required when envelope.trajectory is non-null
  *
@@ -41,8 +41,8 @@ export function checkArtifactVocabulary(ctx: ConformanceContext): CheckResult {
   const types = new Set(env.artifacts.map((a: Artifact) => a.artifactType));
   const missing: string[] = [];
 
-  // output.<kind> is always required for restoration
-  const outputType = `output.${env.kind}`;
+  // output.<solverType> is always required for restoration
+  const outputType = `output.${env.solverType}`;
   if (!types.has(outputType)) missing.push(outputType);
 
   // system_snapshot required for restoration
@@ -75,8 +75,8 @@ type TrajLike = { spans: SpanLike[] };
  * Bidirectional linkage per scope §3.1 K5:
  *   1. Every artifact with `metadata.producedBy.spanId` must reference a
  *      span id that exists in the trajectory.
- *   2. Every `jinn.artifact.emit` span's `jinn.artifact.cid` attribute must
- *      reference a CID that is present in `envelope.artifacts[]`.
+ *   2. Every `jinn.artifact.emit` span's `jinn.artifact.sha256` attribute must
+ *      reference a sha256 that is present in `envelope.artifacts[]`.
  *
  * Skipped when no trajectory is present.
  */
@@ -92,7 +92,7 @@ export function checkArtifactLinkage(ctx: ConformanceContext): CheckResult {
   }
 
   const spanIds = new Set(traj.spans.map((s) => s.spanId));
-  const artifactCids = new Set(env.artifacts.map((a: Artifact) => a.cid));
+  const artifactSha256s = new Set(env.artifacts.map((a: Artifact) => a.sha256));
   const failures: string[] = [];
 
   // 1. Every artifact with producedBy.spanId must reference a real span.
@@ -101,22 +101,22 @@ export function checkArtifactLinkage(ctx: ConformanceContext): CheckResult {
       ?.producedBy;
     if (producedBy?.spanId && !spanIds.has(producedBy.spanId)) {
       failures.push(
-        `artifact ${art.cid} references nonexistent spanId=${producedBy.spanId}`,
+        `artifact ${art.sha256} references nonexistent spanId=${producedBy.spanId}`,
       );
     }
   }
 
-  // 2. Every jinn.artifact.emit span must reference a real artifact CID.
+  // 2. Every jinn.artifact.emit span must reference a real artifact sha256.
   for (const span of traj.spans) {
     if (span.attributes['jinn.span.kind'] === 'jinn.artifact.emit') {
-      const cid = span.attributes['jinn.artifact.cid'] as string | undefined;
-      if (!cid) {
+      const sha256 = span.attributes['jinn.artifact.sha256'] as string | undefined;
+      if (!sha256) {
         failures.push(
-          `span ${span.spanId} (jinn.artifact.emit) has no jinn.artifact.cid attribute`,
+          `span ${span.spanId} (jinn.artifact.emit) has no jinn.artifact.sha256 attribute`,
         );
-      } else if (!artifactCids.has(cid)) {
+      } else if (!artifactSha256s.has(sha256)) {
         failures.push(
-          `span ${span.spanId} references artifact CID ${cid} not in envelope.artifacts`,
+          `span ${span.spanId} references artifact sha256 ${sha256} not in envelope.artifacts`,
         );
       }
     }

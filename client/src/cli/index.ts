@@ -29,16 +29,20 @@ import historyCommand from './commands/history.js';
 import rewardsCommand from './commands/rewards.js';
 import logsCommand from './commands/logs.js';
 import fleetManageCommand from './commands/fleet-scale.js';
-import submitIntentCommand from './commands/submit-intent.js';
 import claimRewardsCommand from './commands/claim-rewards.js';
 import withdrawCommand from './commands/withdraw.js';
 import keysCommand from './commands/keys-backup.js';
-import pluginCommand from './commands/plugin-install.js';
 import updateCommand from './commands/update.js';
-import intentsCommand from './commands/intents.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import conformanceCommand from './commands/conformance.js';
+import createCommand from './commands/create.js';
+import uiCommand from './commands/ui.js';
+import tasksCommand from './commands/tasks.js';
+import solverNetsCommand from './commands/solver-nets.js';
+import harnessesCommand from './commands/harnesses.js';
+import solverPluginsCommand from './commands/solver-plugins.js';
+import integrationsCommand from './commands/integrations.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -57,16 +61,20 @@ const COMMANDS: CommandModule[] = [
   rewardsCommand,
   logsCommand,
   fleetManageCommand,
-  submitIntentCommand,
   claimRewardsCommand,
   withdrawCommand,
   keysCommand,
-  pluginCommand,
   updateCommand,
-  intentsCommand,
   mcpCommand,
   migrateAgentIdCommand,
   conformanceCommand,
+  createCommand,
+  uiCommand,
+  tasksCommand,
+  solverNetsCommand,
+  harnessesCommand,
+  solverPluginsCommand,
+  integrationsCommand,
 ];
 
 /**

@@ -5,7 +5,7 @@
  * §3.1 (D5 + K1 knowledge tree), §3.2 (K3 executor provenance), §3.4 migration.
  *
  * One envelope shape covers restoration manifests (role='restoration') and
- * verdict manifests (role='verdict'). Payload is typed per (kind, role) via
+ * verdict manifests (role='verdict'). Payload is typed per (solverType, role) via
  * the registry in `./payloads/`.
  */
 
@@ -24,7 +24,7 @@ export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 export const RoleSchema = z.enum(['restoration', 'verdict']);
 export type Role = z.infer<typeof RoleSchema>;
 
-const IntentProvenanceSchema = z.object({
+const TaskProvenanceSchema = z.object({
   cid: z.string().min(1),
   onchainCreationTx: HexStringSchema,
   onchainCreationBlock: z.number().int(),
@@ -57,6 +57,13 @@ const ExecutorSchema = z.object({
   implVersion: z.string().min(1),
   clientGitSha: z.string().min(1),
   codeDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  runtimeBundleDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  plugins: z.array(z.object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    cid: z.string().min(1).optional(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  })),
   signingKey: SigningKeySchema,
   source: SourceBundleSchema.optional(),
 });
@@ -69,21 +76,16 @@ const AttestationSchema = z.object({
 });
 
 const TrajectoryRefSchema = z.object({
-  cid: z.string().min(1),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  access: z
-    .object({
-      kind: z.enum(['open', 'x402-gated']),
-      endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
-    })
-    .optional(),
+  access: z.object({
+    endpoint: z.string().url(),
+    priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
+  }),
 });
 
 const ArtifactSchema = z.object({
-  cid: z.string().min(1),
   artifactType: z.string().min(1),
-  sha256: z.string().optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
   metadata: z
     .object({
       description: z.string().optional(),
@@ -96,13 +98,10 @@ const ArtifactSchema = z.object({
         .optional(),
     })
     .optional(),
-  access: z
-    .object({
-      kind: z.enum(['open', 'x402-gated']),
-      endpoint: z.string().optional(),
-      priceUsdc: z.string().optional(),
-    })
-    .optional(),
+  access: z.object({
+    endpoint: z.string().url(),
+    priceUsdc: z.string().regex(/^\d+(\.\d+)?$/),
+  }),
 });
 
 export type Artifact = z.infer<typeof ArtifactSchema>;
@@ -116,10 +115,10 @@ const SignatureSchema = z.object({
 
 const BaseEnvelopeFields = {
   schemaVersion: z.literal('jinn.execution.v1'),
-  kind: z.string().min(1),
+  solverType: z.string().min(1),
   role: RoleSchema,
   generatedAt: z.number().int(),
-  intent: IntentProvenanceSchema,
+  task: TaskProvenanceSchema,
   participant: ParticipantSchema,
   window: WindowSchema,
   executor: ExecutorSchema,

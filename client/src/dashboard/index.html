@@ -11,7 +11,7 @@ button{background:#3758c7;color:#fff;border:0;border-radius:6px;padding:6px 8px;
 <div class="row"><h1>jinn operator</h1><div><span id="network" class="badge">network</span> <span id="health">...</span> <button id="refresh">Refresh now</button></div></div>
 <div class="muted" id="meta">last poll --</div>
 <div class="grid">
-<section class="card full"><h3>In-flight intents</h3><div id="inflight"></div></section>
+<section class="card full"><h3>In-flight tasks</h3><div id="inflight"></div></section>
 <section class="card full"><h3>Recent verdicts</h3><div id="verdicts"></div></section>
 <section class="card"><h3>Earnings</h3><div id="earnings"></div></section>
 <section class="card"><h3>Fleet</h3><div id="fleet"></div></section>
@@ -48,7 +48,7 @@ function render(d){
     new Date(i.windowStartTs).toISOString().slice(11,19)+'→'+new Date(i.windowEndTs).toISOString().slice(11,19),
     new Date(i.stateUpdatedAt).toISOString().slice(11,19),i.lastError??'-'
   ]);
-  $('inflight').innerHTML=inflight.length?table(['requestId','state','impl','window','updated','error'],inflight):'No in-flight intents';
+  $('inflight').innerHTML=inflight.length?table(['requestId','state','impl','window','updated','error'],inflight):'No in-flight tasks';
   const verdicts=(d.portfolioV0?.verdicts??[]).map(v=>[v.outcome,link(net,'tx',v.deliveryTxHash||''),v.manifestCid??'-']);
   $('verdicts').innerHTML=verdicts.length?table(['outcome','delivery tx','manifest'],verdicts):'No verdicts';
   const pend=d.rewards?.pendingStakingRewardsWei??'0'; const lc=d.rewards?.lastClaimTickAt??'--';

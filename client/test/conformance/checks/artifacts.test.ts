@@ -126,7 +126,7 @@ describe('checkArtifactVocabulary', () => {
 describe('checkArtifactLinkage', () => {
   it('passes when all artifacts and spans are correctly linked', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     const ctx: ConformanceContext = {
       envelope: fx.envelope,
       trajectory: traj as unknown,
@@ -153,13 +153,13 @@ describe('checkArtifactLinkage', () => {
 
   it('fails when an artifact.producedBy.spanId points to nonexistent span', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
     const env = {
       ...fx.envelope,
       artifacts: [
         ...fx.envelope.artifacts,
         {
-          cid: 'bafy-orphan',
+          sha256: '0'.repeat(64),
           artifactType: 'runtime_log',
           metadata: {
             producedBy: { spanId: 'nonexistent-span-id', trajectoryCid: 'bafy-traj' },
@@ -178,15 +178,16 @@ describe('checkArtifactLinkage', () => {
     expect(result.detail).toMatch(/nonexistent/);
   });
 
-  it('fails when a jinn.artifact.emit span references a CID not in envelope.artifacts', async () => {
+  it('fails when a jinn.artifact.emit span references a sha256 not in envelope.artifacts', async () => {
     const fx = await buildGoodRestorationFixture();
-    const traj = buildGoodTrajectoryFixture(fx.intent.id);
-    // Corrupt the emit span's CID to one not in envelope.artifacts
+    const traj = buildGoodTrajectoryFixture(fx.envelope.task.cid);
+    // Corrupt the emit span's sha256 to one not in envelope.artifacts
     const emitSpan = traj.spans.find(
       (s) => s.attributes['jinn.span.kind'] === 'jinn.artifact.emit',
     );
     expect(emitSpan).toBeDefined();
-    emitSpan!.attributes['jinn.artifact.cid'] = 'bafy-orphan-cid';
+    const orphanSha = '9'.repeat(64);
+    emitSpan!.attributes['jinn.artifact.sha256'] = orphanSha;
     const ctx: ConformanceContext = {
       envelope: fx.envelope,
       trajectory: traj as unknown,
@@ -195,7 +196,7 @@ describe('checkArtifactLinkage', () => {
     };
     const result = checkArtifactLinkage(ctx);
     expect(result.passed).toBe(false);
-    expect(result.detail).toMatch(/bafy-orphan-cid/);
+    expect(result.detail).toMatch(new RegExp(orphanSha));
   });
 
   it('fails when envelope is not loaded', () => {

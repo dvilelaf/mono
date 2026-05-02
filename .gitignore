@@ -20,3 +20,13 @@ growth/docs/initial-network-recruitment/
 growth/docs/Initial Network Recruitment-handoff.zip
 growth/docs/Intro to Jinn*.pdf
 growth/skills/
+growth/.local/
+
+packages/*/node_modules/
+packages/*/dist/
+packages/*/.yarn/cache/
+packages/*/.yarn/install-state.gz
+examples/external-restorer-impls/*/node_modules/
+examples/external-restorer-impls/*/dist/
+examples/external-restorer-impls/*/.yarn/cache/
+examples/external-restorer-impls/*/.yarn/install-state.gz

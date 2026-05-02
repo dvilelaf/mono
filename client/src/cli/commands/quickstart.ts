@@ -330,7 +330,7 @@ Examples:
       if (doctorPayload && !doctorPayload.ok) {
         const blocking = doctorPayload.checks.filter((c) => !c.ok);
         // portfolio.v0 impl-state checks are advisory for a fresh operator who
-        // hasn't submitted an HL intent yet — don't block quickstart on them.
+        // hasn't submitted an HL task yet — don't block quickstart on them.
         const realBlockers = blocking.filter(
           (c) => !c.name.startsWith('portfolio_') && !c.name.startsWith('hl_'),
         );

@@ -37,6 +37,8 @@ const ERC20_BALANCE_OF_ABI = [
   },
 ] as const;
 
+const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
+
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
@@ -254,7 +256,7 @@ export async function gatherGatheredStatusRaw(
     requestId: row.requestId,
     serviceIndex: row.serviceIndex,
     txHash: row.txHash,
-    specKind: row.specKind,
+    solverType: row.solverType,
     outcome: row.outcome,
   }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');
@@ -300,6 +302,7 @@ export async function gatherGatheredStatusRaw(
 
   const earningStore = new FleetStateStore(status.earningDir);
   const fleet = await earningStore.tryLoadExisting();
+  const migrationArchive = await earningStore.loadMigrationArchive();
 
   const vk = chainKey(status.network);
   const chainCfg = getChainConfig(vk, {
@@ -313,8 +316,12 @@ export async function gatherGatheredStatusRaw(
   const raw: GatheredStatusRaw = {
     ...baseRaw,
     fleet,
+    migrationArchive: migrationArchive.entries.length > 0 ? migrationArchive : undefined,
     rpc: { ok: false, error: undefined },
-    minMasterEthWei: chainCfg.minEoaGasEth.toString(),
+    minMasterEthWei: (
+      chainCfg.minEoaGasEth *
+      (fleet && fleet.services.length > 0 ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+    ).toString(),
     master: {
       address: fleet?.master_address ?? null,
     },

@@ -7,9 +7,9 @@
  * Validates the complete lifecycle:
  *   Bootstrap operator (service + mech) on Anvil fork
  *   Creator posts -> router.createRestorationJob -> marketplace
- *   Restorer picks up -> delivers via ClaudeRunner(mock-agent.sh)
+ *   Harness picks up -> delivers via ClaudeRunner(mock-agent.sh)
  *   Creator claims -> router.claimDelivery -> creates evaluation
- *   Restorer picks up evaluation -> delivers
+ *   Harness picks up evaluation -> delivers
  *   Creator claims evaluation -> done
  *   Checkpoint -> verify staking rewards
  *   CLI smoke: jinn subprocess with --config + --password-fd (parse + dry-run paths),
@@ -354,7 +354,7 @@ async function pinAgentFactoryMapping(
   );
 }
 
-async function warmCreateRestorationJobPath(
+async function warmCreateTaskPath(
   safeAddress: Address,
   mechAddress: Address,
   deliveryRate: bigint,
@@ -428,7 +428,7 @@ async function stabilizeForkedMarketplaceState(
     ]),
   ]);
 
-  await warmCreateRestorationJobPath(
+  await warmCreateTaskPath(
     safeAddress,
     mechAddress,
     deliveryRate,
@@ -559,7 +559,7 @@ async function main(): Promise<void> {
   let agentEoaPrivateKeyB: Hex | undefined;
 
   // API server for DAEMON_API_URL flow
-  let restorerApiServer: import('../../src/api/server.js').ApiServer | undefined;
+  let harnessApiServer: import('../../src/api/server.js').ApiServer | undefined;
   let e2eClaimRegistryAddress: Address | undefined;
 
   async function deployClaimRegistryForE2e(): Promise<Address> {
@@ -779,7 +779,7 @@ async function main(): Promise<void> {
         await adapter.initialize();
         console.log('    MechAdapter initialized');
 
-        // warmCreateRestorationJobPath eth_call uses `from: safeAddress` with msg.value = deliveryRate;
+        // warmCreateTaskPath eth_call uses `from: safeAddress` with msg.value = deliveryRate;
         // fund the Safe on the fork so the simulation does not fail with insufficient funds.
         await anvilJsonRpc(ANVIL_RPC, 'anvil_setBalance', [
           safeAddress,
@@ -810,20 +810,20 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 4: Creator posts desired state ─────────────────────────────────
+    // ── Phase 4: Creator posts Task ──────────────────────────────────────────
 
     results.push(
-      await runPhase('Phase 4: Creator posts desired state', async () => {
+      await runPhase('Phase 4: Creator posts Task', async () => {
         if (!adapter) throw new Error('No adapter from Phase 3');
 
         // Mine 3 blocks to flush any stale nonce state from bootstrap.
         // anvil_mine returns synchronously after the blocks commit.
         await chain.mineBlocks(3);
 
-        restorationRequestId = await adapter.postRestorationJob({
+        restorationRequestId = await adapter.postTask({
           id: 'e2e-test',
           description: 'E2E router flow test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'e2e-test/1',
           attemptNumber: 1,
         });
@@ -853,13 +853,13 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 5: Restorer delivers via ClaudeRunner (E2E legacy loop) ───────
+    // ── Phase 5: Harness delivers via ClaudeRunner (E2E legacy loop) ───────
     //
-    // Full RestorationEngine is wired in Phase 11 and requires two-layer
-    // ClaimRegistry deps on the fork. Phases 5–8 use {@link E2eRestorerLoop} —
-    // same behavior as the former production `RestorerLoop` (adapter + runner).
+    // Full TaskEngine is wired in Phase 11 and requires two-layer
+    // ClaimRegistry deps on the fork. Phases 5–8 use {@link E2eHarnessLoop} —
+    // same behavior as the former production `HarnessLoop` (adapter + runner).
 
-    const { E2eRestorerLoop } = await import('./legacy-restorer.js');
+    const { E2eHarnessLoop } = await import('./legacy-harness.js');
     const { ClaudeRunner } = await import('../../src/runner/claude.js');
     const { Store } = await import('../../src/store/store.js');
 
@@ -877,20 +877,20 @@ async function main(): Promise<void> {
     // Start API server so submit_restoration_result can POST artifacts via DAEMON_API_URL
     // Use port 0 to let the OS assign a free port, avoiding EADDRINUSE from stale e2e runs.
     const { startApiServer } = await import('../../src/api/server.js');
-    restorerApiServer = await startApiServer({ port: 0, store });
-    const daemonApiUrl = `http://127.0.0.1:${restorerApiServer.port}`;
+    harnessApiServer = await startApiServer({ port: 0, store, apiToken: 'e2e-test-token' });
+    const daemonApiUrl = `http://127.0.0.1:${harnessApiServer.port}`;
 
     const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
-    const restorer = new E2eRestorerLoop(adapter!, runner, store, join(tmpDir!, 'e2e-work'), agentTimeoutMs, daemonApiUrl);
+    const harness = new E2eHarnessLoop(adapter!, runner, store, join(tmpDir!, 'e2e-work'), agentTimeoutMs, daemonApiUrl);
 
     // Create the delivery iterator once — it is infinite and carries state
     const deliveryIter = adapter!.watchForDeliveries()[Symbol.asyncIterator]();
 
     results.push(
-      await runPhase('Phase 5: Restorer picks up request and delivers via ClaudeRunner', async () => {
+      await runPhase('Phase 5: Harness picks up request and delivers via ClaudeRunner', async () => {
         if (!adapter || !restorationRequestId) throw new Error('Missing state from prior phases');
 
-        // Mine blocks so the restorer sees the request
+        // Mine blocks so the harness sees the request
         await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Mine blocks continuously while processOne runs
@@ -900,15 +900,15 @@ async function main(): Promise<void> {
 
         try {
           const processed = await Promise.race([
-            restorer.processOne(),
-            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`restorer.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
+            harness.processOne(),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`harness.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('processOne returned false — no request found');
         } finally {
           clearInterval(miningInterval);
         }
 
-        console.log('    E2eRestorerLoop.processOne() completed');
+        console.log('    E2eHarnessLoop.processOne() completed');
 
         // Mine a block to confirm the delivery transaction
         await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -957,14 +957,14 @@ async function main(): Promise<void> {
         if (del.requestId !== restorationRequestId) {
           throw new Error(`Expected requestId ${restorationRequestId}, got ${del.requestId}`);
         }
-        if ((del.restorationJob.type ?? 'restoration') !== 'restoration') {
-          throw new Error(`Expected type 'restoration', got '${del.restorationJob.type}'`);
+        if ((del.task.role ?? 'restoration') !== 'restoration') {
+          throw new Error(`Expected type 'restoration', got '${del.task.role}'`);
         }
         if (!del.result.data) {
           throw new Error('Expected result.data to be present');
         }
         console.log(`    Delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    restorationJob.type: ${del.restorationJob.type ?? 'restoration'}`);
+        console.log(`    task.role: ${del.task.role ?? 'restoration'}`);
         console.log(`    result.data: "${del.result.data.slice(0, 80)}"`);
 
         // Mine to ensure evaluation creation tx is confirmed
@@ -1007,13 +1007,13 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 7: Restorer delivers evaluation ────────────────────────────────
+    // ── Phase 7: Harness delivers evaluation ────────────────────────────────
 
     results.push(
-      await runPhase('Phase 7: Restorer delivers evaluation via ClaudeRunner', async () => {
+      await runPhase('Phase 7: Harness delivers evaluation via ClaudeRunner', async () => {
         if (!adapter) throw new Error('Missing adapter');
 
-        // Mine blocks so the restorer sees the evaluation request
+        // Mine blocks so the harness sees the evaluation request
         await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
 
         // Mine blocks continuously while processOne runs
@@ -1023,15 +1023,15 @@ async function main(): Promise<void> {
 
         try {
           const processed = await Promise.race([
-            restorer.processOne(),
-            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`restorer.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
+            harness.processOne(),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`harness.processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('processOne returned false — no evaluation request found');
         } finally {
           clearInterval(miningInterval);
         }
 
-        console.log('    E2eRestorerLoop.processOne() completed for evaluation');
+        console.log('    E2eHarnessLoop.processOne() completed for evaluation');
 
         // Mine a block to confirm
         await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []);
@@ -1062,11 +1062,11 @@ async function main(): Promise<void> {
         if (delivery.done || !delivery.value) throw new Error('watchForDeliveries ended unexpectedly');
         const del = delivery.value;
 
-        if (del.restorationJob.type !== 'evaluation') {
-          throw new Error(`Expected type 'evaluation', got '${del.restorationJob.type}'`);
+        if (del.task.role !== 'evaluation') {
+          throw new Error(`Expected type 'evaluation', got '${del.task.role}'`);
         }
         console.log(`    Evaluation delivery claimed for requestId: ${del.requestId}`);
-        console.log(`    restorationJob.type: ${del.restorationJob.type}`);
+        console.log(`    task.role: ${del.task.role}`);
 
         // Verify the evaluation verdict contains restoration delivery data
         // (proves get_restoration_delivery tool worked in the mock agent)
@@ -1174,12 +1174,12 @@ async function main(): Promise<void> {
         }
         console.log(`    Search by requestId: ${byRequestId.length} result(s) ✓`);
 
-        // Gap 1: Verify search by desiredStateId
-        const byDesiredState = store.searchArtifacts({ desiredStateId: 'e2e-test' });
-        if (byDesiredState.length === 0) {
-          throw new Error('Search by desiredStateId returned no results');
+        // Gap 1: Verify search by taskId
+        const byTask = store.searchArtifacts({ taskId: 'e2e-test' });
+        if (byTask.length === 0) {
+          throw new Error('Search by taskId returned no results');
         }
-        console.log(`    Search by desiredStateId: ${byDesiredState.length} result(s) ✓`);
+        console.log(`    Search by taskId: ${byTask.length} result(s) ✓`);
 
         // Gap 1: Verify time range filters
         const beforeEverything = store.searchArtifacts({ before: '2020-01-01T00:00:00' });
@@ -1373,7 +1373,7 @@ async function main(): Promise<void> {
           // JinnRouter-shaped manifestHash). In production the engine.pack()
           // path passes the real signatureHash; here we use a deterministic
           // surrogate so the on-chain assertion is independent of the
-          // legacy-restorer's signature derivation.
+          // legacy-harness's signature derivation.
           const manifestCid = `bafkreial7e2eenvelope${Date.now().toString(16)}`;
           const manifestHash = keccak256(stringToBytes(`al7-test-${manifestCid}`));
           const tier = 1; // committed — matches engine.ts payload selection
@@ -1508,9 +1508,9 @@ async function main(): Promise<void> {
 
           // The contract enforces no-self-feedback (caller cannot be agent
           // owner / approved / operator-for-all). In production the evaluator
-          // is a different operator from the restorer; here we synthesise an
+          // is a different operator from the harness; here we synthesise an
           // independent EOA so the e2e exercises the real path. Documented as
-          // an e2e-specific shortcut: production resolves the restorer
+          // an e2e-specific shortcut: production resolves the harness
           // agentId via the subgraph and uses a separate evaluator wallet.
           const evaluatorPk = generatePrivateKey();
           const evaluatorAccount = privateKeyToAccount(evaluatorPk);
@@ -1543,7 +1543,7 @@ async function main(): Promise<void> {
             );
           }
 
-          // E2E shortcut: pass restorerAgentId directly. Production resolves
+          // E2E shortcut: pass harnessAgentId directly. Production resolves
           // it via subgraph (jinn-mono-yg4 / agent-resolver.ts), but the
           // subgraph isn't running in this harness. The hook itself is what
           // we want to exercise — its agentId-resolution dependency is a
@@ -1551,9 +1551,9 @@ async function main(): Promise<void> {
           const outcome = await submitEvaluatorFeedback({
             registry: reputationClient,
             ref: {
-              restorerAgentId: agentId,
-              restorerManifestCid: publishedEnvelopeManifestCid,
-              restorerEvidenceHash: publishedEnvelopeManifestHash,
+              harnessAgentId: agentId,
+              harnessManifestCid: publishedEnvelopeManifestCid,
+              harnessEvidenceHash: publishedEnvelopeManifestHash,
             },
             verdict: { verdict: 'PASS', kind: 'al7-test' },
           });
@@ -1616,7 +1616,7 @@ async function main(): Promise<void> {
           }
           if ((fbArgs.feedbackHash ?? '').toLowerCase() !== publishedEnvelopeManifestHash.toLowerCase()) {
             throw new Error(
-              `feedbackHash=${fbArgs.feedbackHash} does not match restorer evidenceHash ${publishedEnvelopeManifestHash}`,
+              `feedbackHash=${fbArgs.feedbackHash} does not match harness evidenceHash ${publishedEnvelopeManifestHash}`,
             );
           }
           // PASS verdict: int128 value=100, uint8 valueDecimals=2 → score 1.00
@@ -2115,9 +2115,8 @@ async function main(): Promise<void> {
         const { Daemon } = await import('../../src/daemon/daemon.js');
         const { ClaudeRunner } = await import('../../src/runner/claude.js');
         const { createClients } = await import('../../src/adapters/mech/safe.js');
-        const { RestorerImplRegistry } = await import('../../src/restorer/engine/registry.js');
-        const { buildRestorerImpls } = await import('../../src/restorer/impls/index.js');
-        const { DEFAULT_BY_KIND, DEFAULT_DISABLED_IMPLS } = await import('../../src/cli/intent-registry-access.js');
+        const { HarnessRegistry } = await import('../../src/harnesses/engine/registry.js');
+        const { buildHarnesses } = await import('../../src/harnesses/impls/index.js');
         const { ClaimRegistryClient } = await import('../../src/adapters/claim-registry/client.js');
 
         const daemonAdapter = new MechAdapter({
@@ -2138,12 +2137,16 @@ async function main(): Promise<void> {
         const runner = new ClaudeRunner({ claudePath: agentPath, model: agentModel });
         const agentClients = createClients(ANVIL_RPC, agentEoaPrivateKey as Hex, base);
 
-        const implRegistry = new RestorerImplRegistry({
-          byKind: { ...DEFAULT_BY_KIND },
+        const implRegistry = new HarnessRegistry({
+          solverTypeHarnesses: {
+            'portfolio.v0': 'claude-mcp-hyperliquid',
+            'prediction.v0': 'prediction-v0-baseline',
+            'prediction.apy.v0': 'prediction-apy-v0-baseline',
+          },
           default: 'legacy-claude',
-          disabled: [...DEFAULT_DISABLED_IMPLS],
+          disabled: ['claude-mcp-hyperliquid'],
         });
-        for (const impl of buildRestorerImpls({
+        for (const impl of buildHarnesses({
           rpcUrl: ANVIL_RPC,
           claudePath: agentPath,
           claudeModel: agentModel,
@@ -2151,6 +2154,7 @@ async function main(): Promise<void> {
           safe: safeAddress as `0x${string}`,
           runner,
           daemonApiUrl: 'http://127.0.0.1:7331',
+          daemonApiToken: 'e2e-test-token',
         })) {
           implRegistry.register(impl);
         }
@@ -2175,10 +2179,11 @@ async function main(): Promise<void> {
         const daemon = new Daemon({
           adapter: daemonAdapter,
           runner,
-          desiredStates: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
+          tasks: [{ id: 'daemon-loop-test', description: 'Daemon loop E2E test' }],
           dbPath: daemonDbPath,
           shutdownTimeoutMs: 10000,
           apiPort: 7331,
+          apiToken: 'e2e-test-token',
           restorationEngine: {
             implRegistry,
             paths: {
@@ -2186,7 +2191,11 @@ async function main(): Promise<void> {
               implStateDirRoot: join(tmpDir!, 'e2e-engine-impl-state'),
             },
             claimDeps,
-            packagingDeps: { ipfsRegistryUrl: 'https://registry.autonolas.tech' },
+            packagingDeps: {
+              operatorEndpoint: 'http://localhost:7331',
+              defaultPriceUsdc: '0',
+              perArtifactTypePrice: {},
+            },
             envelopeDeps: {
               ipfsRegistryUrl: 'https://registry.autonolas.tech',
               agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
@@ -2391,8 +2400,8 @@ async function main(): Promise<void> {
         });
         await creatorAdapter.initialize();
 
-        // Restorer adapter (Operator B) — delivers through B's mech
-        const restorerAdapterB = new MechAdapter({
+        // Harness adapter (Operator B) — delivers through B's mech
+        const harnessAdapterB = new MechAdapter({
           rpcUrl: ANVIL_RPC,
           mechMarketplaceAddress: MARKETPLACE_ADDRESS as `0x${string}`,
           routerAddress: ROUTER_ADDRESS as `0x${string}`,
@@ -2405,13 +2414,13 @@ async function main(): Promise<void> {
           chainId: base.id,
           routerClaimDeliveryVariant: 'v1',
         });
-        await restorerAdapterB.initialize();
+        await harnessAdapterB.initialize();
 
         // A posts a restoration request targeting B's mech
-        const crossRequestId = await creatorAdapter.postRestorationJob({
+        const crossRequestId = await creatorAdapter.postTask({
           id: 'cross-operator-test',
           description: 'Cross-operator E2E test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'cross-operator-test/1',
           attemptNumber: 1,
         });
@@ -2419,11 +2428,11 @@ async function main(): Promise<void> {
         console.log(`    Cross-operator requestId: ${crossRequestId}`);
 
         // B picks up the request and delivers
-        const { E2eRestorerLoop: E2eRestorerB } = await import('./legacy-restorer.js');
+        const { E2eHarnessLoop: E2eHarnessB } = await import('./legacy-harness.js');
         const { Store: StoreB } = await import('../../src/store/store.js');
         const storeB = new StoreB(':memory:');
-        const restorerB = new E2eRestorerB(
-          restorerAdapterB,
+        const harnessB = new E2eHarnessB(
+          harnessAdapterB,
           runner,
           storeB,
           join(tmpDir2!, 'e2e-b-work'),
@@ -2436,8 +2445,8 @@ async function main(): Promise<void> {
 
         try {
           const processed = await Promise.race([
-            restorerB.processOne(),
-            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B restorer timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
+            harnessB.processOne(),
+            sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B harness timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
           ]);
           if (!processed) throw new Error('Operator B processOne returned false');
         } finally {
@@ -2473,7 +2482,7 @@ async function main(): Promise<void> {
           crossDeliveryIter.next().then(r => r.value),
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator watchForDeliveries timed out'); }),
         ]);
-        console.log(`    A claimed restoration, type: ${crossDelivery?.restorationJob?.type ?? 'restoration'}`);
+        console.log(`    A claimed restoration, role: ${crossDelivery?.task?.role ?? 'restoration'}`);
 
         await waitForRouterEvaluationJobForRestoration(
           publicClient,
@@ -2485,7 +2494,7 @@ async function main(): Promise<void> {
 
         // B delivers evaluation (only after eval request is guaranteed on chain for B's mech)
         await Promise.race([
-          restorerB.processOne(),
+          harnessB.processOne(),
           sleep(agentTimeoutMs + 30000).then(() => { throw new Error(`Operator B eval processOne timed out after ${(agentTimeoutMs + 30000) / 1000}s`); }),
         ]);
         console.log('    B delivered evaluation');
@@ -2496,11 +2505,11 @@ async function main(): Promise<void> {
           sleep(USE_REAL_AGENT ? 120000 : 30000).then(() => { throw new Error('Cross-operator eval watchForDeliveries timed out'); }),
         ]);
         clearInterval(miningInterval2);
-        console.log(`    A claimed evaluation, type: ${crossEvalDelivery?.restorationJob?.type}`);
+        console.log(`    A claimed evaluation, role: ${crossEvalDelivery?.task?.role}`);
         console.log('    Cross-operator full lifecycle complete');
 
         await creatorAdapter.stop();
-        await restorerAdapterB.stop();
+        await harnessAdapterB.stop();
         storeB.close();
       }),
     );
@@ -2538,10 +2547,10 @@ async function main(): Promise<void> {
         });
         await windowAdapter.initialize();
 
-        const priorityRequestId = await windowAdapter.postRestorationJob({
+        const priorityRequestId = await windowAdapter.postTask({
           id: 'priority-window-test',
           description: 'Priority window E2E test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'priority-window-test/1',
           attemptNumber: 1,
         });
@@ -2718,10 +2727,10 @@ async function main(): Promise<void> {
         });
         await claimTestAdapter.initialize();
 
-        const claimTestRequestId = await claimTestAdapter.postRestorationJob({
+        const claimTestRequestId = await claimTestAdapter.postTask({
           id: 'claim-registry-test',
           description: 'ClaimRegistry E2E test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'claim-registry-test/1',
           attemptNumber: 1,
         });
@@ -2844,10 +2853,10 @@ async function main(): Promise<void> {
 
         // Now claiming should fail — the checker has no code so staticcall reverts
         // Post a new request to claim
-        const eligTestRequestId = await claimTestAdapter.postRestorationJob({
+        const eligTestRequestId = await claimTestAdapter.postTask({
           id: 'eligibility-reject-test',
           description: 'Eligibility rejection test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'eligibility-reject-test/1',
           attemptNumber: 1,
         });
@@ -2895,8 +2904,8 @@ async function main(): Promise<void> {
         const storeB = new Store(join(tmpDir, 'node-b.db'));
 
         // Start two API servers on different ports
-        const serverA = await startApiServer({ port: 7341, store: storeA, requireAuth: false });
-        const serverB = await startApiServer({ port: 7342, store: storeB, requireAuth: false });
+        const serverA = await startApiServer({ port: 7341, store: storeA, requireAuth: false, apiToken: 'e2e-test-token' });
+        const serverB = await startApiServer({ port: 7342, store: storeB, requireAuth: false, apiToken: 'e2e-test-token' });
         console.log(`    Node A API on port ${serverA.port}`);
         console.log(`    Node B API on port ${serverB.port}`);
 
@@ -2905,7 +2914,7 @@ async function main(): Promise<void> {
           const artifactId = 'cross-node-test-artifact';
           storeA.insertArtifact({
             id: artifactId,
-            desiredStateId: 'cross-node-test',
+            taskId: 'cross-node-test',
             requestId: '0x0000',
             title: 'Cross-node knowledge: restoration strategy alpha',
             content: 'When restoring FLOOR invariants, check historical baselines first.',
@@ -2936,7 +2945,7 @@ async function main(): Promise<void> {
           console.log(`    Node B local search: ${searchB.length} result(s)`);
 
           // Verify content is NOT cached yet (remote artifact, metadata only)
-          const cachedContent = storeB.getArtifactContent(artifactId);
+          const cachedContent = storeB.resolveCatalogArtifactContent(artifactId);
           if (cachedContent !== null) throw new Error('Content should not be cached before acquire');
           console.log('    Content not cached yet (metadata only)');
 
@@ -2949,7 +2958,7 @@ async function main(): Promise<void> {
           console.log(`    Node B acquired content: "${content.slice(0, 50)}..."`);
 
           // Verify content is now cached
-          const cachedAfter = storeB.getArtifactContent(artifactId);
+          const cachedAfter = storeB.resolveCatalogArtifactContent(artifactId);
           if (!cachedAfter) throw new Error('Content should be cached after acquire');
           console.log('    Content cached locally on Node B');
 
@@ -3059,7 +3068,7 @@ async function main(): Promise<void> {
 
           backfillStore.insertRemoteArtifact({
             id: artifactId!,
-            desiredStateId: '',
+            taskId: '',
             requestId: '',
             title: title ?? '',
             tags,
@@ -3074,13 +3083,13 @@ async function main(): Promise<void> {
           console.log(`    Backfilled artifact searchable: ${results.length} result(s)`);
 
           // Verify it's marked as remote
-          const remoteInfo = backfillStore.getRemoteArtifactInfo(artifactId!);
+          const remoteInfo = backfillStore.getRemoteDiscoveryMetadata(artifactId!);
           if (!remoteInfo) throw new Error('Remote info not found');
           if (remoteInfo.endpoint !== 'http://remote-node:7331') throw new Error(`Wrong endpoint: ${remoteInfo.endpoint}`);
           console.log(`    Remote info: endpoint=${remoteInfo.endpoint}, owner=${remoteInfo.ownerAddress}`);
 
           // Content should be null (metadata only, not acquired yet)
-          const content = backfillStore.getArtifactContent(artifactId!);
+          const content = backfillStore.resolveCatalogArtifactContent(artifactId!);
           if (content !== null) throw new Error('Content should be null before acquisition');
           console.log('    Content is null (not yet acquired) — correct');
 
@@ -3103,7 +3112,7 @@ async function main(): Promise<void> {
         const x402Store = new Store(join(tmpDir, 'x402-test.db'));
         x402Store.insertArtifact({
           id: 'x402-test-artifact',
-          desiredStateId: 'x402-test',
+          taskId: 'x402-test',
           requestId: '0x0000',
           title: 'Payment-gated knowledge',
           content: 'This content requires x402 payment to access.',
@@ -3114,10 +3123,10 @@ async function main(): Promise<void> {
         const x402Server = await startApiServer({
           port: 7351,
           store: x402Store,
+          apiToken: 'e2e-test-token',
           x402: {
             privateKey: agentEoaPrivateKey as string,
             recipientAddress: safeAddress as string,
-            pricePerArtifact: '$0.001',
             network: 'eip155:8453',
             rpcUrl: ANVIL_RPC,
           },
@@ -3131,8 +3140,18 @@ async function main(): Promise<void> {
           if (!freeData.content.includes('x402 payment')) throw new Error('Free route returned wrong content');
           console.log('    Free route (/artifacts/:id/content) works alongside x402');
 
-          // --- Test 2: x402 route returns 402 without payment ---
-          const gatedRes = await fetch('http://localhost:7351/x402/artifacts/x402-test-artifact/content');
+          // --- Test 2: x402 route returns 404 for unknown sha256 (free 200 with row) ---
+          // Post jinn-mono-vy37.1.2 the route is sha256-keyed against the
+          // served_artifacts table. We seed a row to exercise the gating path.
+          const fakeSha256 = 'a'.repeat(64);
+          x402Store.saveServedArtifact({
+            sha256: fakeSha256,
+            artifactType: 'output.test',
+            content: Buffer.from('paid x402 content'),
+            priceUsdc: '0.001',
+            createdAt: new Date().toISOString(),
+          });
+          const gatedRes = await fetch(`http://localhost:7351/v1/artifacts/${fakeSha256}/content`);
           if (gatedRes.status === 402) {
             console.log('    x402 route correctly returns 402 (Payment Required) without payment');
           } else if (gatedRes.status === 200) {
@@ -3142,8 +3161,8 @@ async function main(): Promise<void> {
           }
 
           // --- Test 3: URL builder ---
-          const url = buildAcquisitionUrl('http://localhost:7351', 'x402-test-artifact');
-          if (url !== 'http://localhost:7351/x402/artifacts/x402-test-artifact/content') {
+          const url = buildAcquisitionUrl('http://localhost:7351', fakeSha256);
+          if (url !== `http://localhost:7351/v1/artifacts/${fakeSha256}/content`) {
             throw new Error(`Wrong acquisition URL: ${url}`);
           }
           console.log('    buildAcquisitionUrl produces correct URL');
@@ -3151,15 +3170,15 @@ async function main(): Promise<void> {
           // --- Test 4: Best-effort paid acquisition ---
           console.log('    Testing x402 acquisition (best-effort, may fail on Anvil)...');
           try {
-            const content = await acquireArtifactWithPayment(
+            const result = await acquireArtifactWithPayment(
               'http://localhost:7351',
-              'x402-test-artifact',
+              fakeSha256,
               agentEoaPrivateKey as string,
             );
-            if (content) {
-              console.log(`    x402 acquisition succeeded: "${content.slice(0, 40)}..."`);
+            if (result.ok) {
+              console.log(`    x402 acquisition succeeded: ${result.content.length} bytes`);
             } else {
-              console.log('    x402 acquisition returned null (payment settlement may not work on Anvil fork)');
+              console.log(`    x402 acquisition returned ${result.reason} (payment settlement may not work on Anvil fork)`);
             }
           } catch (err) {
             console.log(`    x402 acquisition error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -3185,6 +3204,7 @@ async function main(): Promise<void> {
           port: 7352,
           store: authStore,
           requireAuth: true,
+          apiToken: 'e2e-test-token',
         });
 
         try {
@@ -3211,11 +3231,14 @@ async function main(): Promise<void> {
           const signedReq = await signRequestWithErc8128({
             signer,
             input: 'http://localhost:7352/artifacts',
-            init: {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                title: 'Authorized artifact',
+	            init: {
+	              method: 'POST',
+	              headers: {
+	                'Authorization': 'Bearer e2e-test-token',
+	                'Content-Type': 'application/json',
+	              },
+	              body: JSON.stringify({
+	                title: 'Authorized artifact',
                 content: 'This should be accepted',
                 tags: ['auth-test'],
                 outcome: 'SUCCESS',
@@ -3277,10 +3300,10 @@ async function main(): Promise<void> {
         });
         await compAdapter.initialize();
 
-        const compRequestId = await compAdapter.postRestorationJob({
+        const compRequestId = await compAdapter.postTask({
           id: 'competition-test',
           description: 'Claim competition test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'competition-test/1',
           attemptNumber: 1,
         });
@@ -3335,7 +3358,7 @@ async function main(): Promise<void> {
     // ── Phase 13h: Agent Failure Handling ─────────────────────────────────
 
     results.push(
-      await runPhase('Phase 13h: Agent Failure — mock agent crashes, restorer handles gracefully', async () => {
+      await runPhase('Phase 13h: Agent Failure — mock agent crashes, harness handles gracefully', async () => {
         if (!agentEoaPrivateKey || !safeAddress || !mechAddress || !tmpDir) {
           throw new Error('Missing credentials');
         }
@@ -3359,10 +3382,10 @@ async function main(): Promise<void> {
         });
         await failAdapter.initialize();
 
-        const failRequestId = await failAdapter.postRestorationJob({
+        const failRequestId = await failAdapter.postTask({
           id: 'agent-failure-test',
           description: 'Agent failure test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'agent-failure-test/1',
           attemptNumber: 1,
         });
@@ -3380,11 +3403,11 @@ async function main(): Promise<void> {
         writeFS2(failScript, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
 
         const { ClaudeRunner } = await import('../../src/runner/claude.js');
-        const { E2eRestorerLoop: E2eFail } = await import('./legacy-restorer.js');
+        const { E2eHarnessLoop: E2eFail } = await import('./legacy-harness.js');
         const { Store: StoreFail } = await import('../../src/store/store.js');
         const failRunner = new ClaudeRunner({ claudePath: failScript });
         const failStore = new StoreFail(join(tmpDir!, 'fail-test.db'));
-        const failRestorer = new E2eFail(failAdapter, failRunner, failStore, join(tmpDir!, 'fail-work'), 30_000);
+        const failHarness = new E2eFail(failAdapter, failRunner, failStore, join(tmpDir!, 'fail-work'), 30_000);
 
         const miningInterval = setInterval(async () => {
           try { await anvilJsonRpc(ANVIL_RPC, 'evm_mine', []); } catch { /* ignore */ }
@@ -3393,7 +3416,7 @@ async function main(): Promise<void> {
         try {
           // processOne should NOT throw — error is caught internally
           const processed = await Promise.race([
-            failRestorer.processOne(),
+            failHarness.processOne(),
             sleep(30000).then(() => { throw new Error('processOne timed out'); }),
           ]);
           if (!processed) throw new Error('processOne returned false');
@@ -3460,10 +3483,10 @@ async function main(): Promise<void> {
         crashStore.setLastProcessedBlock(prePostBlock);
 
         // Post a request
-        const crashRequestId = await crashAdapter.postRestorationJob({
+        const crashRequestId = await crashAdapter.postTask({
           id: 'crash-recovery-test',
           description: 'Crash recovery E2E test',
-          type: 'restoration',
+          role: 'restoration',
           attemptId: 'crash-recovery-test/1',
           attemptNumber: 1,
         });
@@ -3645,24 +3668,27 @@ async function main(): Promise<void> {
             throw new Error(`expected claim-rewards dryRun, got ${JSON.stringify(jClaim)}`);
           }
 
-          const intent = await runJinnCliSubprocess(
+          const task = await runJinnCliSubprocess(
             [
-              'submit-intent',
+              'tasks',
+              'submit',
               '--dry-run',
               '--id',
               'e2e-cli',
               '--description',
               'E2E CLI config + password-fd',
+              '--solver-type',
+              'prediction.v0',
               ...cfg,
             ],
             pw,
           );
-          if (intent.code !== 0) {
-            throw new Error(`submit-intent --dry-run exit ${intent.code} stderr=${intent.stderr}`);
+          if (task.code !== 0) {
+            throw new Error(`tasks submit --dry-run exit ${task.code} stderr=${task.stderr}`);
           }
-          const jIntent = parseLastStdoutJsonObject(intent.stdout);
-          if (jIntent['dryRun'] !== true) {
-            throw new Error(`expected submit-intent dryRun, got ${JSON.stringify(jIntent)}`);
+          const jTask = parseLastStdoutJsonObject(task.stdout);
+          if (jTask['dryRun'] !== true) {
+            throw new Error(`expected tasks submit dryRun, got ${JSON.stringify(jTask)}`);
           }
 
           const scale = await runJinnCliSubprocess(['fleet', 'scale', '--to', '1', '--dry-run', ...cfg], pw);
@@ -3729,7 +3755,7 @@ async function main(): Promise<void> {
             throw new Error(`expected empty stolas tick, got ${JSON.stringify(tickEmpty)}`);
           }
 
-          console.log('    claim-rewards, submit-intent, fleet scale/retire, withdraw (dry-run + flags)');
+          console.log('    claim-rewards, tasks submit, fleet scale/retire, withdraw (dry-run + flags)');
           console.log('    fleet retire display 0 -> chainIndex 1 (matches jinn fleet JSON index)');
           console.log('    nextFleetServiceIndex + tickStolasDistributorClaims(strict, []) OK');
         },
@@ -3745,7 +3771,7 @@ async function main(): Promise<void> {
           await adapter.stop().catch(() => {});
           console.log('    Adapter stopped');
         }
-        await restorerApiServer?.close().catch(() => {});
+        await harnessApiServer?.close().catch(() => {});
         if (chain) {
           await chain.teardown();
           console.log('    Anvil process terminated');
