@@ -650,7 +650,7 @@ __metadata:
     "@coinbase/cdp-sdk": "npm:^1.48.2"
     "@ethereumjs/wallet": "npm:^10.0.0"
     "@hono/node-server": "npm:^1.19.12"
-    "@jinn-network/sdk": "npm:^1.0.0"
+    "@jinn-network/sdk": "portal:../packages/sdk"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     "@msgpack/msgpack": "npm:^3.0.0"
     "@noble/ed25519": "npm:^3.1.0"

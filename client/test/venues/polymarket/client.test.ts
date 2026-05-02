@@ -138,4 +138,11 @@ describe('Polymarket public data client', () => {
     await expect(getResolution({ marketId: 'mkt-1', fetchImpl: unresolvedFetch }))
       .resolves.toMatchObject({ status: 'unresolved' });
   });
+
+  it('propagates resolution read failures instead of emitting unresolved verdict state', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: 'temporary outage' }, 500)) as unknown as typeof fetch;
+
+    await expect(getResolution({ marketId: 'mkt-1', fetchImpl }))
+      .rejects.toThrow(/Polymarket request failed 500/);
+  });
 });

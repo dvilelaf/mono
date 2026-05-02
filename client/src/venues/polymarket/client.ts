@@ -339,31 +339,20 @@ function outcomeFromRecord(record: Record<string, unknown>): 'YES' | 'NO' | unde
 export async function getResolution(args: GetResolutionArgs): Promise<ResolutionSnapshot> {
   let market: MarketCandidate | null = null;
   let record: Record<string, unknown> = {};
-  try {
-    const fetchImpl = clientFetch(args);
-    let raw: unknown;
-    if (args.marketId) {
-      raw = await readJson(gammaUrl(args, `/markets/${encodeURIComponent(args.marketId)}`), fetchImpl);
-    } else if (args.slug) {
-      raw = await readJson(gammaUrl(args, `/markets/slug/${encodeURIComponent(args.slug)}`), fetchImpl);
-    } else if (args.conditionId) {
-      market = await getMarket(args);
-      raw = await readJson(gammaUrl(args, `/markets/${encodeURIComponent(market.marketId)}`), fetchImpl);
-    } else {
-      throw new Error('getResolution requires marketId, slug, or conditionId');
-    }
-    record = asRecord(raw);
-    market = normalizeMarketCandidate(record) ?? market;
-  } catch (err) {
-    if (!args.conditionId && !args.marketId) throw err;
-    return {
-      venue: 'polymarket',
-      marketId: args.marketId ?? '',
-      conditionId: args.conditionId ?? '',
-      status: 'unresolved',
-      sourceUrl: args.sourceUrl ?? 'https://polymarket.com',
-    };
+  const fetchImpl = clientFetch(args);
+  let raw: unknown;
+  if (args.marketId) {
+    raw = await readJson(gammaUrl(args, `/markets/${encodeURIComponent(args.marketId)}`), fetchImpl);
+  } else if (args.slug) {
+    raw = await readJson(gammaUrl(args, `/markets/slug/${encodeURIComponent(args.slug)}`), fetchImpl);
+  } else if (args.conditionId) {
+    market = await getMarket(args);
+    raw = await readJson(gammaUrl(args, `/markets/${encodeURIComponent(market.marketId)}`), fetchImpl);
+  } else {
+    throw new Error('getResolution requires marketId, slug, or conditionId');
   }
+  record = asRecord(raw);
+  market = normalizeMarketCandidate(record) ?? market;
 
   const conditionId = market?.conditionId ?? args.conditionId ?? firstString(record, ['conditionId', 'condition_id']) ?? '';
   const marketId = market?.marketId ?? args.marketId ?? firstString(record, ['id', 'marketId', 'market_id']) ?? '';
