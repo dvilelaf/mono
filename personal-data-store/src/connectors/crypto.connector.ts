@@ -33,8 +33,10 @@ export const cryptoConnector: Connector = {
     }
 
     let recordsSynced = 0;
+    let quotaExhausted = false;
 
     for (const [address, walletGroup] of addressMap) {
+      if (quotaExhausted) break;
       await sleep(250); // 4 RPS to stay under Zerion's 5 RPS limit
       try {
         const res = await fetch(
@@ -42,6 +44,10 @@ export const cryptoConnector: Connector = {
           { headers: zerionHeaders() },
         );
 
+        if (res.status === 429) {
+          quotaExhausted = true;
+          throw new Error("Zerion API error: 429 (quota exhausted — bailing out of run)");
+        }
         if (!res.ok) throw new Error(`Zerion API error: ${res.status}`);
 
         const json = (await res.json()) as {

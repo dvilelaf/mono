@@ -63,13 +63,27 @@ async function executeJob(job: JobName): Promise<RunResult> {
     `=== ${job} run start ${startedAt.toISOString()} ===\n`,
   );
 
+  const childEnv = { ...process.env };
+  for (const key of [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDECODE",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+  ]) {
+    delete childEnv[key];
+  }
+
   const exitCode = await new Promise<number | null>((resolve) => {
     const child = spawn(
       config.claudeBin,
       ["-p", "--permission-mode", "bypassPermissions"],
       {
         cwd: config.repoRoot,
-        env: { ...process.env },
+        env: childEnv,
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
