@@ -434,10 +434,10 @@ describe('Engine packaging integration', () => {
     expect(gen1).toBe(gen2);
   });
 
-  // ── Verdict envelope (evaluation intent) ─────────────────────────────────────
+  // ── Verdict envelope (evaluation Task) ─────────────────────────────────────
 
   it('pack() emits role=verdict envelope for taskRole=evaluation with verdictPayload', async () => {
-    // An evaluation intent must produce a 'verdict' envelope, not 'restoration'.
+    // An evaluation Task must produce a 'verdict' envelope, not 'restoration'.
     // The verdictPayload on solutionOutputsJson is passed through as the envelope payload
     // and validated against PortfolioV0VerdictPayloadSchema.
     const requestId = 'req-eval-001';
@@ -554,7 +554,7 @@ describe('Engine packaging integration', () => {
     expect(payload['fills']).toBeUndefined();
   });
 
-  it('pack() throws when evaluation intent has no verdictPayload on implOutput', async () => {
+  it('pack() throws when evaluation Task has no verdictPayload on implOutput', async () => {
     // Guard: if an evaluator impl forgot to set verdictPayload, pack() should throw
     // rather than silently assembling a malformed restoration-role envelope.
     const requestId = 'req-eval-no-vp';

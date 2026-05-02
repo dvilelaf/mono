@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { parseTask } from '../../src/types/desired-state.js';
+import { parseTask } from '../../src/types/task.js';
 
 describe('Task', () => {
-  it('parses a valid desired state', () => {
+  it('parses a valid Task', () => {
     const input = {
       description: 'The API should return 200 on /health',
       context: { endpoint: 'https://api.example.com/health' },
@@ -13,7 +13,7 @@ describe('Task', () => {
     expect(result.id).toBeDefined();
   });
 
-  it('rejects a desired state without description', () => {
+  it('rejects a Task without description', () => {
     expect(() => parseTask({ context: {} })).toThrow();
   });
 });

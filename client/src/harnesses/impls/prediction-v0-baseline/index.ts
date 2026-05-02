@@ -62,7 +62,7 @@ export class PredictionV0BaselineImpl implements Harness {
     return { status: 'ready' };
   }
 
-  async canAttempt(task: import('../../../types/desired-state.js').Task):
+  async canAttempt(task: import('../../../types/task.js').Task):
     Promise<{ ok: true } | { ok: false; reason: string }>
   {
     const parsed = PredictionV0TaskSchema.safeParse(task);

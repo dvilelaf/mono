@@ -1,5 +1,5 @@
 import type { Check } from '../types.js';
-import type { Window } from '../../../../types/desired-state.js';
+import type { Window } from '../../../../types/task.js';
 
 export function checkSubmissionWithinWindow(
   submittedAt: number,

@@ -32,7 +32,7 @@ const baseInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
   role: 'restoration',
   task: {
-    cid: 'bafy-intent',
+    cid: 'bafy-task',
     onchainCreationTx: '0x' + 'ab'.repeat(32),
     onchainCreationBlock: 100,
     requestId: '0x' + 'cd'.repeat(32),

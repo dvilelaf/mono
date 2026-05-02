@@ -62,7 +62,7 @@ export class PredictionApyV0BaselineImpl implements Harness {
     return { status: 'ready' };
   }
 
-  async canAttempt(task: import('../../../types/desired-state.js').Task) {
+  async canAttempt(task: import('../../../types/task.js').Task) {
     const parsed = PredictionApyV0TaskSchema.safeParse(task);
     if (!parsed.success) return { ok: false as const, reason: `Invalid prediction.apy.v0 task: ${parsed.error.message}` };
     if (Date.now() > parsed.data.window.endTs) return { ok: false as const, reason: 'window already closed' };

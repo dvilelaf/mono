@@ -12,7 +12,7 @@ import {
   GeneratedTaskSource,
 } from '../../src/tasks/sources.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
-import type { Task } from '../../src/types/desired-state.js';
+import type { Task } from '../../src/types/task.js';
 
 const STUB_INTENT: SignedTaskV1 = {
   schemaVersion: 'task.v1',

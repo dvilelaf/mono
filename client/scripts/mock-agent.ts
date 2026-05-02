@@ -105,9 +105,9 @@ async function callTool(name: string, toolArgs: Record<string, unknown>): Promis
     .join('\n');
 }
 
-// ── Get desired state ────────────────────────────────────────────────────────
+// ── Get Task ────────────────────────────────────────────────────────
 
-const stateJson = await callTool('get_desired_state', {});
+const stateJson = await callTool('get_task', {});
 const state = JSON.parse(stateJson) as {
   id: string;
   description: string;
@@ -167,7 +167,7 @@ if (isEvaluation) {
   const verdict = {
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
-    desiredStateId: state.id,
+    taskId: state.id,
     restorationRequestId: state.restorationRequestId,
     requestId: state.requestId,
     success: hasDelivery,
@@ -212,7 +212,7 @@ if (isEvaluation) {
   const result = {
     protocol: 'jinn-client/v1',
     type: 'restoration-result',
-    desiredStateId: state.id,
+    taskId: state.id,
     requestId: state.requestId,
     description: state.description,
     success: true,

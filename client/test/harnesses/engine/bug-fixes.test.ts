@@ -17,7 +17,7 @@ import {
 } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from '../../../src/harnesses/engine/state.js';
-import type { Task } from '../../../src/types/desired-state.js';
+import type { Task } from '../../../src/types/task.js';
 import type { Harness, HarnessContext, Solution } from '../../../src/harnesses/types.js';
 import {
   resolveOrchestratorConfig,

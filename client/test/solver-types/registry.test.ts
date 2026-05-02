@@ -138,7 +138,7 @@ describe('SOLVER_TYPES manifest', () => {
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       autoTasksDisabled: false,
-      env: { ...process.env, JINN_ENABLE_APY_AUTO_INTENTS: '1' },
+      env: { ...process.env, JINN_ENABLE_APY_AUTO_TASKS: '1' },
     });
     expect(generators.length).toBe(2);
     expect(generators.map((g) => g.solverType)).toEqual(['prediction.v0', 'prediction.apy.v0']);

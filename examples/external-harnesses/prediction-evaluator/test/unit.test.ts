@@ -73,7 +73,7 @@ describe('@jinn-examples/prediction-evaluator', () => {
     expect(v.error).toBe('missing restoration');
   });
 
-  it('produces a deterministic score for the same intent + forecast', async () => {
+  it('produces a deterministic score for the same Task + forecast', async () => {
     const impl = createEvaluator(env);
     const out1 = await impl.run(makeCtx('determinism-test', 0.6));
     const out2 = await impl.run(makeCtx('determinism-test', 0.6));

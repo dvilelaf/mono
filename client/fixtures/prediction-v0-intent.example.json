@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "prediction.v0 Task template. The submit-intent CLI resolves two sentinels:",
+    "prediction.v0 Task template. The tasks submit CLI resolves two sentinels:",
     "  * window.startTs = 0       → Date.now() at post time; endTs + resolveTs follow",
     "  * threshold = \"current\"  → current Chainlink price at post time",
     "",

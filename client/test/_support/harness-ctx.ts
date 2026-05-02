@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Task } from '@/types/desired-state.js';
+import type { Task } from '@/types/task.js';
 import type { HarnessContext } from '@/harnesses/types.js';
 import { TrajectoryCollector } from '@/trajectory/collector.js';
 

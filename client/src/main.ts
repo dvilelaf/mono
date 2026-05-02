@@ -1181,8 +1181,7 @@ export async function main(): Promise<DaemonStartupInfo | void> {
 
   // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
   const autoTasksDisabled =
-    process.env['JINN_DISABLE_AUTO_TASKS'] === '1' ||
-    process.env['JINN_DISABLE_AUTO_INTENTS'] === '1';
+    process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
   const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
   const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
   const { generators: autoTaskGenerators, logLines: autoTaskLogLines } = collectTestnetAutoTaskGenerators({

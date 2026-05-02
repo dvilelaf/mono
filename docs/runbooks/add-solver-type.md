@@ -8,7 +8,7 @@ This runbook replaces the pre-manifest extension steps in [Architecture audit (j
 |--------|------|----------------|
 | **SolverType** (`solverType`) | Names the typed Task spec shape; drives CLI `--spec-file` parsing, optional auto-generators, and operator UX metadata. | `client/src/solver-types/` (`SOLVER_TYPES` in `index.ts`) |
 | **Harness** | Solves a Task for a given SolverType and can evaluate Tasks for `role: 'evaluation'`. | `client/src/harnesses/impls/*` — new Harness classes are constructed in one place: [`buildHarnesses`](../../client/src/harnesses/impls/index.ts). SolverNet config chooses the restoration Harness at runtime. |
-| **Task** | A posted object with top-level `solverType`, plus typed `window` / `spec` / `eligibility`. | `client/src/types/desired-state.ts` + per-SolverType Zod in `client/src/types/` |
+| **Task** | A posted object with top-level `solverType`, plus typed `window` / `spec` / `eligibility`. | `client/src/types/task.ts` + per-SolverType Zod in `client/src/types/` |
 
 **Important:** **Parsing and testnet auto-post** for SolverTypes is centralized in [`SOLVER_TYPES`](../../client/src/solver-types/index.ts) and [`collectTestnetAutoTaskGenerators`](../../client/src/solver-types/index.ts). **Which Harness runs** for a restoration Task is owned by the enabled SolverNet: `task.solverType` resolves to `solverNets.<name>`, and that SolverNet selects its Harness plus canonical/extra SolverPlugins. Evaluation Tasks still dispatch by role-aware Harness support.
 
@@ -35,7 +35,7 @@ If the SolverType needs CLI-time resolution (e.g. `window.startTs: 0`, or oracle
 
 **Minimum touch for wiring:** one new file under `solver-types/` plus an entry in `solver-types/index.ts`. You still need the **types** file (and any template/auto helpers) for a real SolverType.
 
-### 2.4 Harness + evaluator impls
+### 2.4 Harness + evaluation Harnesses
 
 Ship at least one `Harness` under `client/src/harnesses/impls/<your-impl>/` with `supports({ solverType, role })` narrowing to your SolverType.
 
@@ -74,4 +74,4 @@ Loading a third-party Harness from npm or dynamic `import()` is **not** supporte
 
 ## 5. Future hook (not implemented)
 
-Per-SolverType doctor checks (e.g. portfolio HL preflight) may eventually hang off the manifest; today [`client/src/cli/commands/doctor.ts`](../../client/src/cli/commands/doctor.ts) still branches on configured desired states.
+Per-SolverType doctor checks (e.g. portfolio HL preflight) may eventually hang off the manifest; today [`client/src/cli/commands/doctor.ts`](../../client/src/cli/commands/doctor.ts) still branches on configured Tasks.

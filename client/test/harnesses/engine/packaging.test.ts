@@ -9,7 +9,7 @@ import {
   walkArtifacts,
   uploadArtifacts,
 } from '../../../src/harnesses/engine/packaging.js';
-import type { Task } from '../../../src/types/desired-state.js';
+import type { Task } from '../../../src/types/task.js';
 import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
 import { Store } from '../../../src/store/store.js';
 
@@ -344,7 +344,7 @@ describe('uploadArtifacts — trajectory collector', () => {
     writeFileSync(join(workDir, 'result.json'), '{"ok":true}');
     writeFileSync(join(workDir, 'notes.md'), '# Notes');
 
-    const collector = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-1' });
+    const collector = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-1' });
     const deps = mkPkgDeps({ collector });
 
     const artifacts = await uploadArtifacts(
@@ -404,7 +404,7 @@ describe('uploadArtifacts — trajectory collector', () => {
     writeFileSync(join(workDir, 'a.txt'), 'aaa');
     writeFileSync(join(workDir, 'b.txt'), 'bbb');
 
-    const collector = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-x' });
+    const collector = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-x' });
     const artifacts = await uploadArtifacts(
       [
         { localPath: join(workDir, 'a.txt'), artifactType: 'execution_log' },
@@ -429,7 +429,7 @@ describe('uploadArtifacts — trajectory collector', () => {
     mkdirSync(workDir, { recursive: true });
     writeFileSync(join(workDir, 'file.txt'), 'data');
 
-    const collector = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-y' });
+    const collector = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-y' });
     const artifacts = await uploadArtifacts(
       [{ localPath: join(workDir, 'file.txt'), artifactType: 'generated_file', metadata: { custom: 'value' } }],
       mkPkgDeps({ collector }),

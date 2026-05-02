@@ -24,7 +24,7 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { createWriteStream } from 'node:fs';
 import { z } from 'zod';
-import type { Task } from '../../types/desired-state.js';
+import type { Task } from '../../types/task.js';
 import type { OutputArtifact } from '../../types/portfolio.js';
 import type { Artifact } from '../../types/envelope.js';
 import type { Store } from '../../store/store.js';

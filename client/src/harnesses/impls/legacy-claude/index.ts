@@ -142,7 +142,7 @@ export class LegacyClaudeImpl implements Harness {
 	  }
 
   private async recoverPublishedArtifact(
-    desiredStateId: string,
+    taskId: string,
     tag: 'restoration-result' | 'evaluation-verdict',
   ): Promise<string> {
     if (!this.config.storePath) return '';
@@ -151,7 +151,7 @@ export class LegacyClaudeImpl implements Harness {
       const store = new Store(this.config.storePath);
       try {
         const [artifact] = store.searchArtifacts({
-          desiredStateId,
+          taskId,
           tags: [tag],
           limit: 1,
         });
@@ -184,7 +184,7 @@ function legacyVerdictPayload(task: { id: string; description: string }, recover
     protocol: 'jinn-client/v1',
     type: 'evaluation-verdict',
     requestId: task.id,
-    desiredStateId: task.id,
+    taskId: task.id,
     success: Boolean(recoveredData),
     reason: recoveredData || `Legacy evaluation completed for "${task.description}"`,
     data: recoveredData,

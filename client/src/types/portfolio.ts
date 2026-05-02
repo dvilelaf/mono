@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import { WindowSchema } from './desired-state.js';
+import { WindowSchema } from './task.js';
 
 // ── Shared primitives ────────────────────────────────────────────────────────
 

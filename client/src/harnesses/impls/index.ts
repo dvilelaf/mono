@@ -81,7 +81,7 @@ export interface HarnessEnv {
 }
 
 /**
- * Build the canonical ordered list of first-party harness / evaluator impls.
+ * Build the canonical ordered list of first-party restoration/evaluation Harnesses.
  * Registration order is stable: it matches historical `main.ts` first-match
  * behavior for `HarnessRegistry`.
  *

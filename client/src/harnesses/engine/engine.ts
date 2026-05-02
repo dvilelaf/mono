@@ -613,7 +613,7 @@ export class TaskEngine {
       window: { startTs: run.windowStartTs, endTs: run.windowEndTs },
     };
 
-    provisionWorkingDir(workingDir, task as import('../../types/desired-state.js').Task);
+    provisionWorkingDir(workingDir, task as import('../../types/task.js').Task);
     provisionImplStateDir(implStateDir);
 
     // takePreSnapshot transitions directly to RUNNING with the snapshot payload
@@ -680,7 +680,7 @@ export class TaskEngine {
           ...(task.solverType ? { solverType: task.solverType, spec: {} } : {}),
           role,
           window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
-        }) as import('../../types/desired-state.js').Task,
+        }) as import('../../types/task.js').Task,
         taskCid: task.taskCid,
         solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
         runtimePlugins,
@@ -1201,8 +1201,7 @@ export class TaskEngine {
    *   - `gatingClaim` doesn't carry a verdict (impl shape mismatch — log and
    *     return).
    *   - The parent harness's manifest hash isn't reachable from the
-   *     persisted state (legacy tasks that pre-date evidenceHash
-   *     threading — log and return).
+   *     persisted state — log and return).
    *   - `resolveAgentId` returns null (subgraph not indexed yet, or no
    *     subgraph URL configured at all — log and return).
    *
@@ -1228,11 +1227,10 @@ export class TaskEngine {
     manifestCid: string,
     evidenceHash: `0x${string}` | null | undefined,
   ): void {
-    const desiredStateId = task.task?.id;
-    if (!desiredStateId) {
-      // Pre-migration task rows had no task_payload; the legacy
-      // path is the only thing that can emit artifacts for them, and it
-      // does so via MCP. Skip rather than synthesise an id.
+    const taskId = task.task?.id;
+    if (!taskId) {
+      // Rows without task payload cannot be attributed to a Task id. Skip
+      // rather than synthesise provenance.
       return;
     }
     const taskRole = task.taskRole ?? 'restoration';
@@ -1242,7 +1240,7 @@ export class TaskEngine {
 
     this.store.insertArtifact({
       id: randomUUID(),
-      desiredStateId,
+      taskId,
       requestId: task.requestId,
       title: `${tag}: ${task.solverType ?? 'cycle'} (${task.implName ?? 'engine'})`,
       content: JSON.stringify({

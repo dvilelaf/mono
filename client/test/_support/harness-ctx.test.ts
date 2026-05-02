@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import { makeHarnessCtx } from '@test/harness-ctx.js';
-import type { Task } from '@/types/desired-state.js';
+import type { Task } from '@/types/task.js';
 
 const fakeTask: Task = {
   id: 'test-1',

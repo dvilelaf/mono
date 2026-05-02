@@ -12,10 +12,10 @@
  *     and can be asserted without external dependencies.
  *  3. Spawns an Anvil fork of Base for parity with the existing
  *     `e2e-portfolio-v0` harness so a follow-up task can fill in the
- *     intent-post + daemon-run + envelope-assertion sections by mirroring
+ *     task-post + daemon-run + envelope-assertion sections by mirroring
  *     `client/test/e2e/portfolio-v0.ts`.
  *
- * Follow-up: the intent-post + envelope-assertion details (executor.implName
+ * Follow-up: the task-post + envelope-assertion details (executor.implName
  * === 'claude-code-learner', per-phase artifact assertions in workingDir) should
  * land once we have a known-working `claude` install in the Anvil environment.
  */
@@ -87,10 +87,10 @@ async function main(): Promise<void> {
     const workingDir = mkdtempSync(join(tmpdir(), 'jinn-e2e-dl-work-'));
     const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-e2e-dl-state-'));
     try {
-      // TODO(plan-3-followup): intent post + daemon run + envelope assertion.
+      // TODO(plan-3-followup): task post + daemon run + envelope assertion.
       // Mirror the harness in client/test/e2e/portfolio-v0.ts:
       //   - bootstrap fleet on Anvil-forked Base (FleetBootstrapper)
-      //   - operator posts a portfolio.v0 intent on-chain
+      //   - operator posts a portfolio.v0 Task on-chain
       //   - daemon claims, runs the wrapper (claude-code-learner), packages + delivers
       //   - assert per-phase artifacts in workingDir:
       const phases = [
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
       // TODO(plan-3-followup): assert envelope's executor.implName === 'claude-code-learner'
       // by reading the manifest the engine packaged (mirror e2e-portfolio-v0's
       // assembleAndSignManifest + executor field assertion).
-      console.log('=== e2e PASSED (skeleton; intent-post + envelope assertion deferred) ===');
+      console.log('=== e2e PASSED (skeleton; task-post + envelope assertion deferred) ===');
     } finally {
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });

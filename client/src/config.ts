@@ -18,8 +18,8 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { TaskSchema, parseTask } from './types/desired-state.js';
-import type { Task } from './types/desired-state.js';
+import { TaskSchema, parseTask } from './types/task.js';
+import type { Task } from './types/task.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 

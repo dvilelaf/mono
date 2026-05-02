@@ -4,7 +4,7 @@
  * Scenario:
  *   1. Bootstrap an operator on Anvil-forked Base mainnet
  *   2. Deploy MockV3Aggregator (ETH/USD price feed)
- *   3. Post a prediction.v0 intent on-chain
+ *   3. Post a prediction.v0 Task on-chain
  *   4. Harness claims + runs PredictionV0BaselineImpl (mocked Chainlink)
  *   5. Sign + submit jinn.execution.v1 restoration envelope as result
  *   6. DeliveryWatcher claims restoration delivery + creates evaluation job
@@ -65,7 +65,7 @@ import { getChainConfig } from '../../src/earning/contracts.js';
 import { PredictionV0BaselineImpl } from '../../src/harnesses/impls/prediction-v0-baseline/index.js';
 import { PredictionV0Evaluator } from '../../src/harnesses/impls/prediction-v0-evaluator/index.js';
 import type { HarnessContext } from '../../src/harnesses/types.js';
-import type { Task } from '../../src/types/desired-state.js';
+import type { Task } from '../../src/types/task.js';
 import type { TaskV1 } from '../../src/types/task-document.js';
 import type { PredictionV0Task } from '../../src/types/prediction.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
@@ -615,11 +615,11 @@ async function main(): Promise<void> {
       console.log('    3 MechAdapters initialized + marketplace stabilized for all 3 mechs');
     }));
 
-    // ── Phase 5: Post prediction.v0 intent on-chain (creator) ────────────────
+    // ── Phase 5: Post prediction.v0 Task on-chain (creator) ────────────────
     // The creator creates the restoration request specifying RESTORER's mech as priorityMech.
     // This is the correct cross-role flow: creator funds + directs, harness delivers.
 
-    results.push(await runPhase('Phase 5: Post prediction.v0 intent on-chain (creator)', async () => {
+    results.push(await runPhase('Phase 5: Post prediction.v0 Task on-chain (creator)', async () => {
       if (!creatorAgentPk || !creatorSafe || !harnessMech || !mockFeedAddress) throw new Error('Missing state from prior phases');
 
       // Capture starting block so later getLogs calls stay within the 10,000-block Anvil fork limit
@@ -716,7 +716,7 @@ async function main(): Promise<void> {
       if (requestIds.length === 0) throw new Error('No requestId from submitTask');
       restorationRequestId = requestIds[0];
       await jsonRpc(ANVIL_RPC, 'evm_mine', []);
-      console.log(`    prediction.v0 intent posted by creator (priorityMech=harnessMech), requestId: ${restorationRequestId}`);
+      console.log(`    prediction.v0 Task posted by creator (priorityMech=harnessMech), requestId: ${restorationRequestId}`);
 
       // Verify MarketplaceRequest event on-chain from the submission receipt.
       const receipt = await publicClient.getTransactionReceipt({ hash: submission.txHash });
@@ -883,7 +883,7 @@ async function main(): Promise<void> {
       // the evaluator's mech (getMechDeliveryRate + submitEvaluationJob use mechContractAddress).
       (creatorRestorationWatcherAdapter as any).config.mechContractAddress = evaluatorMech;
 
-      // Inject the original desired state into pendingEvaluations so iCreatedRestoration=true.
+      // Inject the original Task into pendingEvaluations so iCreatedRestoration=true.
       (creatorRestorationWatcherAdapter as any).pendingEvaluations.set(restorationRequestId, {
         ...capturedIntent,
         id: restorationRequestId,

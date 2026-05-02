@@ -33,10 +33,10 @@ describe('Store', () => {
     expect(store.getConfigValue('last_reward_claim_tick_at')).toBe('2026-01-02T00:00:00.000Z');
   });
 
-  it('searches artifacts by desiredStateId', () => {
+  it('searches artifacts by taskId', () => {
     store.insertArtifact({
       id: 'art-1',
-      desiredStateId: 'my-state-id',
+      taskId: 'my-state-id',
       requestId: 'req-1',
       title: 'Test artifact',
       content: 'Some content',
@@ -45,7 +45,7 @@ describe('Store', () => {
     });
     store.insertArtifact({
       id: 'art-2',
-      desiredStateId: 'other-state-id',
+      taskId: 'other-state-id',
       requestId: 'req-2',
       title: 'Other artifact',
       content: 'Other content',
@@ -53,11 +53,11 @@ describe('Store', () => {
       outcome: 'FAILURE',
     });
 
-    const results = store.searchArtifacts({ desiredStateId: 'my-state-id' });
+    const results = store.searchArtifacts({ taskId: 'my-state-id' });
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe('art-1');
 
-    const noMatch = store.searchArtifacts({ desiredStateId: 'nonexistent' });
+    const noMatch = store.searchArtifacts({ taskId: 'nonexistent' });
     expect(noMatch).toHaveLength(0);
   });
 

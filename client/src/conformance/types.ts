@@ -10,7 +10,7 @@
  */
 
 import type { EvidenceTier, SignedEnvelope } from '../types/envelope.js';
-import type { Task } from '../types/desired-state.js';
+import type { Task } from '../types/task.js';
 
 export interface CheckResult {
   /** Dotted identifier: `<area>.<check>` — e.g. `envelope.schema`, `trajectory.hash-chain`. */

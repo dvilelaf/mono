@@ -16,7 +16,7 @@ export interface ExecutionAdapter {
 
   /**
    * Optional: returns the IPFS CID of the most recently posted Task payload.
-   * Populated by adapters that upload to IPFS as part of `postDesiredState`
+   * Populated by adapters that upload to IPFS as part of `postTask`
    * (e.g. MechAdapter). Used by the posting service for ERC-8004 registration.
    * Returns undefined for adapters that do not upload (e.g. LocalAdapter).
    */

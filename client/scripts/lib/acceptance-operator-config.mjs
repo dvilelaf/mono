@@ -44,13 +44,13 @@ export function resolveAcceptanceRpcUrl(env = process.env) {
 }
 
 /**
- * Acceptance gate posts no static desired states. The protocol loop is
- * exercised via the testnet auto-intent generator (solverType=prediction.v0,
+ * Acceptance gate posts no static Tasks. The protocol loop is
+ * exercised via the testnet auto-task generator (solverType=prediction.v0,
  * id prefix `pred-v0-auto-…`) which the daemon registers automatically when
- * `network=testnet` and `JINN_DISABLE_AUTO_INTENTS` is not set. The gate
+ * `network=testnet` and `JINN_DISABLE_AUTO_TASKS` is not set. The gate
  * tracks any prediction.v0 cycles created after `runStartAt`.
  */
-export function buildAcceptanceDesiredStates(_runIdSuffix) {
+export function buildAcceptanceTasks(_runIdSuffix) {
   return [];
 }
 
@@ -78,7 +78,7 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     predictionV0ResolveGapMs: toInt(env['JINN_PREDICTION_V0_RESOLVE_GAP_MS'], 60_000),
     // Keep harness selection on the deterministic prediction.v0 defaults for
     // the gate. SolverPlugins still load through the normal daemon defaults.
-    desiredStates: buildAcceptanceDesiredStates(runIdSuffix),
+    tasks: buildAcceptanceTasks(runIdSuffix),
   };
 
   const optionalMap = [

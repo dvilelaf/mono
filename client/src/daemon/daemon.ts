@@ -121,8 +121,8 @@ export interface DaemonConfig {
 
   /**
    * TaskEngine — sole path for marketplace request → claim → run → deliver.
-   * Evaluation tasks (`type === 'evaluation'`) dispatch via `supports()` to
-   * evaluator impls; health-check tasks with no spec use `legacy-claude` via
+   * Evaluation tasks (`role === 'evaluation'`) dispatch via `supports()` to
+   * evaluation Harnesses; health-check tasks with no solverType use `legacy-claude` via
    * the registry default.
    */
   restorationEngine: Omit<TaskEngineOptions, 'store' | 'packagingDeps'> & {
@@ -413,13 +413,13 @@ export class Daemon {
    * Bridge loop: consumes adapter.watchForRequests() and routes each request to
    * the TaskEngine via observe() + process().
    *
-   * For legacy tasks (no spec), the engine dispatches to the legacy-claude impl.
+   * For tasks without solverType, the engine dispatches to the legacy-claude Harness.
    * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
    * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
    *
    * On-chain provenance (taskCid, onchainCreationTx, onchainCreationBlock) is
    * populated from the TaskRequest when available (MechAdapter sets these
-   * from the MarketplaceRequest event log). Legacy paths that don't populate them
+   * from the MarketplaceRequest event log). Adapter paths that don't populate them
    * fall back to safe defaults with a warning.
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
@@ -433,7 +433,7 @@ export class Daemon {
       const windowStartTs = request.task.window?.startTs ?? Date.now();
       const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
 
-      // Warn on missing provenance — legacy tasks may legitimately lack it.
+      // Warn on missing provenance; local/test adapters may legitimately lack it.
       if (!request.taskCid) {
         console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
       }
@@ -505,7 +505,7 @@ export class Daemon {
 
       this.store.insertRemoteArtifact({
         id: artifactId,
-        desiredStateId: '',
+        taskId: '',
         requestId: '',
         title,
         tags,

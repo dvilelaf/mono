@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ClaudeMcpHyperliquidImpl, _writeHlMcpServerScript } from '../../../../src/harnesses/impls/claude-mcp-hyperliquid/index.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 import type { HlClearinghouseState, HlFill, HlSpotClearinghouseState } from '../../../../src/venues/hyperliquid/types.js';
 
 // Mock uploadToIpfs for envelope-assembly integration tests (no real network)

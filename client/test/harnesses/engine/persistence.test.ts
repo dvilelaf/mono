@@ -402,7 +402,7 @@ describe('concurrent transition', () => {
     p.transition('concurrent-2', TaskRunState.WAITING);
     // Row is now WAITING again.
 
-    // Second "concurrent" call with same intent now in WAITING reads fresh state,
+    // Second "concurrent" call with same Task now in WAITING reads fresh state,
     // but if we simulate by manually resetting to CLAIMED and doing two transitions:
     store.db.prepare(
       `UPDATE task_runs SET state = 'CLAIMED' WHERE request_id = ?`,

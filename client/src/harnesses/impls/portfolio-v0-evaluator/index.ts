@@ -28,7 +28,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { Task } from '../../../types/desired-state.js';
+import type { Task } from '../../../types/task.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';

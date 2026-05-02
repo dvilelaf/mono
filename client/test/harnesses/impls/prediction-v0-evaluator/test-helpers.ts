@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import type { PredictionV0Task } from '../../../../src/types/prediction.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 import type { SignedEnvelope } from '../../../../src/types/envelope.js';
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
 import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';

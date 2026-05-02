@@ -138,22 +138,22 @@ export function buildPrompt(task: Task): string {
 
   const instructions = isEvaluation
     ? `## Instructions
-1. Use get_desired_state to understand what was requested
+1. Use get_task to understand what was requested
 2. Use get_restoration_delivery to fetch the restoration result
-3. Evaluate whether the restoration achieved the desired state
+3. Evaluate whether the solution satisfied the Task
 4. Use submit_restoration_result to report your verdict
 5. Use report_progress to log progress along the way
 6. Optionally use publish_artifact to record any insights`
     : `## Instructions
-1. Use get_desired_state to understand what needs to be restored
+1. Use get_task to understand what needs to be restored
 2. Take the necessary actions to restore it
 3. Use submit_restoration_result to report what you did
 4. Use report_progress to log progress along the way
 5. Optionally use publish_artifact to record any insights`;
 
-  return `You are ${isEvaluation ? 'evaluating a restoration' : 'restoring a desired state'}.
+  return `You are ${isEvaluation ? 'evaluating a solution' : 'solving a Task'}.
 
-## Desired State
+## Task
 ID: ${task.id}
 Description: ${task.description}
 ${contextSection}

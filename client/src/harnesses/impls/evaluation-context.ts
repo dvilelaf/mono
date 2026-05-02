@@ -1,4 +1,4 @@
-import type { Task } from '../../types/desired-state.js';
+import type { Task } from '../../types/task.js';
 
 /** Eval `Task.context` key for the restoration job's intended-state IPFS CID (not the eval job's). */
 export const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid' as const;

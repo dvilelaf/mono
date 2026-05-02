@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Task } from '../types/desired-state.js';
+import type { Task } from '../types/task.js';
 import type { TaskV1, SignedTaskV1 } from '../types/task-document.js';
 import { resolvePredictionApyV0Template } from './prediction-apy-v0-template.js';
 import { signTaskV1 } from '../tasks/signing.js';

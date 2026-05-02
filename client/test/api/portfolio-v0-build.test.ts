@@ -76,7 +76,7 @@ describe('gatherPortfolioV0Status', () => {
     await withTempStore(async (store) => {
       store.insertArtifact({
         id: 'snap-1',
-        desiredStateId: 'ds-1',
+        taskId: 'ds-1',
         requestId: 'req-snap',
         title: 'System Snapshot 1',
         content: '{"equity":100}',
@@ -85,7 +85,7 @@ describe('gatherPortfolioV0Status', () => {
       });
       store.insertArtifact({
         id: 'not-a-snap',
-        desiredStateId: 'ds-2',
+        taskId: 'ds-2',
         requestId: 'req-other',
         title: 'Not a snapshot',
         content: 'stuff',

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { LegacyClaudeImpl } from '../../../../src/harnesses/impls/legacy-claude/index.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import type { Runner, RunnerContext } from '../../../../src/runner/runner.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

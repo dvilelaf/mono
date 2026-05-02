@@ -11,7 +11,7 @@
 
 import type Database from 'better-sqlite3';
 import { assertValidTransition, TERMINAL_STATES, type TaskRunState } from './state.js';
-import type { Task } from '../../types/desired-state.js';
+import type { Task } from '../../types/task.js';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
 

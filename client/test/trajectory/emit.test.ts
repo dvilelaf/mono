@@ -16,7 +16,7 @@ vi.mock('../../src/adapters/mech/ipfs.js', () => ({
 
 describe('emitTrajectory', () => {
   it('returns a CID and sha256 of the signed blob, and the signed blob schema-validates', async () => {
-    const c = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-1' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-1' });
     c.addSpan({
       name: 'phase.design',
       kind: 'INTERNAL',
@@ -47,7 +47,7 @@ describe('emitTrajectory', () => {
   });
 
   it('signs keccak256(JCS(trajectory without signature))', async () => {
-    const c = new TrajectoryCollector({ taskCid: 'bafy-intent', runId: 'run-2' });
+    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-2' });
     c.addSpan({
       name: 'x',
       kind: 'INTERNAL',

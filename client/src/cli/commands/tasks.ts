@@ -11,7 +11,7 @@ import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import { createCliExecutionContext } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import type { Task } from '../../types/desired-state.js';
+import type { Task } from '../../types/task.js';
 import type { TaskV1 } from '../../types/task-document.js';
 import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../solver-types/index.js';
 import { signTaskV1 } from '../../tasks/signing.js';

@@ -13,7 +13,7 @@ export const predictionApyV0: SolverTypeDefinition<PredictionApyV0AutoConfig | u
   },
   buildGenerator: (config) => makePredictionApyV0Generator(config ?? {}),
   getTestnetAutoConfig: (ctx) => {
-    if (ctx.network !== 'testnet' || ctx.env['JINN_ENABLE_APY_AUTO_INTENTS'] !== '1') {
+    if (ctx.network !== 'testnet' || ctx.env['JINN_ENABLE_APY_AUTO_TASKS'] !== '1') {
       return undefined;
     }
     return {

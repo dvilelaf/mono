@@ -18,7 +18,7 @@ import {
   fetchTrajectoryFromIpfs,
   fetchSourceBundleFromIpfs,
 } from '../adapters/mech/ipfs.js';
-import { parseTask } from '../types/desired-state.js';
+import { parseTask } from '../types/task.js';
 import { checkEnvelopeSchema } from './checks/envelope-schema.js';
 import { checkPayload } from './checks/payload.js';
 import { checkHashAndSignature } from './checks/hash-signature.js';

@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/harnesses/impls/portfolio-v0-evaluator/index.js';
 import { RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 import type { HlFill, HlGridPoint } from '../../../../src/venues/hyperliquid/types.js';
 import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
@@ -205,7 +205,7 @@ interface CtxOverrides {
 }
 
 /**
- * Build a HarnessContext for an evaluation intent using the unified-payload model.
+ * Build a HarnessContext for an evaluation Task using the unified-payload model.
  *
  * - solverType = 'portfolio.v0' (same as restoration)
  * - task.role = 'evaluation'

@@ -69,7 +69,7 @@ export class MechAdapter implements ExecutionAdapter {
   private pendingEvaluationResultCids = new Map<string, string>();
   // RIDs with no delivery found in backfill window; avoids repeated 500k-block rescans.
   private backfillMissRids = new Set<string>();
-  // Original desired states keyed by request ID (restoration and evaluation)
+  // Original Tasks keyed by request ID (restoration and evaluation)
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
   private store?: Store;
@@ -549,7 +549,7 @@ export class MechAdapter implements ExecutionAdapter {
                 artifacts: resultPayload.artifacts as string[] | undefined,
               };
 
-              // Use the original desired state — not the result payload
+              // Use the original Task, not the result payload.
               const task = this.originalStates.get(requestId) ?? {
                 id: requestId,
                 description: '',
@@ -572,7 +572,7 @@ export class MechAdapter implements ExecutionAdapter {
 
         // After new Deliver events are processed (and `pendingEvaluationResults` may be warm),
         // retry evaluation creation. Doing this *before* deliver processing can upload an
-        // evaluation desired state without `restorationResult` in context.
+        // evaluation Task without `restorationResult` in context.
         for (const rid of [...this.claimedButNotEvaluated]) {
           await this.tryCreateEvaluationJob(rid);
         }

@@ -12,7 +12,7 @@ export function createMockHarness(_env: ExternalHarnessEnv): HarnessAdapter {
     async promptForJson<T>({ promptId }: HarnessPromptArgs): Promise<T> {
       switch (promptId) {
         case 'orient':
-          return { topics: [{ name: 'intent-parse', summary: 'parsed' }] } as T;
+          return { topics: [{ name: 'task-parse', summary: 'parsed' }] } as T;
         case 'strategize':
           return {
             approach: 'mock approach',

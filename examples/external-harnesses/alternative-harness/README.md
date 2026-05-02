@@ -15,7 +15,7 @@ underlying agent runtime is swappable.
 - Default-export factory shape per
   `spec/2026-05-external-harness-impls.md` §3.2.
 - `supports({ solverType: 'prediction.v0', role: 'restoration' })` —
-  declines evaluation intents.
+  declines evaluation Tasks.
 - A clean `HarnessAdapter` contract (`src/harness.ts`) — one method
   (`promptForJson<T>`) plus an optional `closePhase`. Easy to wrap any
   subprocess harness around.

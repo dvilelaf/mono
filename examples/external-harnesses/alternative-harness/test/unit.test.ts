@@ -56,7 +56,7 @@ describe('@jinn-examples/alternative-harness', () => {
     expect(out.informational?.stepsFailed).toBe(0);
   });
 
-  it('declines evaluation intents', () => {
+  it('declines evaluation Tasks', () => {
     const impl = createHarness(env);
     expect(
       impl.supports({ solverType: 'prediction.v0', role: 'evaluation' }),

@@ -3,7 +3,7 @@ import { SimpleRunner } from '../../src/runner/simple.js';
 import type { Task } from '../../src/types/index.js';
 
 describe('SimpleRunner', () => {
-  it('produces a result from a desired state', async () => {
+  it('produces a result from a Task', async () => {
     const runner = new SimpleRunner(async (description) => {
       return `Restored: ${description}`;
     });

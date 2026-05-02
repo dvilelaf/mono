@@ -41,7 +41,7 @@ Once the daemon's external-impl loader integration ships (Plan §5.7-5.8 follow-
 }
 ```
 
-The daemon loads, signature-verifies, factory-constructs, and dispatches the impl on matching `prediction.v0` intents.
+The daemon loads, signature-verifies, factory-constructs, and dispatches the Harness on matching `prediction.v0` Tasks.
 
 ## Polymarket client
 

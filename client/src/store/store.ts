@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_desired_state ON artifacts (task_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_outcome ON artifacts (outcome);
 CREATE INDEX IF NOT EXISTS idx_artifacts_remote ON artifacts (remote);
 
@@ -717,7 +717,7 @@ export class Store {
 
   insertArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     content: string;
@@ -726,7 +726,7 @@ export class Store {
   }): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, content, tags, outcome)
-      VALUES (@id, @desiredStateId, @requestId, @title, @content, @tags, @outcome)
+      VALUES (@id, @taskId, @requestId, @title, @content, @tags, @outcome)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),
@@ -737,7 +737,7 @@ export class Store {
     tags?: string[];
     outcome?: string;
     requestId?: string;
-    desiredStateId?: string;
+    taskId?: string;
     after?: string;   // ISO timestamp — only return artifacts created after this time
     before?: string;  // ISO timestamp — only return artifacts created before this time
     limit?: number;
@@ -755,9 +755,9 @@ export class Store {
       params['requestId'] = query.requestId;
     }
 
-    if (query.desiredStateId) {
-      conditions.push('task_id = @desiredStateId');
-      params['desiredStateId'] = query.desiredStateId;
+    if (query.taskId) {
+      conditions.push('task_id = @taskId');
+      params['taskId'] = query.taskId;
     }
 
     if (query.after) {
@@ -792,7 +792,7 @@ export class Store {
 
   insertRemoteArtifact(artifact: {
     id: string;
-    desiredStateId: string;
+    taskId: string;
     requestId: string;
     title: string;
     tags: string[];
@@ -803,7 +803,7 @@ export class Store {
   }): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO artifacts (id, task_id, request_id, title, tags, outcome, remote, owner_address, endpoint, price)
-      VALUES (@id, @desiredStateId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
+      VALUES (@id, @taskId, @requestId, @title, @tags, @outcome, 1, @ownerAddress, @endpoint, @price)
     `).run({
       ...artifact,
       tags: JSON.stringify(artifact.tags),

@@ -10,9 +10,9 @@ describe('LocalAdapter', () => {
     await adapter.initialize();
   });
 
-  it('posts a desired state and makes restoration request available immediately', async () => {
-    const state: Task = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postTask(state);
+  it('posts a Task and makes restoration request available immediately', async () => {
+    const task: Task = { id: 'task-1', description: 'Test task' };
+    const requestId = await adapter.postTask(task);
     expect(requestId).toBeDefined();
 
     const requests: TaskRequest[] = [];
@@ -25,14 +25,14 @@ describe('LocalAdapter', () => {
   });
 
   it('claim always succeeds', async () => {
-    const state: Task = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postTask(state);
+    const task: Task = { id: 'task-1', description: 'Test task' };
+    const requestId = await adapter.postTask(task);
     await expect(adapter.claimRequest(requestId)).resolves.toBeUndefined();
   });
 
   it('submit makes result available as delivery', async () => {
-    const state: Task = { id: 'ds-1', description: 'Test state' };
-    const requestId = await adapter.postTask(state);
+    const task: Task = { id: 'task-1', description: 'Test task' };
+    const requestId = await adapter.postTask(task);
     await adapter.claimRequest(requestId);
     await adapter.submitResult(requestId, { data: 'restored' });
 
@@ -45,8 +45,8 @@ describe('LocalAdapter', () => {
   });
 
   it('creates both restoration and evaluation requests when posting', async () => {
-    const state: Task = { id: 'ds-1', description: 'Test state' };
-    const restorationRequestId = await adapter.postTask(state);
+    const task: Task = { id: 'task-1', description: 'Test task' };
+    const restorationRequestId = await adapter.postTask(task);
 
     // First request yielded should be the restoration request
     const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
@@ -66,8 +66,8 @@ describe('LocalAdapter', () => {
   });
 
   it('evaluation request is only yielded after restoration is delivered', async () => {
-    const state: Task = { id: 'ds-1', description: 'Test state' };
-    const restorationRequestId = await adapter.postTask(state);
+    const task: Task = { id: 'task-1', description: 'Test task' };
+    const restorationRequestId = await adapter.postTask(task);
 
     const iter = adapter.watchForRequests()[Symbol.asyncIterator]();
 

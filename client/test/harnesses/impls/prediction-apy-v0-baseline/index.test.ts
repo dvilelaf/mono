@@ -33,7 +33,7 @@ task: {
         question: { resolveTs },
       },
       eligibility: { maxSubmissionDelayMs: 60_000 },
-    } as unknown as import('../../../../src/types/desired-state.js').Task,
+    } as unknown as import('../../../../src/types/task.js').Task,
     implStateDir: tmp,
     workingDir: tmp,
     log: () => {},

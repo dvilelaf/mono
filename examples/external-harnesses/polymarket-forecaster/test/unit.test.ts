@@ -70,7 +70,7 @@ describe('@jinn-examples/polymarket-forecaster', () => {
     expect(ready?.ready).toBe(true);
   });
 
-  it('falls back to intent.id when spec.marketId is absent', async () => {
+  it('falls back to task.id when spec.marketId is absent', async () => {
     const impl = createHarness(env);
     const out = await impl.run({
       task: {

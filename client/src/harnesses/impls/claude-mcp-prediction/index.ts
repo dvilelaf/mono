@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { Task } from '../../../types/desired-state.js';
+import type { Task } from '../../../types/task.js';
 import { PredictionV0TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';

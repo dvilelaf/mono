@@ -9,14 +9,14 @@
  * restart-replay.
  *
  * Wired in main.ts for testnet-only (jinn-mono-9ew). Operators can opt out
- * with JINN_DISABLE_AUTO_INTENTS=1.
+ * with JINN_DISABLE_AUTO_TASKS=1.
  */
 
 import { randomUUID } from 'node:crypto';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { readChainlinkLatest, scaleToDecimal } from '../venues/chainlink/client.js';
-import type { Task } from '../types/desired-state.js';
+import type { Task } from '../types/task.js';
 import type { TaskV1, SignedTaskV1 } from '../types/task-document.js';
 import { resolvePredictionV0Template } from './prediction-v0-template.js';
 import { signTaskV1 } from '../tasks/signing.js';

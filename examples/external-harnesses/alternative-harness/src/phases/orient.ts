@@ -13,7 +13,7 @@ export async function runOrient(args: {
   return harness.promptForJson<OrientResult>({
     promptId: 'orient',
     systemPrompt:
-      'You are an info-gathering subagent for a Jinn restoration intent.',
+      'You are an info-gathering subagent for a Jinn restoration Task.',
     userPrompt: JSON.stringify({ task: ctx.task }),
     budgetMs: Math.min(ctx.msUntilEndTs(), 30_000),
     abort: ctx.abort,

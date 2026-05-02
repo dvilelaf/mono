@@ -1,4 +1,4 @@
-import type { Task } from '../types/desired-state.js';
+import type { Task } from '../types/task.js';
 
 /** Returns a freshly-built Task for this tick, or null to skip. */
 export type TaskGenerator = () => Promise<Task | null>;

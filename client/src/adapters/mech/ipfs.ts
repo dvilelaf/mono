@@ -5,7 +5,7 @@ import { IPFS_GATEWAY_PREFIX } from './types.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 
 export interface TaskPayload {
-  desiredStateId: string;
+  taskId: string;
   description: string;
   context?: Record<string, unknown>;
   role?: 'restoration' | 'evaluation';
@@ -13,7 +13,7 @@ export interface TaskPayload {
   attemptNumber?: number;
   restorationRequestId?: string;
   solverType?: string;
-  // typed solver payload — optional on both read and write for backward compat
+  // typed solver payload; dispatcher is top-level `solverType`.
   spec?: Record<string, unknown>;
   window?: { startTs: number; endTs: number };
   eligibility?: Record<string, unknown>;
@@ -27,7 +27,7 @@ export interface RestorationResultPayload {
 
 export function buildTaskPayload(state: Task): TaskPayload {
   return {
-    desiredStateId: state.id,
+    taskId: state.id,
     description: state.description,
     context: state.context,
     solverType: state.solverType,
@@ -51,11 +51,11 @@ export function parseTaskFromPayload(payload: Record<string, unknown>): Task {
   const eligibility = payload.eligibility as Record<string, unknown> | undefined;
 
   return {
-    id: (payload.desiredStateId as string) ?? '',
+    id: (payload.taskId as string) ?? '',
     description: (payload.description as string) ?? '',
     context: payload.context as Record<string, unknown> | undefined,
-    solverType: (payload.solverType ?? (spec as { kind?: string } | undefined)?.kind) as string | undefined,
-    role: (payload.role ?? payload.type) as 'restoration' | 'evaluation' | undefined,
+    solverType: payload.solverType as string | undefined,
+    role: payload.role as 'restoration' | 'evaluation' | undefined,
     attemptId: payload.attemptId as string | undefined,
     attemptNumber: payload.attemptNumber as number | undefined,
     restorationRequestId: payload.restorationRequestId as string | undefined,

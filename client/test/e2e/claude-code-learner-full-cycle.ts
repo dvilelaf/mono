@@ -210,7 +210,7 @@ async function runCycle(params: CycleParams): Promise<CycleResult> {
   };
 
   const prompt = [
-    'You are running a Jinn restoration intent. Use the Skill tool to invoke',
+    'You are running a Jinn restoration Task. Use the Skill tool to invoke',
     "'claude-code-learner:coordinator' and run the FULL seven-phase pipeline",
     '(Orient → Strategize → Plan → Execute → Debrief → Improve → Memory consolidation).',
     '',

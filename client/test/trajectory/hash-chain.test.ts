@@ -6,16 +6,16 @@ import type { Span } from '../../src/trajectory/schema.js';
 
 describe('computeGenesisHash', () => {
   it('returns keccak256(JCS({runStart: taskCid}))', () => {
-    const taskCid = 'bafy-intent';
+    const taskCid = 'bafy-task';
     const expected = keccak256(toBytes(canonicalJson({ runStart: taskCid })));
     expect(computeGenesisHash(taskCid)).toBe(expected);
   });
 
-  it('is stable for the same intent CID', () => {
+  it('is stable for the same Task CID', () => {
     expect(computeGenesisHash('bafy-x')).toBe(computeGenesisHash('bafy-x'));
   });
 
-  it('differs for different intent CIDs', () => {
+  it('differs for different Task CIDs', () => {
     expect(computeGenesisHash('bafy-x')).not.toBe(computeGenesisHash('bafy-y'));
   });
 });

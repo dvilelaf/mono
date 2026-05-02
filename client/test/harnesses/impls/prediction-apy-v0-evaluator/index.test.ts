@@ -9,7 +9,7 @@ import { PredictionApyV0Evaluator } from '../../../../src/harnesses/impls/predic
 import { signCanonical } from '../../../../src/harnesses/engine/signing.js';
 import { RESTORATION_TASK_CID_CONTEXT_KEY, RESTORATION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 import { PredictionApyV0VerdictPayloadSchema } from '../../../../src/types/payloads/prediction-apy-v0.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
 import { TrajectoryCollector } from '../../../../src/trajectory/index.js';
 
@@ -170,7 +170,7 @@ describe('PredictionApyV0Evaluator', () => {
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await ev.run(
-      makeCtx(evalTask, 'evaluation-desired-state-cid', {
+      makeCtx(evalTask, 'evaluation-task-cid', {
         twApyBpsOverWindow: async () => ({ twApyBps: 100, sampleCount: 12 }),
       }),
     );

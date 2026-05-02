@@ -1,6 +1,6 @@
 # @jinn-network/client
 
-Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create, restore, and evaluate desired states, and earn rewards for measured work.
+Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
 
 **New operator?** Start with the full testnet runbook:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
@@ -390,8 +390,8 @@ Quick answers to the things that typically surprise new operators:
 
 The daemon runs three concurrent loops:
 
-1. **CreatorLoop** — posts desired states as restoration jobs
-2. **RestorerLoop** — claims requests, spawns Claude to attempt restoration, submits results
+1. **CreatorLoop** — posts Tasks via the deployed restoration-job contract boundary
+2. **TaskEngine** — claims requests, runs the selected Harness, submits Solutions
 3. **DeliveryWatcherLoop** — claims deliveries, creates evaluation jobs
 
 Each loop call increments on-chain activity counters. Staking contracts read these at checkpoints to determine reward eligibility.

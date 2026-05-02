@@ -23,7 +23,7 @@ import { execFileSync } from 'node:child_process';
 
 import { ClaudeMcpPredictionImpl } from '../../../../src/harnesses/impls/claude-mcp-prediction/index.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
-import type { Task } from '../../../../src/types/desired-state.js';
+import type { Task } from '../../../../src/types/task.js';
 
 const enabled = process.env['JINN_TEST_CLAUDE_PREDICTION'] === '1';
 

@@ -50,7 +50,7 @@ describe('Daemon', () => {
     expect(daemon.getShutdownState()).toBe('clean');
   });
 
-  it('accepts legacy tasks when taskSources are omitted', async () => {
+  it('accepts static configured Tasks when taskSources are omitted', async () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),

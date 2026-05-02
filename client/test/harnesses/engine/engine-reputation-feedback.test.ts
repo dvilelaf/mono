@@ -8,7 +8,7 @@
  *   - When verdict=REJECTED, no feedback is posted (mapVerdictToScore→null).
  *   - When the resolver returns null (no subgraph match), no feedback is
  *     posted but the engine still completes the delivery (no throw).
- *   - Restoration intents (taskRole=restoration) skip the feedback path
+ *   - Restoration tasks (taskRole=restoration) skip the feedback path
  *     entirely — the hook is for evaluators only.
  *   - Unexpected throws inside the hook are swallowed; deliver still
  *     transitions to COMPLETE.
@@ -358,7 +358,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     expect(registry.giveFeedback).not.toHaveBeenCalled();
   });
 
-  it('restoration intent → never calls resolver / giveFeedback (evaluator-only path)', async () => {
+  it('restoration Task → never calls resolver / giveFeedback (evaluator-only path)', async () => {
     const registry = makeRegistry();
     const resolveAgentId = vi
       .fn<(h: Hex) => Promise<ResolvedAgent | null>>()
@@ -438,7 +438,7 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     );
   });
 
-  it('evaluator intent missing inlined restorationResult → skip feedback (warn) but still COMPLETE', async () => {
+  it('evaluator Task missing inlined restorationResult → skip feedback (warn) but still COMPLETE', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const registry = makeRegistry();
     const resolveAgentId = vi

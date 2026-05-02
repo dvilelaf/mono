@@ -34,7 +34,7 @@ import type {
   HarnessEnableMetadata,
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { Task } from '../../../types/desired-state.js';
+import type { Task } from '../../../types/task.js';
 import type { RationaleEntry } from '../../../types/portfolio.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { getUnifiedAccountValue } from '../../../venues/hyperliquid/account-value.js';

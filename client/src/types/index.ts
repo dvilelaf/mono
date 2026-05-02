@@ -8,7 +8,7 @@ export {
   parseTask,
   WindowSchema,
   TaskSchema,
-} from './desired-state.js';
+} from './task.js';
 
 export {
   PortfolioV0SpecSchema,

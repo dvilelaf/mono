@@ -810,10 +810,10 @@ async function main(): Promise<void> {
       }),
     );
 
-    // ── Phase 4: Creator posts desired state ─────────────────────────────────
+    // ── Phase 4: Creator posts Task ──────────────────────────────────────────
 
     results.push(
-      await runPhase('Phase 4: Creator posts desired state', async () => {
+      await runPhase('Phase 4: Creator posts Task', async () => {
         if (!adapter) throw new Error('No adapter from Phase 3');
 
         // Mine 3 blocks to flush any stale nonce state from bootstrap.
@@ -1174,12 +1174,12 @@ async function main(): Promise<void> {
         }
         console.log(`    Search by requestId: ${byRequestId.length} result(s) ✓`);
 
-        // Gap 1: Verify search by desiredStateId
-        const byDesiredState = store.searchArtifacts({ desiredStateId: 'e2e-test' });
-        if (byDesiredState.length === 0) {
-          throw new Error('Search by desiredStateId returned no results');
+        // Gap 1: Verify search by taskId
+        const byTask = store.searchArtifacts({ taskId: 'e2e-test' });
+        if (byTask.length === 0) {
+          throw new Error('Search by taskId returned no results');
         }
-        console.log(`    Search by desiredStateId: ${byDesiredState.length} result(s) ✓`);
+        console.log(`    Search by taskId: ${byTask.length} result(s) ✓`);
 
         // Gap 1: Verify time range filters
         const beforeEverything = store.searchArtifacts({ before: '2020-01-01T00:00:00' });
@@ -2914,7 +2914,7 @@ async function main(): Promise<void> {
           const artifactId = 'cross-node-test-artifact';
           storeA.insertArtifact({
             id: artifactId,
-            desiredStateId: 'cross-node-test',
+            taskId: 'cross-node-test',
             requestId: '0x0000',
             title: 'Cross-node knowledge: restoration strategy alpha',
             content: 'When restoring FLOOR invariants, check historical baselines first.',
@@ -3068,7 +3068,7 @@ async function main(): Promise<void> {
 
           backfillStore.insertRemoteArtifact({
             id: artifactId!,
-            desiredStateId: '',
+            taskId: '',
             requestId: '',
             title: title ?? '',
             tags,
@@ -3112,7 +3112,7 @@ async function main(): Promise<void> {
         const x402Store = new Store(join(tmpDir, 'x402-test.db'));
         x402Store.insertArtifact({
           id: 'x402-test-artifact',
-          desiredStateId: 'x402-test',
+          taskId: 'x402-test',
           requestId: '0x0000',
           title: 'Payment-gated knowledge',
           content: 'This content requires x402 payment to access.',

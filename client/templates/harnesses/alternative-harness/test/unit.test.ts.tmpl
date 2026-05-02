@@ -43,7 +43,7 @@ describe('{{packageName}}', () => {
     expect(out.gating.timingPosture).toBe('early-return');
   });
 
-  it('declines evaluation intents', () => {
+  it('declines evaluation Tasks', () => {
     const impl = createHarness(env);
     expect(
       impl.supports({ solverType: '{{solverTypeString}}', role: 'evaluation' }),

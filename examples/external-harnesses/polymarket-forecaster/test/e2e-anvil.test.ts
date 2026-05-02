@@ -1,6 +1,6 @@
 /**
  * End-to-end test: the forecaster impl can be dispatched against a
- * synthetic prediction.v0 intent with an Anvil fork of Base reachable
+ * synthetic prediction.v0 Task with an Anvil fork of Base reachable
  * (so the `network: 'base-mainnet'` env value is real). The test
  * skips when `anvil` is not on PATH.
  *
@@ -50,7 +50,7 @@ describeMaybe('polymarket-forecaster e2e (Anvil fork)', () => {
     anvil?.kill('SIGTERM');
   });
 
-  it('runs the impl against a synthetic intent with anvil reachable', async () => {
+  it('runs the impl against a synthetic Task with anvil reachable', async () => {
     const env: ExternalHarnessEnv = {
       implName: '@jinn-examples/polymarket-forecaster',
       implVersion: '0.1.0',

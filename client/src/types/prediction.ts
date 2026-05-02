@@ -8,7 +8,7 @@
  * PredictionV0RestorationPayloadSchema / PredictionV0VerdictPayloadSchema instead.
  */
 import { z } from 'zod';
-import { WindowSchema } from './desired-state.js';
+import { WindowSchema } from './task.js';
 
 const HexStringSchema = z.string().regex(/^0x[0-9a-fA-F]*$/, 'must be a 0x-prefixed hex string');
 

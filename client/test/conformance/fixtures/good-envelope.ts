@@ -16,7 +16,7 @@ import type {
   EnvelopeAssemblyDeps,
 } from '../../../src/harnesses/engine/envelope-assembly.js';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
-import type { Task } from '../../../src/types/desired-state.js';
+import type { Task } from '../../../src/types/task.js';
 import { createHash } from 'node:crypto';
 import {
   buildGoodTrajectoryFixture,
@@ -28,7 +28,7 @@ export const TEST_PK: `0x${string}` =
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
 export const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
-const STUB_INTENT_CID = 'bafy-test-intent-001';
+const STUB_TASK_CID = 'bafy-test-task-001';
 const STUB_TRAJ_CID = 'bafy-test-trajectory-001';
 
 // ─── Restoration fixture ─────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ const restorationInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
   role: 'restoration',
   task: {
-    cid: STUB_INTENT_CID,
+    cid: STUB_TASK_CID,
     onchainCreationTx: '0x' + 'ab'.repeat(32),
     onchainCreationBlock: 100,
     requestId: '0x' + 'cd'.repeat(32),
@@ -118,8 +118,8 @@ export async function buildGoodRestorationFixture(): Promise<RestorationFixture>
   const envelopeBytes = new TextEncoder().encode(JSON.stringify(result.envelope));
 
   const stubTask: Task = {
-    id: STUB_INTENT_CID,
-    description: 'Test restoration intent',
+    id: STUB_TASK_CID,
+    description: 'Test restoration Task',
     solverType: 'portfolio.v0',
     role: 'restoration',
     window: { startTs: 1, endTs: 86400001 },
@@ -161,7 +161,7 @@ export async function buildGoodVerdictFixture(): Promise<VerdictFixture> {
     solverType: 'portfolio.v0',
     role: 'verdict',
     task: {
-      cid: STUB_INTENT_CID,
+      cid: STUB_TASK_CID,
       onchainCreationTx: '0x' + 'ab'.repeat(32),
       onchainCreationBlock: 100,
       requestId: '0x' + 'cd'.repeat(32),

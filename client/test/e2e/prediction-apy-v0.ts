@@ -29,7 +29,7 @@ import { PredictionApyV0BaselineImpl } from '../../src/harnesses/impls/predictio
 import { PredictionApyV0Evaluator } from '../../src/harnesses/impls/prediction-apy-v0-evaluator/index.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
-import type { Task } from '../../src/types/desired-state.js';
+import type { Task } from '../../src/types/task.js';
 import type { HarnessContext } from '../../src/harnesses/types.js';
 import type { PredictionApySubmissionManifest } from '../../src/types/prediction-apy.js';
 import { JINN_ROUTER_ABI, MECH_ABI, MECH_MARKETPLACE_ABI, NATIVE_PAYMENT_TYPE } from '../../src/adapters/mech/types.js';
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
       await adapter.initialize();
     }));
 
-    results.push(await runPhase('Phase 4: Post prediction.apy.v0 restoration intent on-chain', async () => {
+    results.push(await runPhase('Phase 4: Post prediction.apy.v0 restoration Task on-chain', async () => {
       const now = Date.now();
       window = { startTs: now, endTs: now + 3_600_000 };
       intent = {

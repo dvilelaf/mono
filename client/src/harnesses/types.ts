@@ -4,7 +4,7 @@
  * Pure type definitions; no runtime side effects.
  */
 
-import type { Task } from '../types/desired-state.js';
+import type { Task } from '../types/task.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
 import type { TrajectoryCollector } from '../trajectory/index.js';
 import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.js';
@@ -74,7 +74,7 @@ export interface HarnessContext {
 export interface Solution {
   venueRef: { name: string };
 
-  /** Optional — evaluator impls that do not operate on a venue leave these undefined. */
+  /** Optional — evaluation Harnesses that do not operate on a venue leave these undefined. */
   preSnapshot?: Snapshot;
   postSnapshot?: Snapshot;
   fills?: unknown[];
@@ -95,7 +95,7 @@ export interface Solution {
   solutionPayload?: Record<string, unknown>;
 
   /**
-   * Full verdict payload for evaluator impls (taskRole === 'evaluation').
+   * Full verdict payload for evaluation Harnesses (taskRole === 'evaluation').
    *
    * When set, engine.pack() uses role='verdict' and passes this as the
    * envelope payload directly (validated against the solverType's verdict schema).

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTask } from '../../src/types/desired-state.js';
+import { parseTask } from '../../src/types/task.js';
 import {
   PortfolioV0TaskSchema,
 } from '../../src/types/portfolio.js';
@@ -70,11 +70,11 @@ describe('Task legacy backwards compat', () => {
 // ── Task with new optional fields ─────────────────────────────────────
 
 describe('Task with window / spec / eligibility', () => {
-  it('parses a portfolio.v0 desired state', () => {
+  it('parses a portfolio.v0 Task', () => {
     const result = parseTask(portfolioV0Task);
     expect(result.window).toEqual({ startTs: START_TS, endTs: END_TS });
     expect(result.solverType).toBe('portfolio.v0');
-    expect(result.spec?.kind).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(result.spec ?? {}, 'kind')).toBe(false);
     expect(result.eligibility).toBeDefined();
   });
 });
@@ -85,7 +85,7 @@ describe('PortfolioV0TaskSchema', () => {
   it('parses a fully-specified portfolio.v0 task', () => {
     const result = PortfolioV0TaskSchema.parse(portfolioV0Task);
     expect(result.solverType).toBe('portfolio.v0');
-    expect(result.spec.kind).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(result.spec, 'kind')).toBe(false);
     expect(result.spec.account.venue).toBe('hyperliquid-testnet');
     expect(result.eligibility?.minClosedTrades).toBe(25);
   });

@@ -8,17 +8,17 @@ import { PermanentError, type Task } from '../../src/types/index.js';
 const SAFE = '0x00112233445566778899aabbccddeeff00112233';
 
 describe('CreatorLoop', () => {
-  it('posts desired states with role and attemptId', async () => {
+  it('posts Tasks with role and attemptId', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: Task[] = [
+    const tasks: Task[] = [
       { id: 'ds-1', description: 'API returns 200' },
     ];
 
     const postSpy = vi.spyOn(adapter, 'postTask');
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store);
 
     await loop.tick();
 
@@ -35,17 +35,17 @@ describe('CreatorLoop', () => {
     await adapter.stop();
   });
 
-  it('does not re-post already posted desired states', async () => {
+  it('does not re-post already posted Tasks', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
 
-    const states: Task[] = [
+    const tasks: Task[] = [
       { id: 'ds-1', description: 'API returns 200' },
     ];
 
     const postSpy = vi.spyOn(adapter, 'postTask');
-    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(states)], store);
+    const loop = new CreatorLoop(adapter, [new StaticConfiguredTaskSource(tasks)], store);
 
     await loop.tick();
     await loop.tick();
