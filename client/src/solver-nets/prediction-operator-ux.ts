@@ -5,6 +5,7 @@ import {
   PredictionV1RestorationPayloadSchema,
 } from '@jinn-network/sdk/solvernets/prediction-v1';
 import type { JinnConfig } from '../config.js';
+import { DEFAULT_DISABLED_HARNESSES } from '../harnesses/engine/registry.js';
 import {
   loadExternalImpl as defaultLoadExternalImpl,
   type LoadExternalImplArgs,
@@ -292,9 +293,8 @@ export async function buildPredictionOperatorStatus({
     }
   }
 
-  const selectedHarnessDisabled = Boolean(
-    net.harness && (config.harnesses?.disabled ?? []).includes(net.harness),
-  );
+  const disabledHarnesses = config.harnesses?.disabled ?? [...DEFAULT_DISABLED_HARNESSES];
+  const selectedHarnessDisabled = Boolean(net.harness && disabledHarnesses.includes(net.harness));
   const harnesses = buildHarnesses({
     stub: true,
     rpcUrl: config.rpcUrl,
@@ -303,7 +303,7 @@ export async function buildPredictionOperatorStatus({
     claudeModel: config.claudeModel,
     implStateDirRoot: config.engine.implStateDirRoot,
     externalImpls: externalHarnesses,
-    disabledNames: config.harnesses?.disabled,
+    disabledNames: disabledHarnesses,
   });
   const selectedHarness = net.harness
     ? harnesses.find((candidate) => candidate.name === net.harness)

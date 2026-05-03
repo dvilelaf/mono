@@ -110,6 +110,25 @@ describe('solver-nets command', () => {
     );
   });
 
+  it('honors daemon default-disabled Prediction Harnesses when config omits disabled names', async () => {
+    const configPath = tempConfig(predictionConfig({ harness: 'claude-mcp-hyperliquid' }));
+    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+
+    expect(result.exits).toEqual([]);
+    const envelope = result.envelope;
+    expect(envelope['ok']).toBe(false);
+    expect(envelope['harness']).toBeUndefined();
+    expect(envelope['diagnostics']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'prediction_harness_disabled',
+          severity: 'error',
+          configField: 'harnesses.disabled',
+        }),
+      ]),
+    );
+  });
+
   it('surfaces selected external Prediction Harness load failures', async () => {
     const configPath = tempConfig({
       ...predictionConfig({ harness: '@example/prediction-harness' }),
