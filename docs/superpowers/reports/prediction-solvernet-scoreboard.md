@@ -44,4 +44,3 @@ No plugin rows yet.
 | Missing score rows | 0 |
 | Non-numeric score rows | 0 |
 | Outside trailing window | 0 |
-

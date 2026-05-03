@@ -1,14 +1,67 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregatePredictionBrierScoreboard,
+  buildPredictionBrierScoreboard,
   renderPredictionBrierScoreboardMarkdown,
 } from '../../src/corpus/index.js';
 import type { EnvelopeProjection } from '../../src/corpus/types.js';
+import { Store } from '../../src/store/store.js';
 
 const AS_OF = Date.parse('2026-05-03T00:00:00.000Z');
 const DAY_MS = 86_400_000;
 
 describe('renderPredictionBrierScoreboardMarkdown', () => {
+  it('bounds historical report queries before limit and fetches Solution attribution separately', () => {
+    const store = new Store(':memory:');
+    try {
+      store.saveEnvelopeProjection(solutionProjection('a', {
+        safe: `0x${'a'.repeat(40)}`,
+        agent: `0x${'1'.repeat(40)}`,
+        harness: 'solver-harness',
+        version: '1.0.0',
+        runtimeDigest: 'sha256:solver-runtime',
+        plugins: ['solver-plugin@1.0.0'],
+        generatedAt: AS_OF - 120 * DAY_MS,
+      }));
+      store.saveEnvelopeProjection(scoredVerdictProjection('a', {
+        generatedAt: AS_OF - DAY_MS,
+        solverBrier: '0.090000',
+        consensusBrier: '0.160000',
+        brierSpread: '-0.070000',
+      }));
+      store.saveEnvelopeProjection(scoredVerdictProjection('newer', {
+        generatedAt: AS_OF + DAY_MS,
+        solverBrier: '0.990000',
+        consensusBrier: '0.010000',
+        brierSpread: '0.980000',
+      }));
+
+      const scoreboard = buildPredictionBrierScoreboard(store, {
+        asOfGeneratedAt: AS_OF,
+        projectionQuery: { limit: 1 },
+      });
+
+      expect(scoreboard.overall.scoredVerdictCount).toBe(1);
+      expect(scoreboard.overall.meanBrierSpread).toBeCloseTo(-0.07);
+      expect(scoreboard.perOperator).toMatchObject([
+        {
+          participantSafeAddress: `0x${'a'.repeat(40)}`,
+          scoredVerdictCount: 1,
+        },
+      ]);
+      expect(scoreboard.perHarness).toMatchObject([
+        {
+          implName: 'solver-harness',
+          runtimeBundleDigest: 'sha256:solver-runtime',
+          scoredVerdictCount: 1,
+        },
+      ]);
+      expect(scoreboard.perPlugin.map((summary) => summary.plugin)).toEqual(['solver-plugin@1.0.0']);
+    } finally {
+      store.close();
+    }
+  });
+
   it('renders a deterministic Markdown report with headline, trend, attribution, and exclusions', () => {
     const scoreboard = aggregatePredictionBrierScoreboard([
       solutionProjection('a', {
@@ -66,6 +119,7 @@ function solutionProjection(id: string, args: {
   version: string;
   runtimeDigest: string;
   plugins: string[];
+  generatedAt?: number;
 }): EnvelopeProjection {
   return {
     envelopeId: `solution-${id}`,
@@ -77,7 +131,7 @@ function solutionProjection(id: string, args: {
     taskCid: 'bafy-task-shared',
     taskId: 'prediction-v1-polymarket-abc',
     requestId: `solution-request-${id}`,
-    generatedAt: AS_OF - 2 * DAY_MS,
+    generatedAt: args.generatedAt ?? AS_OF - 2 * DAY_MS,
     evidenceTier: 'self-signed',
     participantSafeAddress: args.safe,
     participantAgentEoa: args.agent,

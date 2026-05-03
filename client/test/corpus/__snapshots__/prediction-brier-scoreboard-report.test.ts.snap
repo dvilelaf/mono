@@ -53,6 +53,5 @@ Window: trailing 84 days ending 2026-05-03T00:00:00.000Z
 | Missing score rows | 0 |
 | Non-numeric score rows | 0 |
 | Outside trailing window | 0 |
-
 "
 `;

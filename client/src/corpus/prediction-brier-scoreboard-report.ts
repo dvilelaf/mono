@@ -1,6 +1,7 @@
 import type { Store } from '../store/store.js';
 import type { EnvelopeProjection, EnvelopeProjectionQuery } from './types.js';
 import {
+  DEFAULT_PREDICTION_BRIER_SCOREBOARD_WINDOW_DAYS,
   aggregatePredictionBrierScoreboard,
   type PredictionBrierMetricSummary,
   type PredictionBrierScoreboard,
@@ -29,20 +30,32 @@ export function queryPredictionBrierScoreboardProjections(
   store: Pick<Store, 'queryEnvelopeProjections'>,
   query: PredictionBrierScoreboardProjectionQuery = {},
 ): EnvelopeProjection[] {
-  return store.queryEnvelopeProjections({
+  const verdicts = store.queryEnvelopeProjections({
     solverType: 'prediction.v1',
+    role: 'verdict',
     generatedAfter: query.generatedAfter,
     generatedBefore: query.generatedBefore,
     limit: query.limit ?? 1000,
   });
+  const solutionRefs = compactRefs(verdicts.flatMap(verdictSolutionRefs));
+  if (solutionRefs.length === 0) return verdicts;
+
+  const solutions = store.queryEnvelopeProjections({
+    envelopeRefs: solutionRefs,
+    solverType: 'prediction.v1',
+    role: 'restoration',
+    limit: solutionRefs.length,
+  });
+  return dedupeProjections([...verdicts, ...solutions]);
 }
 
 export function buildPredictionBrierScoreboard(
   store: Pick<Store, 'queryEnvelopeProjections'>,
   options: BuildPredictionBrierScoreboardOptions = {},
 ): PredictionBrierScoreboard {
+  const projectionQuery = windowedProjectionQuery(options);
   return aggregatePredictionBrierScoreboard(
-    queryPredictionBrierScoreboardProjections(store, options.projectionQuery),
+    queryPredictionBrierScoreboardProjections(store, projectionQuery),
     options,
   );
 }
@@ -151,10 +164,50 @@ export function renderPredictionBrierScoreboardMarkdown(
     `| Missing score rows | ${scoreboard.excluded.missingScoreRows} |`,
     `| Non-numeric score rows | ${scoreboard.excluded.nonNumericScoreRows} |`,
     `| Outside trailing window | ${scoreboard.excluded.outsideWindowRows} |`,
-    '',
   );
 
   return `${lines.join('\n')}\n`;
+}
+
+function windowedProjectionQuery(
+  options: BuildPredictionBrierScoreboardOptions,
+): PredictionBrierScoreboardProjectionQuery {
+  const projectionQuery = options.projectionQuery ?? {};
+  if (options.asOfGeneratedAt === undefined) return projectionQuery;
+
+  const trailingWindowDays = options.trailingWindowDays
+    ?? DEFAULT_PREDICTION_BRIER_SCOREBOARD_WINDOW_DAYS;
+  return {
+    ...projectionQuery,
+    generatedAfter: projectionQuery.generatedAfter
+      ?? options.asOfGeneratedAt - generatedAtSpanForDays(options.asOfGeneratedAt, trailingWindowDays),
+    generatedBefore: projectionQuery.generatedBefore ?? options.asOfGeneratedAt,
+  };
+}
+
+function generatedAtSpanForDays(asOfGeneratedAt: number, days: number): number {
+  const daySpan = Math.abs(asOfGeneratedAt) >= 10_000_000_000 ? 86_400_000 : 86_400;
+  return days * daySpan;
+}
+
+function verdictSolutionRefs(projection: EnvelopeProjection): string[] {
+  return [
+    projection.solutionEnvelopeCid,
+    projection.solutionEnvelopeSha256,
+    projection.solutionEnvelopeRef,
+    projection.metadata['solutionEnvelope.cid'],
+    projection.metadata['solutionEnvelope.sha256'],
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function compactRefs(refs: readonly string[]): string[] {
+  return [...new Set(refs)];
+}
+
+function dedupeProjections(projections: readonly EnvelopeProjection[]): EnvelopeProjection[] {
+  const byId = new Map<string, EnvelopeProjection>();
+  for (const projection of projections) byId.set(projection.envelopeId, projection);
+  return [...byId.values()];
 }
 
 function metricTable(headers: string[], rows: string[][], emptyText: string): string {

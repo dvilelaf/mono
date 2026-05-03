@@ -1289,6 +1289,19 @@ export class Store {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
+    if (query.envelopeRefs && query.envelopeRefs.length > 0) {
+      const placeholders = query.envelopeRefs.map((ref, index) => {
+        const key = `envelopeRef${index}`;
+        params[key] = ref;
+        return `@${key}`;
+      }).join(', ');
+      conditions.push(
+        `(envelope_id IN (${placeholders})
+          OR envelope_cid IN (${placeholders})
+          OR envelope_sha256 IN (${placeholders})
+          OR signature_hash IN (${placeholders}))`,
+      );
+    }
     if (query.solverType) {
       conditions.push('solver_type = @solverType');
       params['solverType'] = query.solverType;
