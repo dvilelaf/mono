@@ -7,6 +7,7 @@ import {
   makePredictionV1Task,
   makeSignedSolutionEnvelope,
 } from '../prediction-v1-test-helpers.js';
+import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';
 
 describe('PredictionV1Evaluator', () => {
   it('scores valid YES resolutions with Brier loss against consensus', async () => {
@@ -82,6 +83,98 @@ describe('PredictionV1Evaluator', () => {
     expect(out.gating).not.toHaveProperty('solverBrier');
     expect(payload.checks).toContainEqual(expect.objectContaining({
       name: 'solution.schema',
+      status: 'FAIL',
+    }));
+  });
+
+  it('rejects forged solution envelopes before scoring', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
+    const tamperedEnvelope = {
+      ...envelope,
+      payload: {
+        ...envelope.payload,
+        probabilityYes: '0.0100',
+      },
+    };
+
+    const out = await new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => ({
+          venue: 'polymarket',
+          marketId: 'mkt-1',
+          conditionId: '0xabc',
+          status: 'resolved',
+          outcome: 'YES',
+          sourceUrl: 'https://polymarket.com/event/test-market',
+        }),
+      },
+    }).run(makeHarnessCtx({ task: makeEvalTask(task, tamperedEnvelope as typeof envelope) }));
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('REJECTED');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'integrity.manifest_signature',
+      status: 'FAIL',
+    }));
+  });
+
+  it('does not score when restoration task CID context is missing', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
+    const evalTask = makeEvalTask(task, envelope);
+    delete evalTask.context![RESTORATION_TASK_CID_CONTEXT_KEY];
+    const evaluator = new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => ({
+          venue: 'polymarket',
+          marketId: 'mkt-1',
+          conditionId: '0xabc',
+          status: 'resolved',
+          outcome: 'YES',
+          sourceUrl: 'https://polymarket.com/event/test-market',
+        }),
+      },
+    });
+
+    await expect(evaluator.canAttempt(evalTask)).resolves.toEqual({
+      ok: false,
+      reason: 'context.restorationTaskCid required',
+    });
+    const out = await evaluator.run(makeHarnessCtx({ task: evalTask }));
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('INDETERMINATE');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'integrity.signedTask_ref',
+      status: 'INDETERMINATE',
+    }));
+  });
+
+  it('rejects resolution snapshots that do not match task market identifiers', async () => {
+    const task = makePredictionV1Task();
+    const envelope = await makeSignedSolutionEnvelope(task);
+
+    const out = await new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => ({
+          venue: 'polymarket',
+          marketId: 'mkt-1',
+          conditionId: '0xother',
+          status: 'resolved',
+          outcome: 'YES',
+          sourceUrl: 'https://polymarket.com/event/test-market',
+        }),
+      },
+    }).run(makeHarnessCtx({ task: makeEvalTask(task, envelope) }));
+    const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);
+
+    expect(payload.verdict).toBe('REJECTED');
+    expect(payload.scores).toBeUndefined();
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      name: 'market.identity',
       status: 'FAIL',
     }));
   });
