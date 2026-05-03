@@ -8,6 +8,7 @@ import { createPublicClient, http, type PublicClient } from 'viem';
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
+import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
 import { getChainConfig } from '../earning/contracts.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
@@ -25,7 +26,9 @@ import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
 } from './portfolio-v0-build.js';
+import { gatherPredictionV1Status } from './prediction-v1-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
+import { buildPredictionOperatorStatus } from '../solver-nets/prediction-operator-ux.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -52,6 +55,9 @@ export interface StatusGatherConfig {
   testnetStolasDeploymentPath?: string;
   /** Engine paths — used for portfolio.v0 Claude outcome scan, etc. */
   engine?: { workingDirRoot: string; implStateDirRoot: string };
+  /** Full config enables SolverNet/plugin/Harness diagnostics in /v1/status. */
+  config?: JinnConfig;
+  configPath?: string;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -275,6 +281,23 @@ export async function gatherGatheredStatusRaw(
     portfolioV0 = undefined;
   }
 
+  let predictionV1: ReturnType<typeof gatherPredictionV1Status> | undefined;
+  try {
+    const operator = status?.config
+      ? await buildPredictionOperatorStatus({
+          config: status.config,
+          configPath: status.configPath ?? '<default>',
+          name: 'prediction',
+        })
+      : null;
+    predictionV1 = gatherPredictionV1Status(store, { operator });
+  } catch (error) {
+    predictionV1 = gatherPredictionV1Status(store, {
+      operator: null,
+      operatorError: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     daemonStartedAt,
@@ -290,6 +313,7 @@ export async function gatherGatheredStatusRaw(
     pollIntervalMs: status?.pollIntervalMs ?? 5000,
     masterDailyEstimateWei: daily.toString(),
     portfolioV0,
+    predictionV1,
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),
