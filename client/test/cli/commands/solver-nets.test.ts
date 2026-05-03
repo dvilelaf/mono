@@ -88,6 +88,56 @@ describe('solver-nets command', () => {
     );
   });
 
+  it('reports selected Prediction Harnesses disabled in operator config', async () => {
+    const configPath = tempConfig({
+      ...predictionConfig({ harness: 'prediction-v1-baseline' }),
+      harnesses: { disabled: ['prediction-v1-baseline'] },
+    });
+    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+
+    expect(result.exits).toEqual([]);
+    const envelope = result.envelope;
+    expect(envelope['ok']).toBe(false);
+    expect(envelope['harness']).toBeUndefined();
+    expect(envelope['diagnostics']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'prediction_harness_disabled',
+          severity: 'error',
+          configField: 'harnesses.disabled',
+        }),
+      ]),
+    );
+  });
+
+  it('surfaces selected external Prediction Harness load failures', async () => {
+    const configPath = tempConfig({
+      ...predictionConfig({ harness: '@example/prediction-harness' }),
+      harnesses: {
+        externalImpls: [
+          {
+            name: '@example/prediction-harness',
+            entry: join(tmpdir(), 'jinn-missing-external-prediction-harness'),
+          },
+        ],
+      },
+    });
+    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+
+    expect(result.exits).toEqual([]);
+    const envelope = result.envelope;
+    expect(envelope['ok']).toBe(false);
+    expect(envelope['diagnostics']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'prediction_harness_external_unavailable',
+          severity: 'error',
+          configField: 'harnesses.externalImpls.@example/prediction-harness',
+        }),
+      ]),
+    );
+  });
+
   it('runs a local no-funds Prediction sample through the baseline Harness', async () => {
     const configPath = tempConfig({});
     const result = await runSolverNets(['sample', 'prediction', '--config', configPath]);
