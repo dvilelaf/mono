@@ -140,6 +140,20 @@ describe("TaskCoordinator", function () {
     expect(attempt.finalization).to.equal(1);
   });
 
+  it("rejects solution submissions after the claim lease expires", async function () {
+    const { coordinator, router, creator, operator } = await deploy();
+    const policy = await makePolicy();
+    policy.claimLeaseTtlSeconds = 30;
+    await coordinator.connect(router).createTask(await creator.getAddress(), TASK_CID, SOLVER_TYPE, policy);
+    await coordinator.connect(router).claimTask(1, await operator.getAddress());
+    await coordinator.connect(router).registerAttemptRequest(1, 0, REQUEST_ID);
+    await time.increase(31);
+
+    await expect(
+      coordinator.connect(router).recordSubmission(REQUEST_ID, await operator.getAddress(), SOLUTION_CID, 7)
+    ).to.be.revertedWithCustomError(coordinator, "TCAttemptClaimExpired");
+  });
+
   it("claims and records a Verdict, finalizing the attempt and locking creator credit once", async function () {
     const { coordinator, router, creator, operator, evaluator, other } = await deploy();
     await createSubmittedAttempt(coordinator, router, await creator.getAddress(), await operator.getAddress());
@@ -186,6 +200,28 @@ describe("TaskCoordinator", function () {
     await expect(
       coordinator.connect(router).claimEvaluation(1, 0, await evaluator.getAddress())
     ).to.be.revertedWithCustomError(coordinator, "TCMaxVerdictsReached");
+  });
+
+  it("rejects verdict submissions after the evaluator claim lease expires", async function () {
+    const { coordinator, router, creator, operator, evaluator } = await deploy();
+    const policy = await makePolicy();
+    policy.claimLeaseTtlSeconds = 30;
+    await coordinator.connect(router).createTask(await creator.getAddress(), TASK_CID, SOLVER_TYPE, policy);
+    await coordinator.connect(router).claimTask(1, await operator.getAddress());
+    await coordinator.connect(router).registerAttemptRequest(1, 0, REQUEST_ID);
+    await coordinator.connect(router).recordSubmission(REQUEST_ID, await operator.getAddress(), SOLUTION_CID, 7);
+    await coordinator.connect(router).claimEvaluation(1, 0, await evaluator.getAddress());
+    await coordinator.connect(router).registerVerdictRequest(1, 0, 0, VERDICT_REQUEST_ID);
+    await time.increase(31);
+
+    await expect(
+      coordinator.connect(router).recordVerdict(
+        VERDICT_REQUEST_ID,
+        await evaluator.getAddress(),
+        VERDICT_CID,
+        1
+      )
+    ).to.be.revertedWithCustomError(coordinator, "TCVerdictClaimExpired");
   });
 
   it("rejects claims outside the claim window", async function () {

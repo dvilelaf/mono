@@ -48,6 +48,11 @@ export interface DeliveryResult {
   claimTxHash: Hex;
 }
 
+export interface DeliveryClaimOptions {
+  kind?: 'solution' | 'verdict';
+  verdictCode?: number;
+}
+
 /**
  * Deliver the manifest to the marketplace and claim the delivery on JinnRouter.
  *
@@ -74,6 +79,7 @@ export async function deliverAndClaim(
   deps: DeliveryDeps,
   preExistingDeliveryTxHash?: Hex,
   onDeliveryTxLanded?: OnDeliveryTxLanded,
+  claimOptions: DeliveryClaimOptions = {},
 ): Promise<DeliveryResult> {
   let deliveryTxHash: Hex;
 
@@ -116,10 +122,11 @@ export async function deliverAndClaim(
     requestId,
     {
       variant: deps.claimDeliveryVariant,
-      kind: 'solution',
+      kind: claimOptions.kind ?? 'solution',
       evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
         ? evidenceHash
         : undefined,
+      verdictCode: claimOptions.verdictCode,
     },
     deps.evictionRecovery,
   );

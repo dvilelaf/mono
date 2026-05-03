@@ -30,6 +30,55 @@ import {
 const EVICTED_STAKING_STATE = 2;
 const restakeLocks = new Map<string, Promise<void>>();
 
+const TASK_COORDINATOR_ABI = [
+  {
+    name: 'getTask',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'taskId', type: 'uint256' }],
+    outputs: [
+      {
+        name: 'record',
+        type: 'tuple',
+        components: [
+          { name: 'creator', type: 'address' },
+          { name: 'taskCidDigest', type: 'bytes32' },
+          { name: 'solverTypeDigest', type: 'bytes32' },
+          { name: 'status', type: 'uint8' },
+          {
+            name: 'policy',
+            type: 'tuple',
+            components: [
+              { name: 'claimWindowStart', type: 'uint64' },
+              { name: 'claimWindowEnd', type: 'uint64' },
+              { name: 'submissionDeadline', type: 'uint64' },
+              { name: 'claimLeaseTtlSeconds', type: 'uint32' },
+              { name: 'maxClaims', type: 'uint16' },
+              { name: 'maxClaimsPerOperator', type: 'uint16' },
+              { name: 'policyHook', type: 'address' },
+              {
+                name: 'evaluationPolicy',
+                type: 'tuple',
+                components: [
+                  { name: 'requiredVerdicts', type: 'uint16' },
+                  { name: 'passThreshold', type: 'uint16' },
+                  { name: 'evaluationDeadline', type: 'uint64' },
+                  { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
+                  { name: 'disallowSolverSelfEvaluation', type: 'bool' },
+                ],
+              },
+            ],
+          },
+          { name: 'claimCount', type: 'uint32' },
+          { name: 'submittedCount', type: 'uint32' },
+          { name: 'finalizedAttemptCount', type: 'uint32' },
+          { name: 'taskCreationCredited', type: 'bool' },
+        ],
+      },
+    ],
+  },
+] as const;
+
 async function withRestakeLock(key: string, fn: () => Promise<void>): Promise<void> {
   const pending = restakeLocks.get(key) ?? Promise.resolve();
 
@@ -506,6 +555,48 @@ export async function claimEvaluation(
   throw new Error(`No EvaluationAttemptCreated event returned from router tx=${txHash}`);
 }
 
+export async function getTaskCidDigest(
+  publicClient: PublicClient,
+  routerAddress: Address,
+  taskId: string | bigint,
+): Promise<Hex> {
+  const coordinatorAddress = await publicClient.readContract({
+    address: routerAddress,
+    abi: JINN_ROUTER_ABI,
+    functionName: 'taskCoordinator',
+  }) as Address;
+  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
+  const task = await publicClient.readContract({
+    address: coordinatorAddress,
+    abi: TASK_COORDINATOR_ABI,
+    functionName: 'getTask',
+    args: [taskIdBigInt],
+  }) as { taskCidDigest: Hex } | readonly unknown[];
+
+  if (Array.isArray(task)) {
+    return task[1] as Hex;
+  }
+  return (task as { taskCidDigest: Hex }).taskCidDigest;
+}
+
+export async function getMarketplaceRequestDeliveryMech(
+  publicClient: PublicClient,
+  marketplaceAddress: Address,
+  requestId: string,
+): Promise<Address> {
+  const info = await publicClient.readContract({
+    address: marketplaceAddress,
+    abi: MECH_MARKETPLACE_ABI,
+    functionName: 'mapRequestIdInfos',
+    args: [requestId as Hex],
+  }) as { deliveryMech: Address } | readonly unknown[];
+
+  if (Array.isArray(info)) {
+    return info[1] as Address;
+  }
+  return (info as { deliveryMech: Address }).deliveryMech;
+}
+
 export async function getMechDeliveryRate(
   publicClient: PublicClient,
   mechAddress: Address,
@@ -621,6 +712,15 @@ export interface DecodedTaskCreated {
   blockNumber?: number;
 }
 
+export interface DecodedSolutionDeliveryClaimed {
+  taskId: string;
+  attemptIndex: number;
+  requestId: string;
+  operator: string;
+  transactionHash?: `0x${string}`;
+  blockNumber?: number;
+}
+
 export function decodeTaskCreatedLogs(logs: Log[]): DecodedTaskCreated[] {
   const results: DecodedTaskCreated[] = [];
   for (const log of logs) {
@@ -642,6 +742,38 @@ export function decodeTaskCreatedLogs(logs: Log[]): DecodedTaskCreated[] {
       }
     } catch {
       // Not a TaskCreated event — skip
+    }
+  }
+  return results;
+}
+
+export function decodeSolutionDeliveryClaimedLogs(logs: Log[]): DecodedSolutionDeliveryClaimed[] {
+  const results: DecodedSolutionDeliveryClaimed[] = [];
+  for (const log of logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (decoded.eventName === 'SolutionDeliveryClaimed') {
+        const args = decoded.args as {
+          operator: Address;
+          requestId: Hex;
+          taskId: bigint;
+          attemptIndex: number;
+        };
+        results.push({
+          taskId: String(args.taskId),
+          attemptIndex: Number(args.attemptIndex),
+          requestId: String(args.requestId),
+          operator: String(args.operator),
+          transactionHash: log.transactionHash ?? undefined,
+          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
+        });
+      }
+    } catch {
+      // Not a SolutionDeliveryClaimed event — skip
     }
   }
   return results;

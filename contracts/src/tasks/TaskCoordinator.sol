@@ -32,6 +32,7 @@ error TCRequestAlreadyRegistered(bytes32 requestId);
 error TCRequestNotFound(bytes32 requestId);
 error TCNotAttemptOperator(uint256 taskId, uint32 attemptIndex, address operator);
 error TCClaimNotExpired(uint256 taskId, uint32 attemptIndex);
+error TCAttemptClaimExpired(uint256 taskId, uint32 attemptIndex);
 error TCSolverSelfEvaluation(uint256 taskId, uint32 attemptIndex, address evaluator);
 error TCEvaluatorClaimLimitReached(uint256 taskId, uint32 attemptIndex, address evaluator);
 error TCMaxVerdictsReached(uint256 taskId, uint32 attemptIndex);
@@ -41,6 +42,7 @@ error TCVerdictAlreadyDelivered(uint256 taskId, uint32 attemptIndex, uint32 verd
 error TCVerdictNotRegistered(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 error TCNotVerdictEvaluator(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex, address evaluator);
 error TCInvalidVerdictCode(uint8 verdictCode);
+error TCVerdictClaimExpired(uint256 taskId, uint32 attemptIndex, uint32 verdictIndex);
 
 /// @title TaskCoordinator
 /// @notice Canonical Task lifecycle, claim, attempt, submission, and evaluation state for new Jinn Tasks.
@@ -396,6 +398,9 @@ contract TaskCoordinator {
 
         TaskRecord storage record = _tasks[ref.taskId];
         if (block.timestamp > record.policy.submissionDeadline) revert TCSubmissionDeadlinePassed(ref.taskId);
+        if (block.timestamp > attempt.claimExpiresAt) {
+            revert TCAttemptClaimExpired(ref.taskId, ref.attemptIndex);
+        }
 
         attempt.solutionCidDigest = solutionCidDigest;
         attempt.solutionWeight = solutionWeight;
@@ -520,6 +525,9 @@ contract TaskCoordinator {
         TaskRecord storage task = _tasks[ref.taskId];
         if (block.timestamp > task.policy.evaluationPolicy.evaluationDeadline) {
             revert TCEvaluationDeadlinePassed(ref.taskId);
+        }
+        if (block.timestamp > verdict.claimExpiresAt) {
+            revert TCVerdictClaimExpired(ref.taskId, ref.attemptIndex, ref.verdictIndex);
         }
 
         VerdictCode verdictCode = VerdictCode(verdictCodeRaw);

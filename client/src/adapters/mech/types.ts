@@ -17,7 +17,7 @@ export interface MechAdapterConfig {
   ipfsRegistryUrl: string;  // Upload endpoint (e.g., https://registry.autonolas.tech)
   ipfsGatewayUrl: string;   // Read endpoint (e.g., https://gateway.autonolas.tech)
   pollIntervalMs: number;
-  /** Optional delivery backfill horizon for late evaluation creation retries. */
+  /** Optional cap for delivery-log scans; omit for full-history recovery. */
   mechDeliverBackfillLookbackBlocks?: bigint;
   chainId: number;
   /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
@@ -179,6 +179,13 @@ export const JINN_ROUTER_CLAIM_DELIVERY_V2_ABI = [
 ] as const;
 
 export const JINN_ROUTER_ABI = [
+  {
+    name: 'taskCoordinator',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
   {
     name: 'createTask',
     type: 'function',

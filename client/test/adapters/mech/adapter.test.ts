@@ -61,11 +61,23 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
     txHash: TX_HASH,
     blockNumber: 124,
   }),
+  claimEvaluation: vi.fn().mockResolvedValue({
+    taskId: '1',
+    attemptIndex: 0,
+    verdictIndex: 0,
+    requestId: ('0x' + 'bb'.repeat(32)) as `0x${string}`,
+    txHash: TX_HASH,
+    blockNumber: 125,
+  }),
   claimDelivery: vi.fn().mockResolvedValue('0x1234'),
   getMechDeliveryRate: vi.fn().mockResolvedValue(1000000n),
   getTimeoutBounds: vi.fn().mockResolvedValue({ min: 60n, max: 300n }),
   decodeTaskCreatedLogs: vi.fn().mockReturnValue([]),
+  decodeSolutionDeliveryClaimedLogs: vi.fn().mockReturnValue([]),
   decodeDeliverLogs: vi.fn().mockReturnValue([]),
+  findLatestDeliveryDataHexForRequest: vi.fn().mockResolvedValue(TASK_CID_DIGEST),
+  getMarketplaceRequestDeliveryMech: vi.fn().mockResolvedValue(('0x' + '77'.repeat(20)) as `0x${string}`),
+  getTaskCidDigest: vi.fn().mockResolvedValue(TASK_CID_DIGEST),
   callDeliverToMarketplace: vi.fn().mockResolvedValue('0x5678'),
 }));
 
@@ -119,6 +131,18 @@ const TEST_CONFIG: MechAdapterConfig = {
   chainId: 8453,
   routerClaimDeliveryVariant: 'v1',
 };
+
+function makeConfigStore(initial: Record<string, string> = {}, lastProcessedBlock: bigint | null = null) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getLastProcessedBlock: vi.fn().mockReturnValue(lastProcessedBlock),
+    getConfigValue: vi.fn((key: string) => values.get(key) ?? null),
+    setConfigValue: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+    values,
+  };
+}
 
 describe('MechAdapter TaskCoordinator flow', () => {
   beforeEach(() => {
@@ -221,6 +245,286 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('watchForTasks yields evaluation opportunities and claimTask claims them as evaluator work', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      claimEvaluation,
+      decodeSolutionDeliveryClaimedLogs,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+      getTaskCidDigest,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs, uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+    const solverMech = ('0x' + '77'.repeat(20)) as `0x${string}`;
+
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValueOnce([{
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: solverSafe,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    }]);
+    vi.mocked(getMarketplaceRequestDeliveryMech).mockResolvedValueOnce(solverMech);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: `evaluation:1:0:${REQUEST_ID}`,
+      task: {
+        role: 'evaluation',
+        restorationRequestId: REQUEST_ID,
+        attemptId: REQUEST_ID,
+        attemptNumber: 0,
+      },
+      onchainCreationTx: TX_HASH,
+      onchainCreationBlock: 333,
+    });
+    expect(value!.task.id).toBe('watched-task:evaluation:0');
+    expect(value!.task.context).toMatchObject({
+      restorationResult: 'solution payload',
+      restorationEnvelopeCid: TASK_CID,
+    });
+    expect(getTaskCidDigest).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.routerAddress,
+      '1',
+    );
+    expect(getMarketplaceRequestDeliveryMech).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.mechMarketplaceAddress,
+      REQUEST_ID,
+    );
+    expect(findLatestDeliveryDataHexForRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      solverMech,
+      REQUEST_ID,
+      0n,
+      333n,
+    );
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledWith(
+      TEST_CONFIG.ipfsGatewayUrl,
+      TASK_CID,
+    );
+    expect(claimEvaluation).not.toHaveBeenCalled();
+
+    const request = await adapter.claimTask(value!.taskId);
+    expect(uploadToIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsRegistryUrl, expect.objectContaining({
+      role: 'evaluation',
+      restorationRequestId: REQUEST_ID,
+    }));
+    expect(claimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '1',
+      0,
+      TEST_CONFIG.mechContractAddress,
+      TASK_CID_DIGEST,
+      undefined,
+    );
+    expect(request).toMatchObject({
+      requestId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      taskId: '1',
+      attemptIndex: 0,
+      task: { role: 'evaluation', restorationRequestId: REQUEST_ID },
+      taskCid: 'QmFakeCid',
+    });
+
+    await adapter.stop();
+  });
+
+  it('uses a full delivery-log scan by default for delayed SolutionDeliveryClaimed events', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      decodeSolutionDeliveryClaimedLogs,
+      findLatestDeliveryDataHexForRequest,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+    const solverMech = ('0x' + '77'.repeat(20)) as `0x${string}`;
+
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValueOnce([{
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: solverSafe,
+      transactionHash: TX_HASH,
+      blockNumber: 25_000,
+    }]);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(25_001n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 24_999n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value!.task.role).toBe('evaluation');
+    expect(findLatestDeliveryDataHexForRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      solverMech,
+      REQUEST_ID,
+      0n,
+      25_000n,
+    );
+
+    await adapter.stop();
+  });
+
+  it('retries transient evaluation discovery failures after advancing the router cursor', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      decodeSolutionDeliveryClaimedLogs,
+      findLatestDeliveryDataHexForRequest,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValueOnce([{
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: solverSafe,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+    vi.mocked(fetchFromIpfs)
+      .mockRejectedValueOnce(new Error('temporary IPFS outage'))
+      .mockResolvedValueOnce({ data: 'solution payload' });
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 0 });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: `evaluation:1:0:${REQUEST_ID}`,
+      task: {
+        role: 'evaluation',
+        restorationRequestId: REQUEST_ID,
+      },
+    });
+    expect((adapter as any).requestBlockCursor).toBe(101n);
+    expect(fetchFromIpfs).toHaveBeenCalledTimes(2);
+    expect(findLatestDeliveryDataHexForRequest).toHaveBeenCalledTimes(2);
+
+    await adapter.stop();
+  });
+
+  it('backfills router task logs from the persisted block after restart', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const store = makeConfigStore({}, 100n);
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '7',
+      taskCidDigest: TASK_CID_DIGEST,
+      transactionHash: TX_HASH,
+      blockNumber: 105,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'recovered-task' }));
+
+    const adapter = new MechAdapter(
+      { ...TEST_CONFIG, pollIntervalMs: 0 },
+      store as any,
+    );
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(110n);
+    const getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).publicClient.getLogs = getLogs;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: '7',
+      task: { id: 'recovered-task' },
+    });
+    expect(getLogs).toHaveBeenCalledWith({
+      address: TEST_CONFIG.routerAddress,
+      fromBlock: 101n,
+      toBlock: 110n,
+    });
+    expect(store.values.get('mech_router_request_block_cursor_v1')).toBe('110');
+
+    await adapter.stop();
+  });
+
+  it('keeps pending evaluation solutions durable until claimTask creates a verdict request', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { claimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+    const store = makeConfigStore({
+      mech_pending_evaluation_solutions_v1: JSON.stringify([{
+        taskId: '1',
+        attemptIndex: 0,
+        requestId: REQUEST_ID,
+        operator: solverSafe,
+        transactionHash: TX_HASH,
+        blockNumber: 333,
+      }]),
+      mech_router_request_block_cursor_v1: '333',
+    }, 333n);
+
+    const adapter = new MechAdapter(
+      { ...TEST_CONFIG, pollIntervalMs: 0 },
+      store as any,
+    );
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(333n);
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({
+      taskId: `evaluation:1:0:${REQUEST_ID}`,
+      task: {
+        role: 'evaluation',
+        restorationRequestId: REQUEST_ID,
+      },
+    });
+    expect(store.values.get('mech_pending_evaluation_solutions_v1')).toContain(REQUEST_ID);
+
+    const request = await adapter.claimTask(value!.taskId);
+
+    expect(uploadToIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsRegistryUrl, expect.objectContaining({
+      role: 'evaluation',
+      restorationRequestId: REQUEST_ID,
+    }));
+    expect(claimEvaluation).toHaveBeenCalled();
+    expect(request).toMatchObject({
+      requestId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      taskId: '1',
+      attemptIndex: 0,
+    });
+    expect(store.values.get('mech_pending_evaluation_solutions_v1')).toBe('[]');
+
+    await adapter.stop();
+  });
+
   it('claimTask creates an internal requestId for an observed Task', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimTask } = await import('../../../src/adapters/mech/contracts.js');
@@ -290,15 +594,19 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
   it('watchForDeliveries claims router delivery and yields the submitted Solution', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
-    const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { claimDelivery, claimEvaluation, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
 
     vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
       requestId: REQUEST_ID,
       deliveryDataHex: TASK_CID_DIGEST,
       mechAddress: TEST_CONFIG.safeAddress,
     }]);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution', artifacts: ['bafyartifact'] });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
+      schemaVersion: 'jinn.execution.v1',
+      role: 'restoration',
+      signature: { hash: '0x' + 'ef'.repeat(32) },
+    });
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
@@ -307,6 +615,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     (adapter as any).deliveryBlockCursor = 100n;
     (adapter as any).pendingEvaluations.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test' });
     (adapter as any).originalStates.set(REQUEST_ID, { id: 'prediction-task-1', description: 'test' });
+    (adapter as any).requestKinds.set(REQUEST_ID, 'solution');
 
     const gen = adapter.watchForDeliveries()[Symbol.asyncIterator]();
     const { value } = await gen.next();
@@ -320,9 +629,13 @@ describe('MechAdapter TaskCoordinator flow', () => {
       { variant: 'v1', kind: 'solution', evidenceHash: undefined },
       undefined,
     );
+    expect(uploadToIpfs).not.toHaveBeenCalled();
+    expect(claimEvaluation).not.toHaveBeenCalled();
     expect(value).toMatchObject({
       requestId: REQUEST_ID,
-      result: { data: 'solution', artifacts: ['bafyartifact'] },
+      result: {
+        data: expect.stringContaining('"schemaVersion":"jinn.execution.v1"'),
+      },
       deliveryMechAddress: TEST_CONFIG.safeAddress,
     });
 

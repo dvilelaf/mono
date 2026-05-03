@@ -465,6 +465,8 @@ export class TaskEngine {
   }
 
   async releaseClaimedNotStarted(): Promise<string[]> {
+    // TaskCoordinator claims are made before observe(), so there is no
+    // recoverable "claimed but not started" engine row to release here.
     return [];
   }
 
@@ -884,7 +886,9 @@ export class TaskEngine {
     // so the envelope should be declared 'committed'. For V1 or unknown flows,
     // 'self-signed' is accurate (no on-chain hash commitment).
     const evidenceTier: import('../../types/envelope.js').EvidenceTier =
-      this.deliveryDeps?.claimDeliveryVariant === 'v2' ? 'committed' : 'self-signed';
+      this.deliveryDeps?.claimDeliveryVariant === 'v2' || this.deliveryDeps?.claimDeliveryVariant === 'v3'
+        ? 'committed'
+        : 'self-signed';
     const runtimePlugins: RuntimePlugin[] =
       this.runtimePluginsByRequest.get(task.requestId)
       ?? (task.runtimePluginsJson ? JSON.parse(task.runtimePluginsJson) as RuntimePlugin[] : []);
@@ -1009,7 +1013,7 @@ export class TaskEngine {
     // Guard: v2 claimDelivery requires an evidenceHash — a zero fallback would
     // silently brick staking rewards, so we fail loudly instead.
     const evidenceHash = task.evidenceHash as `0x${string}` | null | undefined;
-    if (!evidenceHash && this.deliveryDeps.claimDeliveryVariant === 'v2') {
+    if (!evidenceHash && (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3')) {
       throw new MissingEvidenceHashError(task.requestId);
     }
 
@@ -1027,6 +1031,10 @@ export class TaskEngine {
       // Persist deliveryTxHash before claimDelivery so recovery can resume from here.
       async (txHash) => {
         persistence.setDeliveryTxHash(requestId, txHash);
+      },
+      {
+        kind: task.taskRole === 'evaluation' ? 'verdict' : 'solution',
+        verdictCode: task.taskRole === 'evaluation' ? this.verdictCodeForTask(task) : undefined,
       },
     );
 
@@ -1165,6 +1173,26 @@ export class TaskEngine {
       tags: [tag, 'success'],
       outcome: 'SUCCESS',
     });
+  }
+
+  private verdictCodeForTask(task: PersistedTaskRun): number {
+    const gating = task.gatingClaim as { verdict?: unknown } | null;
+    const raw = gating?.verdict;
+    switch (raw) {
+      case 'PASS':
+      case 'SCORED':
+        return 1;
+      case 'FAIL':
+      case 'REJECTED':
+        return 2;
+      case 'INVALID':
+        return 3;
+      case 'INDETERMINATE':
+      case 'UNRESOLVED':
+        return 4;
+      default:
+        return 1;
+    }
   }
 
   private async _maybePostEvaluatorFeedback(task: PersistedTaskRun): Promise<void> {

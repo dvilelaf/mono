@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, zeroAddress, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -33,7 +33,11 @@ import {
   getMechDeliveryRate,
   getTimeoutBounds,
   decodeTaskCreatedLogs,
+  decodeSolutionDeliveryClaimedLogs,
   decodeDeliverLogs,
+  findLatestDeliveryDataHexForRequest,
+  getMarketplaceRequestDeliveryMech,
+  getTaskCidDigest,
   callDeliverToMarketplace,
   type RouterTaskPolicy,
 } from './contracts.js';
@@ -41,9 +45,30 @@ import { type MechAdapterConfig } from './types.js';
 import type { Store } from '../../store/store.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import { RESTORATION_TASK_CID_CONTEXT_KEY } from '../../harnesses/impls/evaluation-context.js';
+import {
+  RESTORATION_ENVELOPE_CID_CONTEXT_KEY,
+  RESTORATION_TASK_CID_CONTEXT_KEY,
+} from '../../harnesses/impls/evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
-import type { SignedTaskV1, TaskV1 } from '../../types/task-document.js';
+import type { SignedTaskV1, TaskClaimPolicy, TaskV1 } from '../../types/task-document.js';
+
+interface PendingEvaluationSolution {
+  taskId: string;
+  attemptIndex: number;
+  requestId: string;
+  operator: string;
+  transactionHash?: Hex;
+  blockNumber?: number;
+}
+
+const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
+const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
+const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
+  mode: 'exclusive',
+  maxClaims: 1,
+  maxClaimsPerOperator: 1,
+  claimLeaseTtlSeconds: 30 * 60,
+};
 
 export class MechAdapter implements ExecutionAdapter {
   readonly name = 'mech';
@@ -57,6 +82,12 @@ export class MechAdapter implements ExecutionAdapter {
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
+  private evaluationOpportunities = new Map<string, {
+    taskId: string;
+    attemptIndex: number;
+    task: Task;
+  }>();
+  private pendingEvaluationSolutions = new Map<string, PendingEvaluationSolution>();
   // Original Tasks keyed by request ID (restoration and evaluation)
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
@@ -97,6 +128,7 @@ export class MechAdapter implements ExecutionAdapter {
 
     // Recover pending state from on-chain events
     if (this.store) {
+      this.loadPendingEvaluationSolutions();
       await this.recoverPendingState(blockNumber);
     }
   }
@@ -110,6 +142,66 @@ export class MechAdapter implements ExecutionAdapter {
       );
       this.deliveryBlockCursor = fromBlock;
     }
+
+    const routerCursorRaw = this.store?.getConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY);
+    const routerFromBlock = routerCursorRaw != null
+      ? BigInt(routerCursorRaw)
+      : fromBlock;
+    if (routerFromBlock < currentBlock) {
+      this.requestBlockCursor = routerFromBlock;
+    }
+  }
+
+  private loadPendingEvaluationSolutions(): void {
+    const raw = this.store?.getConfigValue(PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      for (const value of parsed) {
+        if (value == null || typeof value !== 'object') continue;
+        const item = value as Partial<PendingEvaluationSolution>;
+        if (
+          typeof item.taskId !== 'string' ||
+          typeof item.requestId !== 'string' ||
+          typeof item.operator !== 'string' ||
+          typeof item.attemptIndex !== 'number'
+        ) {
+          continue;
+        }
+        const solution: PendingEvaluationSolution = {
+          taskId: item.taskId,
+          attemptIndex: item.attemptIndex,
+          requestId: item.requestId,
+          operator: item.operator,
+          transactionHash: typeof item.transactionHash === 'string'
+            ? item.transactionHash as Hex
+            : undefined,
+          blockNumber: typeof item.blockNumber === 'number' ? item.blockNumber : undefined,
+        };
+        this.pendingEvaluationSolutions.set(solution.requestId, solution);
+      }
+    } catch (err) {
+      console.error('[mech] Failed to load pending evaluation solutions:', err);
+    }
+  }
+
+  private persistPendingEvaluationSolutions(): void {
+    if (!this.store) return;
+    this.store.setConfigValue(
+      PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY,
+      JSON.stringify(Array.from(this.pendingEvaluationSolutions.values())),
+    );
+  }
+
+  private rememberPendingEvaluationSolution(solution: PendingEvaluationSolution): void {
+    this.pendingEvaluationSolutions.set(solution.requestId, solution);
+    this.persistPendingEvaluationSolutions();
+  }
+
+  private forgetPendingEvaluationSolution(requestId: string): void {
+    if (!this.pendingEvaluationSolutions.delete(requestId)) return;
+    this.persistPendingEvaluationSolutions();
   }
 
   async postTask(state: Task): Promise<PostedTask> {
@@ -186,12 +278,7 @@ export class MechAdapter implements ExecutionAdapter {
       window: state.window ?? { startTs: now, endTs: now + 86_400_000 },
       spec: state.spec ?? {},
       eligibility: state.eligibility ?? {},
-      claimPolicy: state.claimPolicy ?? {
-        mode: 'exclusive',
-        maxClaims: 1,
-        maxClaimsPerOperator: 1,
-        claimLeaseTtlSeconds: 30 * 60,
-      },
+      claimPolicy: state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY,
       creator: {
         safeAddress: getAddress(this.config.safeAddress),
         agentEoa: account.address,
@@ -204,12 +291,7 @@ export class MechAdapter implements ExecutionAdapter {
 
   private contractPolicyForTask(state: Task): RouterTaskPolicy {
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const claimPolicy = state.claimPolicy ?? {
-      mode: 'exclusive' as const,
-      maxClaims: 1,
-      maxClaimsPerOperator: 1,
-      claimLeaseTtlSeconds: 30 * 60,
-    };
+    const claimPolicy = state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
     const normalizeTs = (value: number | undefined, fallback: number): bigint => {
       const raw = value ?? fallback;
       return BigInt(raw > 10_000_000_000 ? Math.floor(raw / 1000) : raw);
@@ -234,7 +316,7 @@ export class MechAdapter implements ExecutionAdapter {
       claimLeaseTtlSeconds: claimPolicy.claimLeaseTtlSeconds,
       maxClaims: claimPolicy.maxClaims,
       maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
-      policyHook: (claimPolicy.policyHook ?? '0x0000000000000000000000000000000000000000') as Address,
+      policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
       evaluationPolicy: {
         requiredVerdicts: 1,
         passThreshold: 1,
@@ -245,20 +327,172 @@ export class MechAdapter implements ExecutionAdapter {
     };
   }
 
+  private buildEvaluationTask(params: {
+    task: Task;
+    solutionRequestId: string;
+    attemptIndex: number;
+    resultData: string;
+    restorationEnvelopeCid: string;
+    taskCid?: string;
+  }): Task {
+    return {
+      ...params.task,
+      id: `${params.task.id}:evaluation:${params.attemptIndex}`,
+      role: 'evaluation',
+      restorationRequestId: params.solutionRequestId,
+      attemptId: params.solutionRequestId,
+      attemptNumber: params.attemptIndex,
+      context: {
+        ...(params.task.context ?? {}),
+        restorationResult: params.resultData,
+        [RESTORATION_TASK_CID_CONTEXT_KEY]:
+          params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
+        [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: params.restorationEnvelopeCid,
+      },
+    };
+  }
+
+  private async restorationAnnouncementForTaskId(taskId: string): Promise<TaskAnnouncement> {
+    const cached = this.observedTasks.get(taskId);
+    if (cached) return cached;
+
+    const taskCidDigest = await getTaskCidDigest(
+      this.publicClient,
+      this.config.routerAddress,
+      taskId,
+    );
+    const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
+    const taskCid = `f01551220${digest}`;
+    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const task = parseTask({ signedTask: signed });
+    const announcement: TaskAnnouncement = {
+      taskId,
+      task,
+      taskCid,
+    };
+    this.observedTasks.set(taskId, announcement);
+    return announcement;
+  }
+
+  private async deliveryEnvelopeCidForSolution(solution: {
+    requestId: string;
+    blockNumber?: number;
+  }): Promise<string> {
+    const deliveryMech = await getMarketplaceRequestDeliveryMech(
+      this.publicClient,
+      this.config.mechMarketplaceAddress,
+      solution.requestId,
+    );
+    const toBlock = solution.blockNumber != null
+      ? BigInt(solution.blockNumber)
+      : await this.publicClient.getBlockNumber();
+    const configuredLookback = this.config.mechDeliverBackfillLookbackBlocks;
+    const fromBlock = configuredLookback == null
+      ? 0n
+      : toBlock > configuredLookback
+      ? toBlock - configuredLookback
+      : 0n;
+    const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
+      this.publicClient,
+      deliveryMech,
+      solution.requestId,
+      fromBlock,
+      toBlock,
+    );
+    if (!deliveryDataHex) {
+      throw new Error(
+        `No Deliver event data found for solution ${solution.requestId} on mech ${deliveryMech} ` +
+        `between blocks ${fromBlock} and ${toBlock}`,
+      );
+    }
+    const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
+    return `f01551220${digest}`;
+  }
+
+  private async evaluationAnnouncementForSolution(
+    solution: PendingEvaluationSolution,
+  ): Promise<TaskAnnouncement | undefined> {
+    if (solution.operator.toLowerCase() === this.config.safeAddress.toLowerCase()) {
+      return undefined;
+    }
+
+    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
+    const resultPayload = await fetchFromIpfs(
+      this.config.ipfsGatewayUrl,
+      restorationEnvelopeCid,
+    ) as Record<string, unknown>;
+    const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+    const evaluationTask = this.buildEvaluationTask({
+      task: restoration.task,
+      solutionRequestId: solution.requestId,
+      attemptIndex: solution.attemptIndex,
+      resultData,
+      restorationEnvelopeCid,
+      taskCid: restoration.taskCid,
+    });
+    const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
+    const announcement: TaskAnnouncement = {
+      taskId: opportunityId,
+      task: evaluationTask,
+      taskCid: restoration.taskCid,
+      onchainCreationTx: solution.transactionHash,
+      onchainCreationBlock: solution.blockNumber,
+    };
+    this.evaluationOpportunities.set(opportunityId, {
+      taskId: solution.taskId,
+      attemptIndex: solution.attemptIndex,
+      task: evaluationTask,
+    });
+    this.observedTasks.set(opportunityId, announcement);
+    return announcement;
+  }
+
+  private async *retryPendingEvaluationSolutions(): AsyncIterable<TaskAnnouncement> {
+    for (const [requestId, solution] of Array.from(this.pendingEvaluationSolutions)) {
+      try {
+        const announcement = await this.evaluationAnnouncementForSolution(solution);
+        if (announcement) {
+          yield announcement;
+        } else {
+          this.forgetPendingEvaluationSolution(requestId);
+        }
+      } catch (err) {
+        console.error(
+          `[mech] evaluation opportunity retry failed for ${requestId}:`,
+          err,
+        );
+      }
+    }
+  }
+
   async *watchForTasks(): AsyncIterable<TaskAnnouncement> {
     while (!this.stopped) {
       try {
+        for await (const announcement of this.retryPendingEvaluationSolutions()) {
+          yield announcement;
+        }
+
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
+          const fromBlock = this.requestBlockCursor + 1n;
           const logs = await this.publicClient.getLogs({
             address: this.config.routerAddress,
-            fromBlock: this.requestBlockCursor + 1n,
+            fromBlock,
             toBlock: currentBlock,
           });
-          this.requestBlockCursor = currentBlock;
 
-          const decoded = decodeTaskCreatedLogs(logs);
-          for (const { taskId, taskCidDigest, transactionHash, blockNumber } of decoded) {
+          const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
+          for (const solution of submittedSolutions) {
+            this.rememberPendingEvaluationSolution(solution);
+          }
+          this.requestBlockCursor = currentBlock;
+          if (this.store) {
+            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
+          }
+
+          const createdTasks = decodeTaskCreatedLogs(logs);
+          for (const { taskId, taskCidDigest, transactionHash, blockNumber } of createdTasks) {
             try {
               const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
               // CIDv1 hex with raw codec (0x55) + sha2-256 (0x12) + 32-byte length (0x20).
@@ -282,6 +516,10 @@ export class MechAdapter implements ExecutionAdapter {
               console.error(`[mech] Failed to parse task ${taskId}:`, err);
             }
           }
+
+          for await (const announcement of this.retryPendingEvaluationSolutions()) {
+            yield announcement;
+          }
         }
       } catch (err) {
         console.error('[mech] Error polling for tasks:', formatRpcError(err, {
@@ -298,6 +536,37 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   async claimTask(taskId: string): Promise<TaskRequest> {
+    const evaluationOpportunity = this.evaluationOpportunities.get(taskId);
+    if (evaluationOpportunity) {
+      const signedEvaluationTask = await this.signTaskDocument(evaluationOpportunity.task);
+      const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, signedEvaluationTask);
+      const evaluationTaskCidDigest = cidToDigestHex(evaluationCid);
+      const claimed = await this.claimEvaluation(
+        evaluationOpportunity.taskId,
+        evaluationOpportunity.attemptIndex,
+        evaluationTaskCidDigest,
+      );
+
+      this.pendingEvaluations.set(claimed.requestId, evaluationOpportunity.task);
+      this.originalStates.set(claimed.requestId, evaluationOpportunity.task);
+      this.requestKinds.set(claimed.requestId, 'verdict');
+      this.evaluationOpportunities.delete(taskId);
+      const solutionRequestId = evaluationOpportunity.task.restorationRequestId;
+      if (solutionRequestId) {
+        this.forgetPendingEvaluationSolution(solutionRequestId);
+      }
+
+      return {
+        requestId: claimed.requestId,
+        taskId: claimed.taskId,
+        attemptIndex: claimed.attemptIndex,
+        task: evaluationOpportunity.task,
+        taskCid: evaluationCid,
+        onchainCreationTx: claimed.txHash,
+        onchainCreationBlock: claimed.blockNumber,
+      };
+    }
+
     const announcement = this.observedTasks.get(taskId);
     if (!announcement) {
       throw new PermanentError(`Cannot claim unknown task ${taskId}`);
