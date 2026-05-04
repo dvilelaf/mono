@@ -41,6 +41,7 @@ export interface TaskSessionInputs {
     solverType?: string;
     spec?: Record<string, unknown>;
     role?: string;
+    restorationRequestId?: string;
     eligibility?: Record<string, unknown>;
     window?: { startTs: number; endTs: number };
     [key: string]: unknown;

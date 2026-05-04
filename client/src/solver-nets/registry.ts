@@ -42,9 +42,15 @@ function runtimePluginFrom(
   };
 }
 
-function isNetworkToolsPlugin(plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>): boolean {
-  return plugin.source === JINN_NETWORK_TOOLS_PLUGIN
-    || plugin.name === '@jinn-network/network-tools';
+/**
+ * A runtime plugin (e.g. Network Tools) declares `supports: ['jinn.runtime']` —
+ * it isn't tied to a SolverType, so the supports-includes-solverType check
+ * does not apply to it. The manifest validator enforces that no plugin mixes
+ * 'jinn.runtime' with SolverType identifiers, so this check cannot be abused
+ * by a SolverType plugin claiming runtime status.
+ */
+function isRuntimePlugin(plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>): boolean {
+  return plugin.supports.includes('jinn.runtime');
 }
 
 export class SolverNetRegistry {
@@ -97,7 +103,7 @@ export async function loadSolverNets(
     ): Promise<void> {
       const plugin = await resolveSolverPlugin(entry);
       if (seenSources.has(plugin.source) || seenNames.has(plugin.name)) return;
-      if (!isNetworkToolsPlugin(plugin) && !plugin.supports.includes(net.solverType)) {
+      if (!isRuntimePlugin(plugin) && !plugin.supports.includes(net.solverType)) {
         throw new Error(
           `SolverNet ${name} runtime plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
         );
