@@ -95,6 +95,8 @@ export async function queryDocuments(filters: {
   type?: string;
   from?: string;
   to?: string;
+  limit?: number;
+  offset?: number;
 }) {
   const conditions = [];
   if (filters.domain) conditions.push(eq(documents.domain, filters.domain));
@@ -102,20 +104,60 @@ export async function queryDocuments(filters: {
   if (filters.from) conditions.push(gte(documents.createdAt, new Date(filters.from)));
   if (filters.to) conditions.push(lte(documents.createdAt, new Date(filters.to)));
 
-  return db
-    .select()
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const base = db.select().from(documents).where(where).orderBy(desc(documents.createdAt));
+  if (filters.limit !== undefined && filters.offset !== undefined) {
+    return base.limit(filters.limit).offset(filters.offset);
+  }
+  if (filters.limit !== undefined) return base.limit(filters.limit);
+  if (filters.offset !== undefined) return base.offset(filters.offset);
+  return base;
+}
+
+export async function countDocuments(filters: {
+  domain?: string;
+  type?: string;
+  from?: string;
+  to?: string;
+}): Promise<number> {
+  const conditions = [];
+  if (filters.domain) conditions.push(eq(documents.domain, filters.domain));
+  if (filters.type) conditions.push(eq(documents.type, filters.type));
+  if (filters.from) conditions.push(gte(documents.createdAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(documents.createdAt, new Date(filters.to)));
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const [row] = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
     .from(documents)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(documents.createdAt));
+    .where(where);
+  return row?.n ?? 0;
+}
+
+export async function openDocumentFile(id: string): Promise<{ ok: boolean; error?: string; filePath?: string }> {
+  const doc = await getDocument(id);
+  if (!doc) return { ok: false, error: "Document not found" };
+  if (doc.type !== "file") return { ok: false, error: "Document is not a file" };
+  if (!doc.filePath) return { ok: false, error: "Document has no file_path" };
+  if (!doc.filePath.startsWith("/Users/")) return { ok: false, error: "Refusing to open path outside /Users/" };
+
+  const { exec } = await import("node:child_process");
+  await new Promise<void>((resolve, reject) => {
+    exec(`open ${JSON.stringify(doc.filePath)}`, (err) => (err ? reject(err) : resolve()));
+  });
+  return { ok: true, filePath: doc.filePath };
 }
 
 export async function getCanonicalDocuments(topics: string[]) {
   if (!topics.length) return [];
+  const arrayLiteral =
+    "{" + topics.map((t) => `"${t.replace(/"/g, '\\"')}"`).join(",") + "}";
   const rows = (await db.execute(sql`
     SELECT id, domain, type, title, content, source, metadata, canonical_for,
            created_at, updated_at
     FROM documents
-    WHERE canonical_for && ${topics}::text[]
+    WHERE canonical_for && ${arrayLiteral}::text[]
     ORDER BY updated_at DESC
   `)) as unknown as Array<Record<string, unknown>>;
   return rows;
