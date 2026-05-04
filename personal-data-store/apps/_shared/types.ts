@@ -27,23 +27,26 @@ export interface IncomeSummary {
   }[];
 }
 
-export interface PdsDocument {
+export interface Analysis {
   id: string;
   domain: string;
-  type: string | null;
-  title: string | null;
+  analysisType: string;
+  title: string;
+  summary: string | null;
   content: string | null;
-  source: string | null;
-  metadata: Record<string, unknown> | null;
+  confidence: string | null;
+  entities: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
   createdAt: string;
-  updatedAt: string;
 }
 
-export interface NewPdsDocument {
+export interface NewAnalysis {
   domain: string;
-  type?: string;
-  title?: string;
+  analysisType: string;
+  title: string;
+  summary?: string;
   content?: string;
-  source?: string;
-  metadata?: Record<string, unknown>;
+  confidence?: string;
+  entities?: Record<string, unknown>;
+  result?: Record<string, unknown>;
 }

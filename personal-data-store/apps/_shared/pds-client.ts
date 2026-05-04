@@ -1,4 +1,4 @@
-import type { YieldPosition, IncomeSummary, PdsDocument, NewPdsDocument } from "./types.js";
+import type { YieldPosition, IncomeSummary, Analysis, NewAnalysis } from "./types.js";
 
 export class PdsClient {
   constructor(
@@ -36,15 +36,15 @@ export class PdsClient {
     return this.get(`/api/finance/income/summary${params}`);
   }
 
-  async getDocuments(domain?: string, type?: string): Promise<PdsDocument[]> {
+  async getAnalyses(domain?: string, type?: string): Promise<Analysis[]> {
     const params = new URLSearchParams();
     if (domain) params.set("domain", domain);
     if (type) params.set("type", type);
     const qs = params.toString();
-    return this.get(`/api/documents${qs ? `?${qs}` : ""}`);
+    return this.get(`/api/analyses${qs ? `?${qs}` : ""}`);
   }
 
-  async postDocument(doc: NewPdsDocument): Promise<PdsDocument> {
-    return this.post("/api/documents", doc);
+  async postAnalysis(analysis: NewAnalysis): Promise<Analysis> {
+    return this.post("/api/analyses", analysis);
   }
 }
