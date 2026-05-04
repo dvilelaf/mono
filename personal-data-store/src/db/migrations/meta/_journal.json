@@ -99,27 +99,6 @@
       "when": 1776146659175,
       "tag": "0013_clever_kate_bishop",
       "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1776873315245,
-      "tag": "0014_right_mandrill",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1777300627123,
-      "tag": "0015_wild_daimon_hellstrom",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1777953600000,
-      "tag": "0016_drop_analyses_and_photos",
-      "breakpoints": true
     }
   ]
 }
