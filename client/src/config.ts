@@ -14,7 +14,7 @@
  * (mainnet V1, testnet V2) for JinnRouter claimDelivery encoding.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -535,120 +535,6 @@ export class ConfigLoadError extends Error {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function timestampForBackup(date = new Date()): string {
-  return date.toISOString().replace(/[:.]/g, '-');
-}
-
-function solverNetSlugFor(solverType: string): string {
-  if (solverType === 'prediction.v1') return 'prediction';
-  if (solverType === 'prediction.apy.v0') return 'prediction-apy';
-  if (solverType === 'portfolio.v0') return 'portfolio';
-  return solverType.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
-}
-
-function normalizeSolverNetPlugin(plugin: unknown): unknown | undefined {
-  if (typeof plugin === 'string' && plugin.length > 0) {
-    return plugin.startsWith('bundled:')
-      || plugin.startsWith('file:')
-      || plugin.startsWith('path:')
-      || plugin.startsWith('npm:')
-      || plugin.startsWith('git:')
-      || plugin.startsWith('github:')
-      || plugin.startsWith('claude:')
-      ? plugin
-      : `bundled:${plugin}`;
-  }
-  if (isRecord(plugin)) return plugin;
-  return undefined;
-}
-
-function sourceOfSolverNetPlugin(plugin: unknown): string | undefined {
-  if (typeof plugin === 'string') return plugin;
-  if (isRecord(plugin) && typeof plugin['source'] === 'string') return plugin['source'];
-  return undefined;
-}
-
-function normalizeSolverNetPlugins(...inputs: unknown[]): unknown[] {
-  const out: unknown[] = [];
-  const seen = new Set<string>();
-  for (const input of inputs) {
-    const values = Array.isArray(input) ? input : [input];
-    for (const value of values) {
-      const normalized = normalizeSolverNetPlugin(value);
-      const source = sourceOfSolverNetPlugin(normalized);
-      if (!normalized || !source || seen.has(source)) continue;
-      out.push(normalized);
-      seen.add(source);
-    }
-  }
-  return out;
-}
-
-export function migrateHarnessConfigFileValues(
-  values: Record<string, unknown>,
-): { values: Record<string, unknown>; changed: boolean } {
-  const next: Record<string, unknown> = { ...values };
-  let changed = false;
-
-  const solverNetsInput = next['solverNets'];
-  const solverNets: Record<string, unknown> = {};
-  if (Array.isArray(solverNetsInput)) {
-    for (const item of solverNetsInput) {
-      if (!isRecord(item) || typeof item['solverType'] !== 'string') continue;
-      const solverType = item['solverType'];
-      const slug = typeof item['name'] === 'string' ? item['name'] : solverNetSlugFor(solverType);
-      solverNets[slug] = {
-        enabled: item['enabled'] !== false,
-        solverType,
-        harness: typeof item['harness'] === 'string'
-          ? item['harness']
-          : 'claude-code-learner',
-        plugins: normalizeSolverNetPlugins(item['plugins']),
-        taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
-      };
-    }
-    changed = true;
-  } else if (isRecord(solverNetsInput)) {
-    for (const [name, item] of Object.entries(solverNetsInput)) {
-      if (!isRecord(item) || typeof item['solverType'] !== 'string') {
-        solverNets[name] = item;
-        continue;
-      }
-      const solverType = item['solverType'];
-      solverNets[name] = {
-        enabled: item['enabled'] !== false,
-        solverType,
-        harness: typeof item['harness'] === 'string'
-          ? item['harness']
-          : 'claude-code-learner',
-        plugins: normalizeSolverNetPlugins(item['plugins']),
-        taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
-      };
-    }
-  }
-
-  if (!solverNets['prediction']) {
-    solverNets['prediction'] = {
-      enabled: true,
-      solverType: 'prediction.v1',
-      harness: 'claude-code-learner',
-      plugins: [],
-      taskGenerator: { enabled: true },
-    };
-    changed = true;
-  }
-
-  if (Object.keys(solverNets).length > 0) {
-    next['solverNets'] = solverNets;
-  }
-
-  return { values: next, changed };
-}
-
 // ── Loader ──────────────────────────────────────────────────────────────────
 
 /**
@@ -675,14 +561,6 @@ export function loadConfig(configPath?: string): JinnConfig {
           cause: error instanceof Error ? error.message : String(error),
         },
       );
-    }
-    const migrated = migrateHarnessConfigFileValues(fileValues);
-    if (migrated.changed) {
-      const backupPath = `${filePath}.bak.${timestampForBackup()}`;
-      copyFileSync(filePath, backupPath);
-      writeFileSync(filePath, JSON.stringify(migrated.values, null, 2) + '\n', 'utf-8');
-      fileValues = migrated.values;
-      console.error(`[config] Migrated ${filePath}; backup written to ${backupPath}`);
     }
     console.error(`[config] Loaded ${filePath}`);
   } else if (configPath) {

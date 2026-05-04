@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
-import { loadConfig, migrateHarnessConfigFileValues } from '../../config.js';
+import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
 import { loadSolverNets } from '../../solver-nets/registry.js';
 import {
@@ -36,8 +36,7 @@ function configPathFrom(argv: string[]): string {
 function readConfig(path: string): ConfigShape {
   if (!existsSync(path)) return {};
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
-    return migrateHarnessConfigFileValues(parsed).values as ConfigShape;
+    return JSON.parse(readFileSync(path, 'utf-8')) as ConfigShape;
   } catch {
     return {};
   }
