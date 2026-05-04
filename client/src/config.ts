@@ -596,8 +596,6 @@ export function migrateHarnessConfigFileValues(
 
   const solverNetsInput = next['solverNets'];
   const solverNets: Record<string, unknown> = {};
-  // Legacy SolverNet plugin keys are read only to migrate them into `plugins`
-  // and then rewrite config files without the old authority-shaped field.
   if (Array.isArray(solverNetsInput)) {
     for (const item of solverNetsInput) {
       if (!isRecord(item) || typeof item['solverType'] !== 'string') continue;
@@ -609,7 +607,7 @@ export function migrateHarnessConfigFileValues(
         harness: typeof item['harness'] === 'string'
           ? item['harness']
           : 'claude-code-learner',
-        plugins: normalizeSolverNetPlugins(item['canonicalPlugin'] ?? item['plugin'], item['plugins']),
+        plugins: normalizeSolverNetPlugins(item['plugins']),
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
     }
@@ -627,10 +625,9 @@ export function migrateHarnessConfigFileValues(
         harness: typeof item['harness'] === 'string'
           ? item['harness']
           : 'claude-code-learner',
-        plugins: normalizeSolverNetPlugins(item['canonicalPlugin'] ?? item['plugin'], item['plugins']),
+        plugins: normalizeSolverNetPlugins(item['plugins']),
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
-      if ('canonicalPlugin' in item || 'plugin' in item) changed = true;
     }
   }
 
