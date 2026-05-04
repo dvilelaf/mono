@@ -16,6 +16,7 @@ export const documents = pgTable("documents", {
   lastIndexedAt: timestamp("last_indexed_at", { withTimezone: true }),
   status: text("status").default("active"),
   summary: text("summary"),
+  canonicalFor: text("canonical_for").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -14,6 +14,15 @@ export const config = {
     analyse: process.env.WIKI_ANALYSE_CRON ?? "0 7 * * *",
     synthesise: process.env.WIKI_SYNTHESISE_CRON ?? "0 8 * * 2,4",
   },
+  pdsApiUrl: process.env.PDS_API_URL ?? "http://localhost:3000",
+  canonicalTopics: {
+    extract: (process.env.WIKI_EXTRACT_CANONICAL_TOPICS ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean),
+    analyse: (process.env.WIKI_ANALYSE_CANONICAL_TOPICS ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean),
+    synthesise: (process.env.WIKI_SYNTHESISE_CANONICAL_TOPICS ?? "goals.cardiovascular,goals.body_composition,goals.fertility,goals.sleep,goals.yield,goals.spending,goals.income,goals.data_automation")
+      .split(",").map((s) => s.trim()).filter(Boolean),
+  },
   enabled: (process.env.WIKI_JOBS_CRON_ENABLED ?? "true") === "true",
   timeoutMs: parseInt(process.env.WIKI_JOB_TIMEOUT_MS ?? String(30 * 60 * 1000), 10),
 } as const;

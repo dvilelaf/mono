@@ -78,6 +78,18 @@ Both `documents` and `analyses` have a nullable `source text` column. Use it to 
 
 Always set `source` when creating new documents or analyses.
 
+## Canonical Documents
+
+Documents may be tagged with `canonical_for: text[]` — a list of topic slugs (e.g. `fitness.strength`, `goals.cardiovascular`) that mark them as authoritative reference material for those areas.
+
+**Before any analysis task that touches a goal area, call `GET /api/canonical?topics=<slug>,<slug>` and ground the analysis in the returned content.** If no canonical doc exists for the area, state that explicitly in the response rather than reasoning unaided from memory.
+
+Topic slugs use dot notation: `<area>.<subarea>` (e.g. `fitness.strength`, `fitness.muscle_growth`, `goals.cardiovascular`). Pick the most specific slugs that match your task; the endpoint OR-matches across the array.
+
+The endpoint returns full document content — quote and cite by title, don't summarise blindly. Canonical documents are auto-chunked and embedded on insert/update via `chunkAndEmbed`, so they also surface through `/api/about` and semantic search.
+
+To mark a document canonical, POST/PATCH `/api/documents` with `canonicalFor: ["topic.slug", ...]`.
+
 ## Inbox Pattern
 
 Documents with `domain: "inbox"` are a catch-all for unclassified content. Use this domain when POSTing information that needs human review before being promoted to a proper domain.

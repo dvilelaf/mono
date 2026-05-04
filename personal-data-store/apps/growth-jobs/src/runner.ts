@@ -3,6 +3,7 @@ import { mkdir, readFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, type JobName } from "./config.js";
+import { fetchCanonicalBlock } from "./canonical.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "..");
@@ -47,11 +48,20 @@ async function executeJob(job: JobName): Promise<RunResult> {
   const promptBody = await readFile(promptPath, "utf8");
   const today = startedAt.toISOString().slice(0, 10);
 
+  const canonicalTopics = config.canonicalTopics[job] ?? [];
+  const canonicalBlock = await fetchCanonicalBlock(
+    config.pdsApiUrl,
+    canonicalTopics,
+    process.env.PDS_API_KEY,
+  );
+
   const systemPreamble = [
     `You are the ${job.toUpperCase()} job for Jinn growth orchestration.`,
     `Today's date is ${today}.`,
     `Mono repo (working dir): ${config.monoRepo}`,
     `PDS API base URL: ${config.pdsApiUrl}`,
+    "",
+    canonicalBlock,
     "",
     "Follow the spec below exactly. Do not exceed the stated scope.",
     "",
