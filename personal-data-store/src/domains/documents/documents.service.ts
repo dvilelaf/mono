@@ -14,6 +14,15 @@ interface CreateDocumentInput {
   generateEmbeddings?: boolean;
 }
 
+interface UpdateDocumentInput {
+  domain?: string;
+  type?: string;
+  title?: string;
+  content?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export async function createDocument(input: CreateDocumentInput) {
   const [doc] = await db
     .insert(documents)
@@ -47,7 +56,34 @@ export async function getDocument(id: string) {
   return doc ?? null;
 }
 
-export async function queryDocuments(filters: { domain?: string; type?: string; from?: string; to?: string }) {
+export async function updateDocument(id: string, input: UpdateDocumentInput) {
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.domain !== undefined) updates.domain = input.domain;
+  if (input.type !== undefined) updates.type = input.type;
+  if (input.title !== undefined) updates.title = input.title;
+  if (input.content !== undefined) updates.content = input.content;
+  if (input.source !== undefined) updates.source = input.source;
+  if (input.metadata !== undefined) updates.metadata = input.metadata;
+
+  const [doc] = await db
+    .update(documents)
+    .set(updates)
+    .where(eq(documents.id, id))
+    .returning();
+  return doc ?? null;
+}
+
+export async function deleteDocument(id: string) {
+  await db.delete(embeddings).where(eq(embeddings.documentId, id));
+  await db.delete(documents).where(eq(documents.id, id));
+}
+
+export async function queryDocuments(filters: {
+  domain?: string;
+  type?: string;
+  from?: string;
+  to?: string;
+}) {
   const conditions = [];
   if (filters.domain) conditions.push(eq(documents.domain, filters.domain));
   if (filters.type) conditions.push(eq(documents.type, filters.type));

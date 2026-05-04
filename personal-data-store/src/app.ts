@@ -2,6 +2,7 @@ import express from "express";
 import { apiKeyAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { systemRouter } from "./system/system.routes.js";
+import { aboutRouter } from "./system/about.routes.js";
 import { healthRouter } from "./domains/health/health.routes.js";
 import { genomicsRouter } from "./domains/genomics/genomics.routes.js";
 import { financeRouter } from "./domains/finance/finance.routes.js";
@@ -41,6 +42,6 @@ app.use("/api/finance", financeRouter);
 app.use("/api/business", businessRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/analyses", analysesRouter);
-app.use("/api/media", mediaRouter);
+app.use("/api/about", aboutRouter);
 
 app.use(errorHandler);

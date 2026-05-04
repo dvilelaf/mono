@@ -108,15 +108,12 @@ aboutRouter.get("/", async (req, res, next) => {
         LIMIT ${limit}
       `),
 
-      // analyses: documents with type='analysis' matched by title or summary metadata
+      // analyses: match on title or summary
       db.execute(sql`
-        SELECT id, domain, type, title, content, source, metadata, created_at
-        FROM documents
-        WHERE type = 'analysis'
-          AND (
-            title ILIKE ${pattern}
-            OR (metadata->>'summary') ILIKE ${pattern}
-          )
+        SELECT id, domain, analysis_type, title, summary, source, created_at
+        FROM analyses
+        WHERE title ILIKE ${pattern}
+           OR summary ILIKE ${pattern}
         ORDER BY created_at DESC
         LIMIT ${limit}
       `),

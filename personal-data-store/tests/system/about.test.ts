@@ -45,13 +45,13 @@ describe("GET /api/about", () => {
     expect(res.body.health.length).toBeGreaterThan(0);
   });
 
-  it("matches analyses (documents with type='analysis') by title", async () => {
-    await request(app).post("/api/documents").set(AUTH).send({
+  it("matches analyses by title", async () => {
+    await request(app).post("/api/analyses").set(AUTH).send({
       domain: "finance",
-      type: "analysis",
+      analysisType: "yield",
       title: "Yield optimisation review",
+      summary: "Move stables to Lido",
       source: "claude",
-      metadata: { analysisType: "yield", summary: "Move stables to Lido" },
     });
     const res = await request(app).get("/api/about?topic=yield&limit=5").set(AUTH);
     expect(res.status).toBe(200);
