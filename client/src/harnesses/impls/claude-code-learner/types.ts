@@ -13,6 +13,8 @@ export type KnownAdapterEnvKey =
 export interface TaskSessionInputs {
   /** Task id from ctx.task.id */
   taskId: string;
+  /** On-chain / persisted request id for this run; may differ from taskId. */
+  requestId?: string;
   /** IPFS CID of the full Task payload (if known) for provenance */
   taskCid?: string;
   /** SolverType (e.g. 'portfolio.v0', 'prediction.v1') */

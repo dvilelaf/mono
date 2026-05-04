@@ -176,7 +176,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       DESIRED_STATE_CONTEXT: taskContextJson(inputs),
       DESIRED_STATE_ROLE: stringField(inputs.taskBody?.role),
       RESTORATION_REQUEST_ID: stringField(inputs.taskBody?.restorationRequestId),
-      REQUEST_ID: inputs.taskId,
+      REQUEST_ID: inputs.requestId ?? inputs.taskId,
       STORE_PATH: this.storePath ?? '',
       DAEMON_API_URL: this.daemonApiUrl ?? '',
       DAEMON_API_TOKEN: this.daemonApiToken ?? '',

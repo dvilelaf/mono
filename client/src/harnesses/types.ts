@@ -27,6 +27,8 @@ export interface RuntimePlugin {
 
 export interface HarnessContext {
   task: Task;
+  /** On-chain / persisted request id for this run. May differ from task.id. */
+  requestId?: string;
   solverNet?: { name: string; solverType: string };
   runtimePlugins?: RuntimePlugin[];
   solverPluginRoots?: string[];

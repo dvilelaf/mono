@@ -69,10 +69,13 @@ function makePreview(ref: EnvelopeRef = envelopeRef, envelope = makeEnvelope()):
   return { ref, envelope };
 }
 
-function makeReadOnlyCorpus(preview = makePreview()) {
+function makeReadOnlyCorpus(preview: ManifestPreview | ManifestPreview[] = makePreview()) {
+  const previews = Array.isArray(preview) ? preview : [preview];
   return {
-    query: vi.fn(async () => [preview.ref]),
-    fetchManifest: vi.fn(async () => preview),
+    query: vi.fn(async () => previews.map((item) => item.ref)),
+    fetchManifest: vi.fn(async (ref: EnvelopeRef) =>
+      previews.find((item) => item.ref.manifestCid === ref.manifestCid) ?? previews[0]!
+    ),
     read: vi.fn(async () => { throw new Error('read must not be called'); }),
     acquire: vi.fn(async () => { throw new Error('acquire must not be called'); }),
     acquireBySha256: vi.fn(async () => { throw new Error('acquireBySha256 must not be called'); }),
@@ -193,6 +196,56 @@ describe('search_records (corpus-backed)', () => {
         artifactType: 'output.prediction.v1',
       },
     });
+    store.close();
+  });
+
+  it('post-filters network records after fetching manifests', async () => {
+    const store = new Store(':memory:');
+    const matchingRef = { ...envelopeRef, manifestCid: 'bafyVerdict' };
+    const restorationRef = { ...envelopeRef, manifestCid: 'bafyRestoration' };
+    const corpus = makeReadOnlyCorpus([
+      makePreview(restorationRef, makeEnvelope({
+        role: 'restoration',
+        task: {
+          cid: 'bafyOtherTask',
+          onchainCreationTx: '0x' + '1'.repeat(64),
+          onchainCreationBlock: 123,
+          requestId: '0x' + '4'.repeat(64),
+        },
+      })),
+      makePreview(matchingRef, makeEnvelope({
+        role: 'verdict',
+        task: {
+          cid: 'bafyTask',
+          onchainCreationTx: '0x' + '1'.repeat(64),
+          onchainCreationBlock: 123,
+          requestId: '0x' + '3'.repeat(64),
+        },
+        payload: { verdict: 'SCORED', scores: { solverBrier: 0.12 } },
+      })),
+    ]);
+
+    const out = await handleSearchRecords(corpus, store, {
+      role: 'verdict',
+      requestId: '0x' + '3'.repeat(64),
+      participant: { agentEoa: '0x' + '5'.repeat(40) },
+      metadata: { verdict: 'SCORED', 'scores.solverBrier': 0.12 },
+      limit: 10,
+    });
+
+    expect(out.records.map((record) => record.recordRef)).toEqual(['network:envelope:bafyVerdict']);
+    expect(corpus.fetchManifest).toHaveBeenCalledTimes(2);
+    store.close();
+  });
+
+  it('does not return network records for local-only taskId filters', async () => {
+    const store = new Store(':memory:');
+    const corpus = makeReadOnlyCorpus();
+
+    const out = await handleSearchRecords(corpus, store, { taskId: 'task-1', limit: 10 });
+
+    expect(out.records).toEqual([]);
+    expect(corpus.fetchManifest).toHaveBeenCalledOnce();
     store.close();
   });
 

@@ -162,6 +162,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
 
       await adapter.runTask({
         taskId: 'prediction-v1-polymarket-abc',
+        requestId: '0x' + '9'.repeat(64),
         solverType: 'prediction.v1',
         taskBody: makePredictionV1Task(),
         implStateDir,
@@ -191,7 +192,7 @@ describe('ClaudeCodeHarnessAdapter Network Tools env', () => {
         DESIRED_STATE_ID: 'prediction-v1-polymarket-abc',
         DESIRED_STATE_DESCRIPTION: makePredictionV1Task().description,
         DESIRED_STATE_ROLE: 'restoration',
-        REQUEST_ID: 'prediction-v1-polymarket-abc',
+        REQUEST_ID: '0x' + '9'.repeat(64),
         STORE_PATH: '/tmp/jinn-test.db',
         DAEMON_API_URL: 'http://127.0.0.1:7331',
         DAEMON_API_TOKEN: 'test-token',

@@ -616,6 +616,7 @@ export class TaskEngine {
           role,
           window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
         }) as import('../../types/task.js').Task,
+        requestId: task.requestId,
         taskCid: task.taskCid,
         solverNet: solverNet ? { name: solverNet.name, solverType: solverNet.solverType } : undefined,
         runtimePlugins,

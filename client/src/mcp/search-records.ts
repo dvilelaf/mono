@@ -193,10 +193,43 @@ function manifestArtifactDescriptor(ref: EnvelopeRef, artifact: Artifact): Artif
   };
 }
 
-function manifestRecord(preview: ManifestPreview, args: CorpusQuery): RecordSummary | null {
+function metadataValueAt(record: Record<string, unknown>, key: string): unknown {
+  let current: unknown = record;
+  for (const part of key.split('.')) {
+    if (!isPlainRecord(current)) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function manifestMatchesArgs(preview: ManifestPreview, args: SearchRecordsArgs): boolean {
   const envelope = preview.envelope;
-  if (args.solverType && envelope.solverType !== args.solverType) return null;
-  if (args.taskCid && envelope.task.cid !== args.taskCid) return null;
+  if (args.solverType && envelope.solverType !== args.solverType) return false;
+  if (args.taskCid && envelope.task.cid !== args.taskCid) return false;
+  if (args.taskId) return false;
+  if (args.requestId && envelope.task.requestId !== args.requestId) return false;
+  if (args.role && envelope.role !== args.role) return false;
+  if (args.evidenceTier && preview.ref.evidenceTier !== args.evidenceTier) return false;
+  if (args.generatedAfter !== undefined && envelope.generatedAt < args.generatedAfter) return false;
+  if (args.generatedBefore !== undefined && envelope.generatedAt > args.generatedBefore) return false;
+  if (args.participant?.safeAddress && envelope.participant.safeAddress !== args.participant.safeAddress) return false;
+  if (args.participant?.agentEoa && envelope.participant.agentEoa !== args.participant.agentEoa) return false;
+  if (args.metadata) {
+    if (!isPlainRecord(envelope.payload)) return false;
+    for (const [key, value] of Object.entries(args.metadata)) {
+      if (metadataValueAt(envelope.payload, key) !== value) return false;
+    }
+  }
+  return true;
+}
+
+function manifestRecord(preview: ManifestPreview, args: SearchRecordsArgs): RecordSummary | null {
+  const envelope = preview.envelope;
+  if (!manifestMatchesArgs(preview, args)) return null;
   const artifacts = envelope.artifacts
     .filter((artifact) => !args.artifactType || artifact.artifactType === args.artifactType)
     .map((artifact) => manifestArtifactDescriptor(preview.ref, artifact));
