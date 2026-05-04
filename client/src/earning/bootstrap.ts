@@ -282,17 +282,25 @@ export class FleetBootstrapper {
       };
 
       // On testnet, drain the CDP faucet in a loop until master has enough ETH.
-      // CDP's drip is tiny (~0.0001 ETH) vs the 0.005 ETH bootstrap floor — a
-      // single drip is never enough, and the older two-drip pattern forced
-      // operators to re-run `jinn bootstrap` 25+ times. We loop until funded,
-      // rate-limited, or an error. Cap at 60 iterations as a safety bound.
+      // CDP's drip is tiny (~0.0001 ETH) vs a 0.005-0.010 ETH bootstrap floor —
+      // a single drip is never enough, and a fixed cap of 60 was below the
+      // fresh-fleet target (0.010 ETH on first bootstrap), so onboarding could
+      // never auto-complete. The cap is now derived from the actual gap so the
+      // loop is guaranteed to be able to reach the target; rate-limit / error
+      // responses still terminate early.
       if (systemEth < requiredMasterEth && this.chain === 'base-sepolia' && autoFaucetEnabled) {
-        const MAX_FAUCET_ITERS = 60;
+        const ESTIMATED_DRIP_WEI = 100_000_000_000_000n; // 0.0001 ETH (conservative)
+        const SAFETY_MULT = 2n;
+        const FLOOR = 60;
+        const CEIL = 500;
+        const remaining = requiredMasterEth - systemEth;
+        const computed = Number((remaining / ESTIMATED_DRIP_WEI) * SAFETY_MULT) + 20;
+        const MAX_FAUCET_ITERS = Math.max(FLOOR, Math.min(computed, CEIL));
         const INTER_DRIP_PAUSE_MS = 1_000;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
           `Draining CDP faucet on ${this.chain} via ${rpcHostForDisplay(this.config.rpcUrl)} ` +
-          `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
+          `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-90 s on first run).`,
         );
         for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
           const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');

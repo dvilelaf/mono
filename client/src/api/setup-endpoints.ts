@@ -157,7 +157,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
-    const maxFaucetIters = config.maxFaucetIters ?? 60;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     const targetWei = config.minEoaGasWei ? BigInt(config.minEoaGasWei) : null;
     const publicClient = config.rpcUrl
@@ -167,6 +166,23 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const getBalance = async (): Promise<bigint | null> => {
       if (!publicClient) return null;
       return publicClient.getBalance({ address: address as `0x${string}` });
+    };
+
+    // Cap is dynamic: derived from how far the balance is from the target so
+    // the loop is mathematically able to reach it. Each CDP drip is ~0.0001
+    // ETH; we use a 2x safety multiplier and a 60-drip floor so this is at
+    // least as permissive as the prior fixed cap. Hard ceiling at 500 to
+    // bound rogue scenarios. Rate-limit / error responses still exit early.
+    const computeCap = (balance: bigint | null): number => {
+      const ESTIMATED_DRIP_WEI = 100_000_000_000_000n; // 0.0001 ETH (conservative)
+      const SAFETY_MULT = 2n;
+      const FLOOR = 60;
+      const CEIL = 500;
+      if (config.maxFaucetIters !== undefined) return config.maxFaucetIters;
+      if (targetWei === null || balance === null || balance >= targetWei) return FLOOR;
+      const remaining = targetWei - balance;
+      const computed = Number((remaining / ESTIMATED_DRIP_WEI) * SAFETY_MULT) + 20;
+      return Math.max(FLOOR, Math.min(computed, CEIL));
     };
 
     try {
@@ -183,6 +199,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         });
       }
 
+      const maxFaucetIters = computeCap(balanceWei);
       for (let i = 0; i < maxFaucetIters; i++) {
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
