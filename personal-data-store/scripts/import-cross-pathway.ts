@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { db } from "../src/db/index.js";
-import { analyses } from "../src/domains/analyses/analyses.schema.js";
+import { documents } from "../src/domains/documents/documents.schema.js";
 import { genomicsVariants } from "../src/domains/genomics/genomics.schema.js";
 import { inArray, or, eq } from "drizzle-orm";
 
@@ -163,34 +163,33 @@ async function main() {
     const variantIds = await findVariantIds(f.genes);
     console.log(`${f.title}: ${variantIds.length} variants matched from ${f.genes.length} genes`);
 
-    await db.insert(analyses).values({
+    await db.insert(documents).values({
       domain: "genomics",
-      analysisType: "cross_pathway",
+      type: "analysis",
       title: f.title,
-      summary: f.summary,
       content: [
         `## Mechanism\n${f.mechanism}`,
         `## Clinical Implication\n${f.clinicalImplication}`,
         `## Standard Pitfall\n${f.standardPitfall}`,
         `## Adjusted Recommendation\n${f.recommendation}`,
       ].join("\n\n"),
-      confidence: f.confidence,
-      entities: {
-        variantIds,
-        genes: f.genes,
-        pathways: f.pathways,
-      },
-      result: {
-        pathways: f.pathways,
-        mechanism: f.mechanism,
-        clinicalImplication: f.clinicalImplication,
-        standardPitfall: f.standardPitfall,
-        recommendation: f.recommendation,
-      },
-      sourceQuery: {
-        source: "lifecode_gx_cross_pathway_analysis",
-        method: "multi_report_interaction_map",
-        variantMatchCriteria: f.genes,
+      metadata: {
+        analysisType: "cross_pathway",
+        summary: f.summary,
+        confidence: f.confidence,
+        entities: { variantIds, genes: f.genes, pathways: f.pathways },
+        result: {
+          pathways: f.pathways,
+          mechanism: f.mechanism,
+          clinicalImplication: f.clinicalImplication,
+          standardPitfall: f.standardPitfall,
+          recommendation: f.recommendation,
+        },
+        sourceQuery: {
+          source: "lifecode_gx_cross_pathway_analysis",
+          method: "multi_report_interaction_map",
+          variantMatchCriteria: f.genes,
+        },
       },
     });
   }

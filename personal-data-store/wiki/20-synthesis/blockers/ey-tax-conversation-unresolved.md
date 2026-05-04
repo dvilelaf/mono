@@ -13,10 +13,10 @@ DeFi yield tax treatment unresolved — £26K swing between conservative and agg
 [finance-yield-170k](../goals/finance-yield-170k.md)
 
 ## Evidence
-See goal page and upstream analysis / processing pages.
+[yield-gap](../../10-analysis/finance/yield-gap.md) — "Tax treatment changes economics: EY conversation (£26K conservative vs aggressive) may be larger than the $40K yield optimisation." Goal doc §Yield & Income: "Get the EY conversation done re: DeFi yield token tax treatment."
 
 ## Smallest next action
-_Define._ Synthesis pass should populate this from the analysis layer.
+Book EY call. Frame it specifically around DeFi yield token treatment: (a) are rebasing/auto-compounding yields income at accrual or disposal? (b) what's the aggressive vs conservative delta on the current portfolio?
 
 ## What would raise certainty
-_Define._ State the missing data or confirmation needed.
+Written EY advice note with a concluded treatment. Then update the yield goal page with the net-of-tax yield target.

@@ -7,7 +7,8 @@ import { genomicsRouter } from "./domains/genomics/genomics.routes.js";
 import { financeRouter } from "./domains/finance/finance.routes.js";
 import { businessRouter } from "./domains/business/business.routes.js";
 import { documentsRouter } from "./domains/documents/documents.routes.js";
-import { analysesRouter } from "./domains/analyses/analyses.routes.js";
+import { workoutsRouter } from "./domains/workouts/workouts.routes.js";
+import { messagesRouter } from "./domains/messages/messages.routes.js";
 import { appleHealthWebhook } from "./webhooks/apple-health.webhook.js";
 
 export const app = express();
@@ -19,7 +20,7 @@ app.use((_req, res, next) => {
   if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
   next();
 });
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 // Health check (no auth)
 app.get("/api/system/health", (_req, res) => {
@@ -39,6 +40,7 @@ app.use("/api/genomics", genomicsRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/business", businessRouter);
 app.use("/api/documents", documentsRouter);
-app.use("/api/analyses", analysesRouter);
+app.use("/api/workouts", workoutsRouter);
+app.use("/api/messages", messagesRouter);
 
 app.use(errorHandler);

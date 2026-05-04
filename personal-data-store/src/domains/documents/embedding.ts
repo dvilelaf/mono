@@ -1,5 +1,9 @@
 const CHUNK_SIZE = 500;
 
+export const EMBEDDING_DIM = 768;
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "nomic-embed-text";
+
 export function chunkText(text: string): string[] {
   const chunks: string[] = [];
   for (let i = 0; i < text.length; i += CHUNK_SIZE) {
@@ -9,21 +13,16 @@ export function chunkText(text: string): string[] {
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
-  if (!process.env.OPENAI_API_KEY) {
-    // Return zero vector as placeholder when no embedding API is configured
-    return new Array(1536).fill(0);
-  }
-
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
+  const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: "text-embedding-3-small", input: text }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: text }),
   });
 
-  if (!response.ok) throw new Error(`Embedding API error: ${response.status}`);
-  const data = (await response.json()) as { data: { embedding: number[] }[] };
-  return data.data[0].embedding;
+  if (!response.ok) throw new Error(`Ollama embedding error: ${response.status}`);
+  const data = (await response.json()) as { embedding: number[] };
+  if (!data.embedding || data.embedding.length !== EMBEDDING_DIM) {
+    throw new Error(`Unexpected embedding dimension: ${data.embedding?.length}`);
+  }
+  return data.embedding;
 }

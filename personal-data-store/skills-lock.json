@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "soultrace": {
+      "source": "soultrace-ai/soultrace-skill",
+      "sourceType": "github",
+      "computedHash": "2cceda69901d52d71525010da52a88b11cbcea3611af91e5e0c250605daa7268"
+    }
+  }
+}

@@ -38,24 +38,24 @@ function parseMarkdownTable(lines: string[], section: string): Variant[] {
     if (inTable && trimmed.startsWith("|")) {
       const cells = trimmed.split("|").map(c => c.trim()).filter(c => c !== "");
       const hasDirection = (lines as any).__hasDirection;
-      if (hasDirection && cells.length >= 6) {
+      if (hasDirection && cells.length >= 5) {
         variants.push({
           gene: cells[0],
           snp: cells[1],
           genotype: cells[2],
           direction: cells[3],
           colour: cells[4],
-          result: cells[5],
+          result: cells[5] ?? "",
           section,
         });
-      } else if (!hasDirection && cells.length >= 5) {
+      } else if (!hasDirection && cells.length >= 4) {
         variants.push({
           gene: cells[0],
           snp: cells[1],
           genotype: cells[2],
           direction: "",
           colour: cells[3],
-          result: cells[4],
+          result: cells[4] ?? "",
           section,
         });
       }

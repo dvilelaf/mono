@@ -13,13 +13,16 @@ export async function executeRun(): Promise<YieldAnalysis> {
   const positions = await pds.getYieldPositions();
   const analysis = await runOptimization(positions);
 
-  // Store to PDS
-  await pds.postAnalysis({
+  // Store to PDS as a document of type='analysis'
+  await pds.postDocument({
     domain: "yield",
-    analysisType: "optimization",
+    type: "analysis",
     title: `Yield Optimization — ${new Date().toISOString().slice(0, 10)}`,
-    summary: `Current: $${analysis.currentAnnualisedYield.toLocaleString()}/yr. Optimised: $${analysis.optimisedAnnualisedYield.toLocaleString()}/yr. ${analysis.recommendations.length} recommendations.`,
-    result: analysis as unknown as Record<string, unknown>,
+    metadata: {
+      analysisType: "optimization",
+      summary: `Current: $${analysis.currentAnnualisedYield.toLocaleString()}/yr. Optimised: $${analysis.optimisedAnnualisedYield.toLocaleString()}/yr. ${analysis.recommendations.length} recommendations.`,
+      result: analysis as unknown as Record<string, unknown>,
+    },
   });
 
   latestAnalysis = analysis;
@@ -45,9 +48,11 @@ router.get("/recommendations", async (_req, res, next) => {
       return;
     }
     // Fall back to PDS
-    const analyses = await pds.getAnalyses("yield", "optimization");
-    if (analyses.length > 0 && analyses[0].result) {
-      res.json(analyses[0].result);
+    const docs = await pds.getDocuments("yield", "analysis");
+    const optimisations = docs.filter((d) => (d.metadata as { analysisType?: string } | null)?.analysisType === "optimization");
+    const result = (optimisations[0]?.metadata as { result?: Record<string, unknown> } | null)?.result;
+    if (result) {
+      res.json(result);
       return;
     }
     res.json({ message: "No analysis available. Trigger a run with POST /api/run." });

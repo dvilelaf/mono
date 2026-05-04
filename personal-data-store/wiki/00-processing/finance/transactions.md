@@ -1,7 +1,7 @@
 ---
 layer: processing
 domain: finance
-updated: 2026-04-23
+updated: 2026-04-28
 sources:
   - table: transactions
     query: SELECT * FROM transactions
@@ -10,13 +10,20 @@ sources:
 # Transactions (Revolut, Wise, Amazon)
 
 ## TL;DR
-**0 rows** in transactions as of 2026-04-23 (first verified extract run). Previous count (~10,400) was from user context, not a DB query. CSV imports are manual and have not yet been run against this DB instance.
+**10,943 rows** in transactions as of 2026-04-28. Data restored post-wipe. Coverage: 2011-12-21 to 2026-04-08. Two distinct sources in use: `csv_import` (Revolut + Wise) and `amazon_export`.
 
-## Source breakdown (planned — not yet populated)
-- **Revolut Personal**: ~8,108 tx, Nov 2017 – present, multi-currency (GBP/EUR/USD/HKD/CHF)
-- **Revolut Savings**: ~1,102 tx, Nov 2022 – present (custom parser for different CSV)
-- **Wise Business**: ~1,176 tx across GBP/EUR/USD accounts, May 2023 – present
-- **Amazon Orders**: ~752 itemised orders Dec 2011 – present, replaces generic "Amazon" card lines with product-level detail
+## Source breakdown (actual — verified 2026-04-28)
+| source | currency | rows | date range |
+|---|---|---|---|
+| amazon_export | GBP | 738 | 2011-12 to 2026-04 |
+| amazon_export | EUR | 14 | 2019-04 to 2023-06 |
+| csv_import | GBP | 8,073 | 2017-11 to 2026-04 |
+| csv_import | EUR | 1,727 | 2017-11 to 2026-03 |
+| csv_import | USD | 336 | 2019-09 to 2026-04 |
+| csv_import | HKD | 49 | 2020-01 to 2026-04 |
+| csv_import | CHF | 6 | 2021-09 to 2025-01 |
+
+Note: `csv_import` combines Revolut Personal, Revolut Savings, and Wise — no sub-source distinction currently. Wise Business rows not distinguishable by source field alone.
 
 All refreshed **manually via CSV re-export**. Wise has an API that could be used (read-only).
 
@@ -43,6 +50,8 @@ GROUP BY 1 ORDER BY 1;
 ```
 
 ## Open questions
-- How many transactions remain uncategorised? Needs query (0 rows currently, moot until import).
+- How many transactions remain uncategorised? Now answerable — needs a `WHERE category IS NULL` query.
 - Is the merchant review backlog tracked anywhere?
-- When will CSV imports be run to populate the DB?
+- Revolut Personal CSV on disk (`~/Downloads/account-statement_2017-11-11_2026-04-08*.csv`) — has this been imported, or is the 2026-04-08 cutoff the CSV's last date?
+- Wise Business sub-source not distinguishable from Revolut in `csv_import` — intentional?
+- Revolut Savings rows present? The 2017-11 start date matches Revolut Personal; savings would be a later sub-account.

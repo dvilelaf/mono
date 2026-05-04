@@ -1,5 +1,16 @@
 # Personal Data Store
 
+## CRITICAL: Database Safety
+
+Never run any of the following against this database:
+- `DROP TABLE`, `DROP SCHEMA`, `DROP DATABASE`
+- `TRUNCATE`
+- `DELETE` without a `WHERE` clause
+- `drizzle-kit push` (any flag), `drizzle-kit drop`, `drizzle-kit reset`
+- Any ad-hoc SQL that wipes or recreates tables
+
+Always use migrations (`db:generate` → `db:migrate`). Always import with `.onConflictDoNothing()` (or an explicit `ON CONFLICT` rule). If a destructive operation seems necessary, stop and ask the user first — assume the answer is no.
+
 ## Goals Review
 
 **Before responding to any request, cross-reference against [docs/goals-h2-2026.md](docs/goals-h2-2026.md).**

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { config, type JobName } from "./config.js";
+import { postSynthesisHook } from "./hooks/synthesis-message.js";
 
 const JOB_PROMPTS: Record<JobName, string> = {
   extract: "scripts/extract.md",
@@ -115,7 +116,7 @@ async function executeJob(job: JobName): Promise<RunResult> {
     `\n=== ${job} run end ${finishedAt.toISOString()} exit=${exitCode} ===\n`,
   );
 
-  return {
+  const result: RunResult = {
     job,
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
@@ -123,4 +124,19 @@ async function executeJob(job: JobName): Promise<RunResult> {
     logPath,
     ok: exitCode === 0,
   };
+
+  if (job === "synthesise" && result.ok) {
+    try {
+      const hookResult = await postSynthesisHook();
+      await appendFile(
+        logPath,
+        `\n[post-synthesis-hook] ${JSON.stringify(hookResult)}\n`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await appendFile(logPath, `\n[post-synthesis-hook error] ${message}\n`).catch(() => {});
+    }
+  }
+
+  return result;
 }

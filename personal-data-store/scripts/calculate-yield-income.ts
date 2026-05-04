@@ -93,7 +93,8 @@ async function calculateForMonth(year: number, month: number) {
         yieldUsd = Number(start.token_balance) * priceGrowth;
         method = "snapshot_price_delta";
       }
-      apy = Number(end.apy) || null;
+      const endApyPct = Number(end.apy);
+      apy = endApyPct ? endApyPct / 100 : null;
     } else {
       // No spanning snapshots — estimate from latest snapshot + APY
       const latest = await db.execute(sql`
@@ -107,8 +108,9 @@ async function calculateForMonth(year: number, month: number) {
       const snap = (latest as any[])[0];
       positionValue = Number(snap.value_usd);
 
-      // Get APY: from snapshot, then DeFiLlama, then skip
-      apy = Number(snap.apy) || null;
+      // Get APY: from snapshot (stored as percent, e.g. 4.1), then DeFiLlama, then skip
+      const snapApyPct = Number(snap.apy);
+      apy = snapApyPct ? snapApyPct / 100 : null;
       if (!apy) {
         const poolId = DEFILLAMA_POOLS[name];
         if (poolId) {

@@ -1,7 +1,7 @@
 ---
 layer: synthesis
 domain: finance
-updated: 2026-04-23
+updated: 2026-05-03
 sources:
   - page: ../../10-analysis/finance/yield-gap.md
 ---
@@ -9,20 +9,19 @@ sources:
 # Goal: $170K annualised yield by July 2026
 
 ## Status
-$130K current. $40K gap. Three named idle capital buckets exist.
+APY now populated for all 9 positions (snapshot 2026-05-03). Annualised yield: **$135,043 USD/yr + £10,795 GBP/yr**. Total deployed: **$3,649,366 USD + £254K GBP**. Gap to $170K USD target: **~$35K**. 68 ETH, LDO, $200K MEXC still not visible as positions. Deadline: July 2026 — 9 weeks away.
 
 ## Top blockers (ranked)
-1. [idle-capital-undeployed](../blockers/idle-capital-undeployed.md) — 68 ETH, LDO, $200K on MEXC all named in goal doc, all sitting
-2. [ey-tax-conversation-unresolved](../blockers/ey-tax-conversation-unresolved.md) — £26K economics swing
-3. [coinbase-balance-manual](../blockers/coinbase-balance-manual.md) — $1.4M position is manual entry; any drift is invisible
+1. [idle-capital-undeployed](../blockers/idle-capital-undeployed.md) — 68 ETH / LDO / $200K MEXC; deploying these closes the gap with margin
+2. [ey-tax-conversation-unresolved](../blockers/ey-tax-conversation-unresolved.md) — £26K conservative-vs-aggressive swing; comparable to the nominal yield gap
+3. [coinbase-balance-manual](../blockers/coinbase-balance-manual.md) — Coinbase position swung $1.146M → $1.25M → $1.146M across 3 snapshots; manual entry hides drift
 
 ## Next actions
-- Deploy 68 ETH → yield
-- Convert LDO → USDC → yield
-- Move $200K off MEXC → yield
-- Book EY call (DeFi yield tax treatment)
+- Confirm wallet/exchange location of 68 ETH, LDO, $200K MEXC; deploy each to highest-confidence yield surface
+- Send the 3 CountDeFi tax reports to EY ahead of a focused call on rebasing/auto-compounding treatment
+- Investigate Coinbase Advanced Trade API path to read Earn balances; until then, schedule a weekly manual refresh
 
 ## Evidence trail
-- Analysis: [yield-gap](../../10-analysis/finance/yield-gap.md)
+- Analysis: [yield-gap](../../10-analysis/finance/yield-gap.md) — refreshed 2026-05-03
 - Processing: [yield-positions](../../00-processing/crypto/yield-positions.md), [goals](../../00-processing/meta/goals.md)
 - Goals source: `documents` row, slug `goals-h2-2026` §Yield & Income
