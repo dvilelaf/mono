@@ -14,6 +14,12 @@ export const config = {
   schedules: {
     "growth-day": process.env.GROWTH_DAY_CRON ?? "0 9 * * 1-5",
   },
+  canonicalTopics: {
+    "growth-day": (process.env.GROWTH_DAY_CANONICAL_TOPICS ?? "growth.daily,growth.thesis,growth.outreach")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
   enabled: (process.env.GROWTH_JOBS_CRON_ENABLED ?? "true") === "true",
   timeoutMs: parseInt(process.env.GROWTH_JOB_TIMEOUT_MS ?? String(20 * 60 * 1000), 10),
 } as const;

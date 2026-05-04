@@ -2,7 +2,8 @@ import { db } from "../../db/index.js";
 import { documents, embeddings } from "./documents.schema.js";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { chunkText, generateEmbedding } from "./embedding.js";
+import { generateEmbedding } from "./embedding.js";
+import { chunkAndEmbed } from "./chunk-and-embed.js";
 
 interface CreateDocumentInput {
   domain: string;
@@ -11,6 +12,8 @@ interface CreateDocumentInput {
   content?: string;
   source?: string;
   metadata?: Record<string, unknown>;
+  canonicalFor?: string[];
+  /** @deprecated v2 chunk-level embeddings are always generated when content is present. */
   generateEmbeddings?: boolean;
 }
 
@@ -21,6 +24,7 @@ interface UpdateDocumentInput {
   content?: string;
   source?: string;
   metadata?: Record<string, unknown>;
+  canonicalFor?: string[];
 }
 
 export async function createDocument(input: CreateDocumentInput) {
@@ -33,18 +37,15 @@ export async function createDocument(input: CreateDocumentInput) {
       content: input.content,
       source: input.source,
       metadata: input.metadata,
+      canonicalFor: input.canonicalFor,
     })
     .returning();
 
-  if (input.generateEmbeddings && input.content) {
-    const chunks = chunkText(input.content);
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkTextVal = chunks[i];
-      const vector = await generateEmbedding(chunkTextVal);
-      await db.execute(sql`
-        INSERT INTO embeddings (id, document_id, chunk_index, chunk_text, embedding, created_at)
-        VALUES (gen_random_uuid(), ${doc.id}, ${i}, ${chunkTextVal}, ${sql.raw(`'[${vector.join(",")}]'::vector`)}, NOW())
-      `);
+  if (input.content && input.content.trim()) {
+    try {
+      await chunkAndEmbed(doc.id, input.content);
+    } catch (err) {
+      console.error(`[documents] chunkAndEmbed failed for ${doc.id}:`, (err as Error).message);
     }
   }
 
@@ -64,16 +65,27 @@ export async function updateDocument(id: string, input: UpdateDocumentInput) {
   if (input.content !== undefined) updates.content = input.content;
   if (input.source !== undefined) updates.source = input.source;
   if (input.metadata !== undefined) updates.metadata = input.metadata;
+  if (input.canonicalFor !== undefined) updates.canonicalFor = input.canonicalFor;
 
   const [doc] = await db
     .update(documents)
     .set(updates)
     .where(eq(documents.id, id))
     .returning();
+
+  if (doc && input.content !== undefined && input.content.trim()) {
+    try {
+      await chunkAndEmbed(doc.id, input.content);
+    } catch (err) {
+      console.error(`[documents] chunkAndEmbed failed for ${doc.id}:`, (err as Error).message);
+    }
+  }
+
   return doc ?? null;
 }
 
 export async function deleteDocument(id: string) {
+  await db.execute(sql`DELETE FROM document_chunks WHERE document_id = ${id}`);
   await db.delete(embeddings).where(eq(embeddings.documentId, id));
   await db.delete(documents).where(eq(documents.id, id));
 }
@@ -95,6 +107,18 @@ export async function queryDocuments(filters: {
     .from(documents)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(documents.createdAt));
+}
+
+export async function getCanonicalDocuments(topics: string[]) {
+  if (!topics.length) return [];
+  const rows = (await db.execute(sql`
+    SELECT id, domain, type, title, content, source, metadata, canonical_for,
+           created_at, updated_at
+    FROM documents
+    WHERE canonical_for && ${topics}::text[]
+    ORDER BY updated_at DESC
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows;
 }
 
 export async function getIndexerStatus() {

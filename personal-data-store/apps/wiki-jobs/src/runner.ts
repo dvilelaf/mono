@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { config, type JobName } from "./config.js";
+import { fetchCanonicalBlock } from "./canonical.js";
 
 const JOB_PROMPTS: Record<JobName, string> = {
   extract: "scripts/extract.md",
@@ -45,12 +46,21 @@ async function executeJob(job: JobName): Promise<RunResult> {
   const promptBody = await readFile(promptPath, "utf8");
   const today = startedAt.toISOString().slice(0, 10);
 
+  const canonicalTopics = config.canonicalTopics[job] ?? [];
+  const canonicalBlock = await fetchCanonicalBlock(
+    config.pdsApiUrl,
+    canonicalTopics,
+    process.env.PDS_API_KEY,
+  );
+
   const systemPreamble = [
     `You are the ${job.toUpperCase()} job for the personal wiki.`,
     `Today's date is ${today}.`,
     `Repo root: ${config.repoRoot}`,
     `Wiki dir: ${config.wikiDir}`,
     `Goal doc (read-only): ${path.join(config.repoRoot, "docs/goals-h2-2026.md")}`,
+    "",
+    canonicalBlock,
     "",
     "Follow the spec below exactly. Do not exceed the stated scope.",
     "",
