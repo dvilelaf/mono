@@ -1,5 +1,5 @@
 {
-  "id": "2e45f40f-2be3-489a-a378-02a4416e53e2",
+  "id": "7a604d32-5678-4780-9187-9888375ba2ec",
   "prevId": "2f9ebcb6-2159-4204-96b9-cec8da2027e2",
   "version": "7",
   "dialect": "postgresql",
@@ -1666,12 +1666,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -1680,12 +1674,6 @@
         },
         "content": {
           "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -2184,6 +2172,158 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.film_reviews": {
+      "name": "film_reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "year_released": {
+          "name": "year_released",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "year_watched": {
+          "name": "year_watched",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "date_watched": {
+          "name": "date_watched",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "context": {
+          "name": "context",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "elo_score": {
+          "name": "elo_score",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'1500'"
+        },
+        "elo_matches": {
+          "name": "elo_matches",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "image_url": {
+          "name": "image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_ids": {
+          "name": "external_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tags": {
+          "name": "tags",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "film_reviews_status_idx": {
+          "name": "film_reviews_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "film_reviews_elo_idx": {
+          "name": "film_reviews_elo_idx",
+          "columns": [
+            {
+              "expression": "elo_score",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.analyses": {
       "name": "analyses",
       "schema": "",
@@ -2252,12 +2392,6 @@
         "parent_id": {
           "name": "parent_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

@@ -1,26 +1,7 @@
 import { Router } from "express";
-import { getEloMatchup, processEloComparison, getEloRankings, getAllFilmReviews, deleteFilmReview } from "./media.service.js";
+import { getEloMatchup, processEloComparison, getEloRankings } from "./media.service.js";
 
 export const mediaRouter = Router();
-
-mediaRouter.get("/film-reviews", async (req, res, next) => {
-  try {
-    const films = await getAllFilmReviews();
-    res.json(films);
-  } catch (err) {
-    next(err);
-  }
-});
-
-mediaRouter.delete("/film-reviews/:id", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const result = await deleteFilmReview(id);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
 
 mediaRouter.get("/film-reviews/elo/matchup", async (req, res, next) => {
   try {

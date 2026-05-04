@@ -96,23 +96,3 @@ export async function getEloRankings(limit = 100) {
     .orderBy(desc(filmReviews.eloScore))
     .limit(limit);
 }
-
-export async function getAllFilmReviews() {
-  return db
-    .select({
-      id: filmReviews.id,
-      title: filmReviews.title,
-      rating: filmReviews.rating,
-      eloScore: filmReviews.eloScore,
-      eloMatches: filmReviews.eloMatches,
-      status: filmReviews.status,
-    })
-    .from(filmReviews)
-    .orderBy(desc(filmReviews.eloScore));
-}
-
-export async function deleteFilmReview(id: string) {
-  const result = await db.delete(filmReviews).where(eq(filmReviews.id, id)).returning({ id: filmReviews.id });
-  if (result.length === 0) throw new Error("Film not found");
-  return result[0];
-}
