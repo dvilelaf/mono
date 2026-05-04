@@ -1,32 +1,43 @@
 ---
 layer: processing
 domain: photos
-updated: 2026-04-28
+updated: 2026-04-23
 sources:
   - table: photos
-    query: "-- TABLE DROPPED: photos table no longer exists as of 2026-04-28"
+    query: SELECT * FROM photos
 ---
 
 # Apple Photos
 
 ## TL;DR
-**SCHEMA DRIFT: `photos` table no longer exists in the DB as of 2026-04-28.** The table was present in prior schema (migration `0003` or similar) and is referenced in `import-photos.ts` and `import-photos.py` (both deleted per git status). The media domain has been restructured to `film_reviews`. Photos import path needs rebuilding.
+**0 rows** in photos as of 2026-04-23. Previous count (47,549 photos/videos) was from user context, not a DB query. osxphotos export has not yet been run against this DB instance.
 
-## Prior state (no longer accurate)
-- `photos` table: 0 rows pre-wipe, 47,549 historical photos/videos planned
-- Schema: id, filename, original_filename, date (timestamptz), latitude, longitude, place_name, city, country, is_photo, is_video, persons, labels, albums, metadata, created_at
+## Actual schema (verified 2026-04-23)
+`photos`: id, filename, original_filename, date (timestamptz), latitude, longitude, place_name, city, country, is_photo, is_video, persons (jsonb), labels (jsonb), albums (jsonb), metadata (jsonb), created_at
 
-## Current DB state
-`photos` table: **does not exist**. `film_reviews` table exists with 59 rows (new domain).
+Note: `ai_caption` is **not a column** — would live in `metadata` jsonb if stored at all.
 
-## New tables in media domain (schema drift, 2026-04-28)
-- `film_reviews`: 59 rows — appears to be the replacement for a photos/media tracking table. Schema unknown.
+## Coverage (planned — not yet populated)
+- Window: 2006 – present
+- Attributes: GPS, place_name, city, country, persons, labels, albums
+- Refresh: **MANUAL** — re-run osxphotos export
+
+## Known gotchas
+- **Schema drift corrected**: `date` is a timestamptz (not date). The query `WHERE date BETWEEN ...` still works but use timestamptz literals.
+- No `ai_caption` column — check `metadata` jsonb if needed.
 
 ## Relevance to goals
-- Body-composition visual timeline and travel GPS cross-check are **blocked** until the photos domain is re-established.
-- Scope decision needed: rebuild photos table, or accept that photos data is out of scope for this PDS instance.
+- Indirect. Could support body-composition visual timeline (front-facing photos, Apr–Nov 2025 waist-expansion window).
+- Travel spending cross-check: photo GPS vs travel tx dates.
+
+## How to query (corrected)
+```sql
+SELECT place_name, COUNT(*)
+FROM photos
+WHERE date BETWEEN '2025-04-01' AND '2025-11-30'
+GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
+```
 
 ## Open questions
-- Was the `photos` table intentionally dropped, or removed as part of a refactor that went too far?
-- `film_reviews` — is this a separate concept (film watching log) or did it replace a broader media schema?
-- If photos are back in scope: osxphotos export + a new schema/migration needed.
+- Is this source worth keeping in live sync, or does it add noise vs signal for goal-oriented synthesis?
+- When will the osxphotos export be run?

@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { config, type JobName } from "./config.js";
-import { postSynthesisHook } from "./hooks/synthesis-message.js";
 
 const JOB_PROMPTS: Record<JobName, string> = {
   extract: "scripts/extract.md",
@@ -64,27 +63,13 @@ async function executeJob(job: JobName): Promise<RunResult> {
     `=== ${job} run start ${startedAt.toISOString()} ===\n`,
   );
 
-  const childEnv = { ...process.env };
-  for (const key of [
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_EXECPATH",
-    "CLAUDECODE",
-    "CLAUDE_AGENT_SDK_VERSION",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-  ]) {
-    delete childEnv[key];
-  }
-
   const exitCode = await new Promise<number | null>((resolve) => {
     const child = spawn(
       config.claudeBin,
       ["-p", "--permission-mode", "bypassPermissions"],
       {
         cwd: config.repoRoot,
-        env: childEnv,
+        env: { ...process.env },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -116,7 +101,7 @@ async function executeJob(job: JobName): Promise<RunResult> {
     `\n=== ${job} run end ${finishedAt.toISOString()} exit=${exitCode} ===\n`,
   );
 
-  const result: RunResult = {
+  return {
     job,
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
@@ -124,19 +109,4 @@ async function executeJob(job: JobName): Promise<RunResult> {
     logPath,
     ok: exitCode === 0,
   };
-
-  if (job === "synthesise" && result.ok) {
-    try {
-      const hookResult = await postSynthesisHook();
-      await appendFile(
-        logPath,
-        `\n[post-synthesis-hook] ${JSON.stringify(hookResult)}\n`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await appendFile(logPath, `\n[post-synthesis-hook error] ${message}\n`).catch(() => {});
-    }
-  }
-
-  return result;
 }
