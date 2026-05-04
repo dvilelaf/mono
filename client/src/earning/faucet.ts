@@ -20,6 +20,64 @@ export interface FaucetResult {
   rateLimited?: boolean;
 }
 
+/**
+ * Conservative estimate for one CDP drip (~0.0001 ETH). Used to size the drip
+ * loop cap so it can actually reach the bootstrap target.
+ */
+export const ESTIMATED_DRIP_WEI = 100_000_000_000_000n;
+
+/**
+ * Default wall-clock safety cutoff for a faucet drip loop. Real loops should
+ * exit on success, rate-limit, or this deadline — whichever comes first.
+ */
+export const DEFAULT_FAUCET_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface ComputeFaucetDripCapInput {
+  /** Bootstrap target (wei) the drip loop is trying to reach. */
+  targetWei?: bigint | null;
+  /** Current balance (wei) at the start of the loop. */
+  balanceWei?: bigint | null;
+  /** Explicit override; bypasses the calculation entirely when provided. */
+  override?: number;
+  /** Lower bound — preserves the historical 60-drip cap for callers without a target. */
+  floor?: number;
+  /** Upper bound — prevents runaway loops if estimates are wrong. */
+  ceiling?: number;
+}
+
+/**
+ * Compute the maximum number of faucet drip iterations needed to clear
+ * `targetWei` from `balanceWei`, given a conservative per-drip estimate.
+ *
+ * The cap is a *safety bound*, not a target — the real exit conditions are
+ * (a) the balance reaches the target, (b) the faucet rate-limits, or
+ * (c) the wall-clock deadline elapses. Sizing it dynamically just prevents
+ * the loop from terminating early on small fixed budgets (the previous
+ * 60-drip cap × ~0.0001 ETH = 0.006 ETH could not reach the 0.010 ETH
+ * fresh-fleet bootstrap target).
+ */
+export function computeFaucetDripCap(input: ComputeFaucetDripCapInput): number {
+  const floor = input.floor ?? 60;
+  const ceiling = input.ceiling ?? 500;
+  if (typeof input.override === 'number') {
+    return Math.max(0, Math.floor(input.override));
+  }
+  const target = input.targetWei ?? null;
+  if (target === null || target <= 0n) {
+    return floor;
+  }
+  const balance = input.balanceWei ?? 0n;
+  const remaining = target - balance;
+  if (remaining <= 0n) {
+    return floor;
+  }
+  const estimatedDrips = Number(remaining / ESTIMATED_DRIP_WEI);
+  // 2x safety multiplier (drips can come in slightly under the estimate) plus
+  // a 20-iteration floor of headroom for rounding on small targets.
+  const computed = estimatedDrips * 2 + 20;
+  return Math.max(floor, Math.min(ceiling, computed));
+}
+
 export async function requestTestnetFunding(
   address: string,
   network: 'base-sepolia',

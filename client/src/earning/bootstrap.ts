@@ -73,7 +73,11 @@ import {
   previousSafeBeingAbandoned,
   sweepOrphanedServiceFunds,
 } from './orphan-sweep.js';
-import { requestTestnetFunding } from './faucet.js';
+import {
+  DEFAULT_FAUCET_LOOP_TIMEOUT_MS,
+  computeFaucetDripCap,
+  requestTestnetFunding,
+} from './faucet.js';
 import {
   flattenErrorMessage,
   viemSendTransactionWithRetry,
@@ -282,19 +286,36 @@ export class FleetBootstrapper {
       };
 
       // On testnet, drain the CDP faucet in a loop until master has enough ETH.
-      // CDP's drip is tiny (~0.0001 ETH) vs the 0.005 ETH bootstrap floor — a
+      // CDP's drip is tiny (~0.0001 ETH) vs the bootstrap floor (e.g. 0.010 ETH
+      // for a fresh fleet, after STANDARD_MASTER_BOOTSTRAP_MULTIPLIER) — a
       // single drip is never enough, and the older two-drip pattern forced
       // operators to re-run `jinn bootstrap` 25+ times. We loop until funded,
-      // rate-limited, or an error. Cap at 60 iterations as a safety bound.
+      // rate-limited, an error, or the wall-clock timeout. The iteration cap is
+      // sized from the remaining shortfall so it can actually clear the target;
+      // a fixed 60-drip cap (≈0.006 ETH) used to leave fresh fleets stuck
+      // forever at "0.006 / 0.010 ETH".
       if (systemEth < requiredMasterEth && this.chain === 'base-sepolia' && autoFaucetEnabled) {
-        const MAX_FAUCET_ITERS = 60;
+        const maxFaucetIters = computeFaucetDripCap({
+          targetWei: requiredMasterEth,
+          balanceWei: systemEth,
+        });
         const INTER_DRIP_PAUSE_MS = 1_000;
+        const loopTimeoutMs = DEFAULT_FAUCET_LOOP_TIMEOUT_MS;
+        const deadline = Date.now() + loopTimeoutMs;
         console.error(
           `[fleet-bootstrap] Master has ${formatEther(systemEth)} ETH; need ${formatEther(requiredMasterEth)} ETH. ` +
           `Draining CDP faucet on ${this.chain} via ${rpcHostForDisplay(this.config.rpcUrl)} ` +
-          `(each drip ≈ 0.0001 ETH, up to ${MAX_FAUCET_ITERS} drips; expect ~30-60 s on first run).`,
+          `(each drip ≈ 0.0001 ETH, up to ${maxFaucetIters} drips or ${Math.round(loopTimeoutMs / 1000)} s — whichever comes first).`,
         );
-        for (let i = 0; i < MAX_FAUCET_ITERS; i++) {
+        for (let i = 0; i < maxFaucetIters; i++) {
+          if (Date.now() >= deadline) {
+            console.error(
+              `[fleet-bootstrap] Faucet drip loop hit ${Math.round(loopTimeoutMs / 1000)} s timeout after ${i} drips ` +
+              `(master=${formatEther(masterBalance)} ETH; target=${formatEther(requiredMasterEth)} ETH). ` +
+              `CDP rate limits 1 claim per address per 24 h — retry later or fund manually.`,
+            );
+            break;
+          }
           const faucetResult = await this.requestFunding(masterAddress, 'base-sepolia');
           if (!faucetResult.ok) {
             if (faucetResult.rateLimited) {
@@ -310,7 +331,7 @@ export class FleetBootstrapper {
           masterBalance = refreshed.master;
           if ((i + 1) % 5 === 0) {
             console.error(
-              `[fleet-bootstrap] drip ${i + 1}/${MAX_FAUCET_ITERS} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
+              `[fleet-bootstrap] drip ${i + 1}/${maxFaucetIters} · chain=${this.chain} · rpc=${rpcHostForDisplay(this.config.rpcUrl)} · ` +
               `master=${formatEther(masterBalance)} ETH · target=${formatEther(requiredMasterEth)} ETH`,
             );
           }

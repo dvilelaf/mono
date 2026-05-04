@@ -26,7 +26,11 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { FleetStateStore } from '../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../earning/wallet.js';
-import { requestTestnetFunding } from '../earning/faucet.js';
+import {
+  DEFAULT_FAUCET_LOOP_TIMEOUT_MS,
+  computeFaucetDripCap,
+  requestTestnetFunding,
+} from '../earning/faucet.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
@@ -60,6 +64,14 @@ export interface SetupRoutesConfig {
   requestFunding?: typeof requestTestnetFunding;
   maxFaucetIters?: number;
   interDripPauseMs?: number;
+  /**
+   * Wall-clock cutoff for the drip loop. Mirrors the role of `maxFaucetIters`
+   * but in time rather than iterations — both are safety rails; the real exit
+   * conditions are reaching `minEoaGasWei` or the faucet rate-limiting.
+   */
+  faucetLoopTimeoutMs?: number;
+  /** Now-source override for tests. */
+  now?: () => number;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -157,12 +169,13 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const requestFunding = config.requestFunding ?? requestTestnetFunding;
-    const maxFaucetIters = config.maxFaucetIters ?? 60;
     const interDripPauseMs = config.interDripPauseMs ?? 1_000;
     const targetWei = config.minEoaGasWei ? BigInt(config.minEoaGasWei) : null;
     const publicClient = config.rpcUrl
       ? createJinnPublicClient(config.rpcUrl, 'base-sepolia')
       : null;
+    const now = config.now ?? Date.now;
+    const loopTimeoutMs = config.faucetLoopTimeoutMs ?? DEFAULT_FAUCET_LOOP_TIMEOUT_MS;
 
     const getBalance = async (): Promise<bigint | null> => {
       if (!publicClient) return null;
@@ -183,7 +196,33 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
         });
       }
 
+      // Size the iteration cap to actually reach the target (≈0.0001 ETH per
+      // drip). The hard exits are still: target reached, faucet rate-limited,
+      // wall-clock deadline. The cap just prevents an unbounded loop if the
+      // estimate is wildly off in either direction.
+      const maxFaucetIters = computeFaucetDripCap({
+        override: config.maxFaucetIters,
+        targetWei,
+        balanceWei,
+      });
+      const deadline = now() + loopTimeoutMs;
+
       for (let i = 0; i < maxFaucetIters; i++) {
+        if (now() >= deadline) {
+          return c.json(
+            {
+              ok: txHashes.length > 0,
+              address,
+              txHash: txHashes.at(-1),
+              txHashes,
+              attempts: i,
+              balanceWei: balanceWei?.toString(),
+              targetWei: targetWei?.toString(),
+              reason: 'faucet_loop_timeout',
+            },
+            txHashes.length > 0 ? 202 : 200,
+          );
+        }
         const result = await requestFunding(address, 'base-sepolia');
         if (!result.ok) {
           return c.json(

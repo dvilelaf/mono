@@ -249,6 +249,44 @@ describe('POST /v1/setup/change-password', () => {
 });
 
 describe('POST /v1/setup/drip', () => {
+  it('sizes the iteration cap to clear the fresh-fleet bootstrap target (0.010 ETH)', async () => {
+    const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-cap-'));
+    const store = new FleetStateStore(earningDir);
+    const state = await store.load('base-sepolia');
+    await store.save({
+      ...state,
+      master_address: '0x2222222222222222222222222222222222222222',
+    });
+
+    // Each drip credits ~0.0001 ETH, so reaching the 0.010 ETH fresh-fleet
+    // target requires at least 100 successful drips. The previous fixed
+    // 60-drip cap (≈0.006 ETH max) could not clear this and stranded
+    // onboarding at "0.006 / 0.010 ETH" forever.
+    const requestFunding = vi.fn(async () => ({
+      ok: true,
+      txHash: '0x' + 'cd'.repeat(32),
+    }));
+    const app = new Hono();
+    addSetupRoutes(app, {
+      earningDir,
+      chain: 'base-sepolia',
+      requestFunding,
+      // Fresh-fleet master target: minEoaGasEth (0.005) ×
+      // STANDARD_MASTER_BOOTSTRAP_MULTIPLIER (2) = 0.010 ETH.
+      minEoaGasWei: '10000000000000000',
+      interDripPauseMs: 0,
+    });
+
+    const res = await app.request('/v1/setup/drip', { method: 'POST' });
+    expect(res.status).toBe(202);
+
+    const attempts = requestFunding.mock.calls.length;
+    const DRIP_WEI = 100_000_000_000_000n; // ≈0.0001 ETH per drip
+    const TARGET_WEI = 10_000_000_000_000_000n; // 0.010 ETH
+    expect(BigInt(attempts) * DRIP_WEI >= TARGET_WEI).toBe(true);
+    expect(attempts).toBeGreaterThan(60);
+  });
+
   it('runs the user-triggered faucet loop for the persisted Base Sepolia master wallet', async () => {
     const earningDir = mkdtempSync(join(tmpdir(), 'jinn-drip-'));
     const store = new FleetStateStore(earningDir);
