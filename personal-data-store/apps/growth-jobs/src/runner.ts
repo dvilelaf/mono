@@ -116,12 +116,84 @@ async function executeJob(job: JobName): Promise<RunResult> {
     `\n=== ${job} run end ${finishedAt.toISOString()} exit=${exitCode} ===\n`,
   );
 
+  const ok = exitCode === 0;
+  await postCompletionMessage({ job, today, finishedAt, exitCode, logPath, ok }).catch((err) =>
+    console.error(`[growth-jobs] message post failed:`, err),
+  );
+
   return {
     job,
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     exitCode,
     logPath,
-    ok: exitCode === 0,
+    ok,
   };
+}
+
+async function tailLog(logPath: string, maxChars: number): Promise<string> {
+  try {
+    const text = await readFile(logPath, "utf8");
+    if (text.length <= maxChars) return text;
+    return "…" + text.slice(text.length - maxChars);
+  } catch {
+    return "";
+  }
+}
+
+async function postCompletionMessage(args: {
+  job: JobName;
+  today: string;
+  finishedAt: Date;
+  exitCode: number | null;
+  logPath: string;
+  ok: boolean;
+}): Promise<void> {
+  const niceJob = args.job
+    .split("-")
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
+  const status = args.ok ? "Complete" : `Failed (exit=${args.exitCode ?? "null"})`;
+  const subject = `${niceJob} ${status} — ${args.today}`;
+  const tail = await tailLog(args.logPath, 4000);
+  const body = [
+    `Job: ${args.job}`,
+    `Status: ${status}`,
+    `Finished: ${args.finishedAt.toISOString()}`,
+    `Log: ${args.logPath}`,
+    "",
+    "--- log tail ---",
+    tail,
+  ].join("\n");
+
+  const summary = args.ok
+    ? `${niceJob} finished cleanly at ${args.finishedAt.toISOString()}. See log tail for details.`
+    : `${niceJob} failed (exit=${args.exitCode ?? "null"}) at ${args.finishedAt.toISOString()}. Check ${args.logPath}`;
+
+  try {
+    const res = await fetch(`${config.pdsApiUrl}/api/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.PDS_API_KEY ? { Authorization: `Bearer ${process.env.PDS_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({
+        type: "growth",
+        subject,
+        body,
+        metadata: {
+          job: args.job,
+          exitCode: args.exitCode,
+          ok: args.ok,
+          logPath: args.logPath,
+          summary,
+        },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`[growth-jobs] message POST ${res.status}: ${await res.text()}`);
+    }
+  } catch (err) {
+    console.error("[growth-jobs] message POST threw:", err);
+  }
 }

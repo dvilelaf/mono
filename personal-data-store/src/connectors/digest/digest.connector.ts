@@ -4,6 +4,7 @@ import { documents } from "../../domains/documents/documents.schema.js";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { researchInterest } from "./research.js";
 import { generateDigestArticle, type PreviousArticle } from "./generator.js";
+import { createMessage } from "../../domains/messages/messages.service.js";
 
 interface InterestDoc {
   id: string;
@@ -118,6 +119,23 @@ export async function runDigestCycle(): Promise<{ articles: { title: string; con
       articles.push({ title: saved.title ?? "", content: articleContent, id: saved.id });
       processedIds.push(interest.id);
       console.log(`[digest] Generated article for: ${interest.title}`);
+
+      try {
+        await createMessage({
+          type: "digest",
+          subject: `New Digest: ${saved.title}`,
+          body: articleContent,
+          metadata: {
+            documentId: saved.id,
+            interestId: interest.id,
+            interestTitle: interest.title,
+            sourceCount: allUrls.length,
+            newSourceCount: newUrls.length,
+          },
+        });
+      } catch (msgErr) {
+        console.error(`[digest] message create failed for ${saved.id}:`, msgErr);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${interest.title}: ${msg}`);

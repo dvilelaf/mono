@@ -45,7 +45,7 @@ messagesRouter.post("/", async (req, res) => {
   const row = await createMessage({ type, subject, body, metadata });
 
   let delivery: { delivered: boolean; error?: string; gmailId?: string } | null = null;
-  if (send !== false) {
+  if (send === true) {
     delivery = await deliverMessage(row.id, to ?? DEFAULT_RECIPIENT);
   }
 

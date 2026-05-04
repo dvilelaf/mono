@@ -6,6 +6,7 @@ import {
   deleteDocument,
   queryDocuments,
   semanticSearch,
+  getIndexerStatus,
 } from "./documents.service.js";
 import { hybridSearch } from "./search-v2.js";
 
