@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
-import { loadConfig } from '../../config.js';
+import { loadConfig, migrateHarnessConfigFileValues } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
 import { loadSolverNets } from '../../solver-nets/registry.js';
 import {
@@ -18,7 +18,6 @@ type SolverPluginEntry = string | { name?: string; source: string; version?: str
 interface SolverNetConfig {
   enabled?: boolean;
   solverType: string;
-  canonicalPlugin: SolverPluginEntry;
   harness?: string;
   plugins?: SolverPluginEntry[];
   taskGenerator?: { enabled?: boolean };
@@ -37,7 +36,8 @@ function configPathFrom(argv: string[]): string {
 function readConfig(path: string): ConfigShape {
   if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as ConfigShape;
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+    return migrateHarnessConfigFileValues(parsed).values as ConfigShape;
   } catch {
     return {};
   }
@@ -57,7 +57,6 @@ function predictionDefault(): SolverNetConfig {
   return {
     enabled: true,
     solverType: 'prediction.v1',
-    canonicalPlugin: 'bundled:jinn-prediction-plugin',
     harness: 'claude-code-learner',
     plugins: [],
     taskGenerator: { enabled: true },
@@ -138,7 +137,6 @@ const command: CommandModule = {
           enabled: net.enabled,
           solverType: net.solverType,
           harness: net.harness,
-          canonicalPlugin: net.canonicalPlugin,
           pluginCount: net.plugins.length,
           taskGeneratorEnabled: net.taskGenerator.enabled,
         })),
@@ -210,7 +208,7 @@ const command: CommandModule = {
         if (harness?.onEnable) {
           enableResult = await harness.onEnable({
             solverNet: { name: loadedNet.name, solverType: loadedNet.solverType },
-            runtimePlugins: [loadedNet.canonicalPlugin, ...loadedNet.plugins],
+            runtimePlugins: loadedNet.runtimePlugins,
             args: enableArgs(rest),
           });
         }

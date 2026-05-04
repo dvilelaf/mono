@@ -1,13 +1,13 @@
-import type { JinnConfig } from '../config.js';
 import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
+export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
+
 export interface SolverNetConfig {
   enabled: boolean;
   solverType: string;
-  canonicalPlugin: SolverPluginEntry;
   harness: string;
   plugins: SolverPluginEntry[];
   taskGenerator: { enabled: boolean };
@@ -19,26 +19,32 @@ export interface LoadedSolverNet {
   solverType: string;
   contract: SolverNetContract;
   harness: string;
-  canonicalPlugin: RuntimePlugin;
-  plugins: RuntimePlugin[];
+  runtimePlugins: RuntimePlugin[];
   taskGenerator: { enabled: boolean };
 }
 
 function runtimePluginFrom(
   plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>,
-  role: RuntimePlugin['role'],
+  provenance: RuntimePlugin['provenance'],
 ): RuntimePlugin {
   return {
     name: plugin.name,
     version: plugin.version,
+    source: plugin.source,
+    sourceKind: plugin.sourceKind,
     solverType: plugin.solverType,
     supports: plugin.supports,
     root: plugin.root,
     manifestPath: plugin.manifestPath,
     sha256: plugin.sha256,
     ...(plugin.cid ? { cid: plugin.cid } : {}),
-    role,
+    provenance,
   };
+}
+
+function isNetworkToolsPlugin(plugin: Awaited<ReturnType<typeof resolveSolverPlugin>>): boolean {
+  return plugin.source === JINN_NETWORK_TOOLS_PLUGIN
+    || plugin.name === '@jinn-network/network-tools';
 }
 
 export class SolverNetRegistry {
@@ -53,7 +59,9 @@ export class SolverNetRegistry {
   }
 
   forSolverType(solverType: string): LoadedSolverNet | undefined {
-    return [...this.nets.values()].find((net) => net.enabled && net.solverType === solverType);
+    return [...this.nets.values()].find((net) =>
+      net.enabled && net.solverType === solverType,
+    );
   }
 
   list(): LoadedSolverNet[] {
@@ -70,7 +78,7 @@ export class SolverNetRegistry {
 }
 
 export async function loadSolverNets(
-  config: Pick<JinnConfig, 'solverNets'>,
+  config: { solverNets: Record<string, SolverNetConfig> },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
   for (const [name, net] of Object.entries(config.solverNets)) {
@@ -79,22 +87,31 @@ export async function loadSolverNets(
     if (!contract) {
       throw new Error(`SolverNet ${name} has no registered SolverNetContract for ${net.solverType}`);
     }
-    const canonicalEntry = net.canonicalPlugin ?? contract.referencePlugins[0];
-    const canonical = await resolveSolverPlugin(canonicalEntry);
-    if (!canonical.supports.includes(net.solverType)) {
-      throw new Error(
-        `SolverNet ${name} solverType mismatch: config=${net.solverType} plugin supports=${canonical.supports.join(',')}`,
-      );
-    }
-    const extras = [];
-    for (const entry of net.plugins) {
+    const runtimePlugins: RuntimePlugin[] = [];
+    const seenSources = new Set<string>();
+    const seenNames = new Set<string>();
+
+    async function addRuntimePlugin(
+      entry: SolverPluginEntry,
+      provenance: RuntimePlugin['provenance'],
+    ): Promise<void> {
       const plugin = await resolveSolverPlugin(entry);
-      if (!plugin.supports.includes(net.solverType)) {
+      if (seenSources.has(plugin.source) || seenNames.has(plugin.name)) return;
+      if (!isNetworkToolsPlugin(plugin) && !plugin.supports.includes(net.solverType)) {
         throw new Error(
-          `SolverNet ${name} extra plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
+          `SolverNet ${name} runtime plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
         );
       }
-      extras.push(runtimePluginFrom(plugin, 'extra'));
+      runtimePlugins.push(runtimePluginFrom(plugin, provenance));
+      seenSources.add(plugin.source);
+      seenNames.add(plugin.name);
+    }
+
+    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN, ...contract.defaultRuntimePlugins]) {
+      await addRuntimePlugin(entry, 'default');
+    }
+    for (const entry of net.plugins ?? []) {
+      await addRuntimePlugin(entry, 'configured');
     }
     registry.register({
       name,
@@ -102,8 +119,7 @@ export async function loadSolverNets(
       solverType: net.solverType,
       contract,
       harness: net.harness,
-      canonicalPlugin: runtimePluginFrom(canonical, 'canonical'),
-      plugins: extras,
+      runtimePlugins,
       taskGenerator: net.taskGenerator,
     });
   }

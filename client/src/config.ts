@@ -353,18 +353,10 @@ export const JinnConfigSchema = z.object({
     })
     .optional(),
 
-  /** SolverNet activation, canonical SolverPlugin, and Harness selection. */
+  /** SolverNet activation, Harness selection, and operator-configured runtime plugins. */
   solverNets: z.record(z.object({
     enabled: z.boolean().default(true),
     solverType: z.string(),
-    canonicalPlugin: z.union([
-      z.string(),
-      z.object({
-        name: z.string().optional(),
-        source: z.string(),
-        version: z.string().optional(),
-      }),
-    ]),
     harness: z.string().default('claude-code-learner'),
     plugins: z.array(z.union([
       z.string(),
@@ -381,7 +373,6 @@ export const JinnConfigSchema = z.object({
     prediction: {
       enabled: true,
       solverType: 'prediction.v1',
-      canonicalPlugin: 'bundled:jinn-prediction-plugin',
       harness: 'claude-code-learner',
       plugins: [],
       taskGenerator: { enabled: true },
@@ -559,12 +550,7 @@ function solverNetSlugFor(solverType: string): string {
   return solverType.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
 }
 
-function defaultCanonicalPluginFor(solverType: string): string {
-  if (solverType === 'prediction.v1') return 'bundled:jinn-prediction-plugin';
-  return `bundled:${solverType.replace(/[^a-zA-Z0-9._-]+/g, '-')}-plugin`;
-}
-
-function normalizeSolverNetPlugin(plugin: unknown, solverType: string): unknown {
+function normalizeSolverNetPlugin(plugin: unknown): unknown | undefined {
   if (typeof plugin === 'string' && plugin.length > 0) {
     return plugin.startsWith('bundled:')
       || plugin.startsWith('file:')
@@ -577,7 +563,29 @@ function normalizeSolverNetPlugin(plugin: unknown, solverType: string): unknown 
       : `bundled:${plugin}`;
   }
   if (isRecord(plugin)) return plugin;
-  return defaultCanonicalPluginFor(solverType);
+  return undefined;
+}
+
+function sourceOfSolverNetPlugin(plugin: unknown): string | undefined {
+  if (typeof plugin === 'string') return plugin;
+  if (isRecord(plugin) && typeof plugin['source'] === 'string') return plugin['source'];
+  return undefined;
+}
+
+function normalizeSolverNetPlugins(...inputs: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  const seen = new Set<string>();
+  for (const input of inputs) {
+    const values = Array.isArray(input) ? input : [input];
+    for (const value of values) {
+      const normalized = normalizeSolverNetPlugin(value);
+      const source = sourceOfSolverNetPlugin(normalized);
+      if (!normalized || !source || seen.has(source)) continue;
+      out.push(normalized);
+      seen.add(source);
+    }
+  }
+  return out;
 }
 
 export function migrateHarnessConfigFileValues(
@@ -588,6 +596,8 @@ export function migrateHarnessConfigFileValues(
 
   const solverNetsInput = next['solverNets'];
   const solverNets: Record<string, unknown> = {};
+  // Legacy SolverNet plugin keys are read only to migrate them into `plugins`
+  // and then rewrite config files without the old authority-shaped field.
   if (Array.isArray(solverNetsInput)) {
     for (const item of solverNetsInput) {
       if (!isRecord(item) || typeof item['solverType'] !== 'string') continue;
@@ -596,11 +606,10 @@ export function migrateHarnessConfigFileValues(
       solverNets[slug] = {
         enabled: item['enabled'] !== false,
         solverType,
-        canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
         harness: typeof item['harness'] === 'string'
           ? item['harness']
           : 'claude-code-learner',
-        plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
+        plugins: normalizeSolverNetPlugins(item['canonicalPlugin'] ?? item['plugin'], item['plugins']),
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
     }
@@ -615,13 +624,13 @@ export function migrateHarnessConfigFileValues(
       solverNets[name] = {
         enabled: item['enabled'] !== false,
         solverType,
-        canonicalPlugin: normalizeSolverNetPlugin(item['canonicalPlugin'] ?? item['plugin'], solverType),
         harness: typeof item['harness'] === 'string'
           ? item['harness']
           : 'claude-code-learner',
-        plugins: Array.isArray(item['plugins']) ? item['plugins'] : [],
+        plugins: normalizeSolverNetPlugins(item['canonicalPlugin'] ?? item['plugin'], item['plugins']),
         taskGenerator: isRecord(item['taskGenerator']) ? item['taskGenerator'] : { enabled: true },
       };
+      if ('canonicalPlugin' in item || 'plugin' in item) changed = true;
     }
   }
 
@@ -629,7 +638,6 @@ export function migrateHarnessConfigFileValues(
     solverNets['prediction'] = {
       enabled: true,
       solverType: 'prediction.v1',
-      canonicalPlugin: normalizeSolverNetPlugin(undefined, 'prediction.v1'),
       harness: 'claude-code-learner',
       plugins: [],
       taskGenerator: { enabled: true },

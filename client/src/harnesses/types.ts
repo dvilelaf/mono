@@ -12,13 +12,15 @@ import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.
 export interface RuntimePlugin {
   name: string;
   version: string;
+  source: string;
+  sourceKind?: string;
   solverType?: string;
   supports?: string[];
   root: string;
   manifestPath: string;
   sha256: string;
   cid?: string;
-  role: 'canonical' | 'extra';
+  provenance: 'default' | 'configured';
 }
 
 // ── HarnessContext ────────────────────────────────────────────────────────
