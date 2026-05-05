@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+/**
+ * pre-tool-use-bash — Claude Code PreToolUse hook for the claude-code-learner plugin.
+ *
+ * Intercepts native Bash tool calls and applies the §3.3 package-install block
+ * from spec/2026-05-05-plug-in-and-harness-network-trust.md.
+ *
+ * Contract (Claude Code PreToolUse hook):
+ *   stdin  — JSON: { "tool_name": "Bash", "tool_input": { "command": "...", ... } }
+ *   stdout — If blocking: JSON: { "continue": false, "stopReason": "<message>" }
+ *            If passthrough: empty stdout
+ *   exit   — Always 0 (non-zero signals a hook error, not a tool denial)
+ *
+ * Filter-logic strategy: import from compiled dist/runner/bash-filter.js when
+ * @jinn-network/client is installed alongside this plugin; otherwise inline the
+ * same patterns (kept in sync with client/src/runner/bash-filter.ts).
+ *
+ * NOTE: Prefer the import path — a diverged inline copy is a maintenance hazard.
+ * The inline fallback exists only so the hook works in a bare plugin installation
+ * (e.g. during Claude Code plugin development before the package is published).
+ */
+
+'use strict';
+
+import { createRequire } from 'node:module';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// ── Filter logic ─────────────────────────────────────────────────────────────
+
+let isPackageInstallCommand;
+
+// Attempt to resolve the compiled filter from the installed @jinn-network/client package.
+// Walk up from the plugin root to find a node_modules directory containing the package.
+function tryLoadFromPackage() {
+  try {
+    const req = createRequire(import.meta.url);
+    // Probe candidate paths: plugin's own node_modules, then the client package root.
+    const candidates = [
+      // Installed alongside as a dependency
+      '@jinn-network/client/dist/runner/bash-filter.js',
+    ];
+    for (const candidate of candidates) {
+      try {
+        const mod = req(candidate);
+        if (typeof mod.isPackageInstallCommand === 'function') {
+          return mod.isPackageInstallCommand;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Walk up from __dirname looking for a dist/runner/bash-filter.js
+    let dir = __dirname;
+    for (let i = 0; i < 6; i++) {
+      const candidate = join(dir, 'dist', 'runner', 'bash-filter.js');
+      try {
+        const mod = req(candidate);
+        if (typeof mod.isPackageInstallCommand === 'function') {
+          return mod.isPackageInstallCommand;
+        }
+      } catch {
+        // continue
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // fall through to inline
+  }
+  return null;
+}
+
+const loaded = tryLoadFromPackage();
+
+if (loaded) {
+  isPackageInstallCommand = loaded;
+} else {
+  // Inline fallback — keep in sync with client/src/runner/bash-filter.ts
+  // If these patterns diverge from the canonical source, update both places.
+  const RULES = [
+    {
+      rule: 'yarn-add',
+      test: (cmd) =>
+        /(?:^|\s)yarn\s+(?:global\s+)?add\s/.test(cmd) ||
+        /(?:^|\s)yarn\s+install\s+\S/.test(cmd),
+    },
+    {
+      rule: 'npm-install-pkg',
+      test: (cmd) => /(?:^|\s)npm\s+(?:install|i)\s+\S/.test(cmd),
+    },
+    {
+      rule: 'pnpm-add',
+      test: (cmd) => /(?:^|\s)pnpm\s+(?:add|install)\s+\S/.test(cmd),
+    },
+    {
+      rule: 'jinn-plugin-add',
+      test: (cmd) =>
+        /(?:^|\s)jinn\s+(?:plug-ins|plugins|impls|harnesses)\s+add\s/.test(cmd),
+    },
+    {
+      rule: 'npm-registry-curl',
+      test: (cmd) =>
+        /(?:^|\s)(?:curl|wget|fetch)\s[^\n]*(?:registry\.npmjs\.org|npm\.pkg\.github\.com|registry\.yarnpkg\.com)/.test(cmd),
+    },
+    {
+      rule: 'npm-registry-api',
+      test: (cmd) =>
+        /https?:\/\/(?:registry\.npmjs\.org|npm\.pkg\.github\.com|registry\.yarnpkg\.com)/.test(cmd),
+    },
+  ];
+
+  isPackageInstallCommand = function (command) {
+    for (const { rule, test } of RULES) {
+      if (test(command)) {
+        return {
+          blocked: true,
+          reason: `Package-install commands are not permitted in the learning harness (rule: ${rule}). Use the recommendations queue instead — write a JSONL entry to ~/.jinn-client/recommendations.jsonl and let the operator install via \`jinn plug-ins add\`.`,
+          rule,
+        };
+      }
+    }
+    return { blocked: false, reason: '', rule: '' };
+  };
+}
+
+// ── Stdin ─────────────────────────────────────────────────────────────────────
+
+const chunks = [];
+process.stdin.on('data', (chunk) => chunks.push(chunk));
+process.stdin.on('end', () => {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    // Malformed JSON — passthrough (don't block; don't crash Claude Code)
+    process.exit(0);
+  }
+
+  // Defensive: only act on Bash tool calls
+  if (payload.tool_name !== 'Bash') {
+    process.exit(0);
+  }
+
+  const command = payload.tool_input?.command;
+  if (typeof command !== 'string') {
+    // No command — passthrough
+    process.exit(0);
+  }
+
+  const result = isPackageInstallCommand(command);
+
+  if (result.blocked) {
+    // Write refusal to the project's .bash/refused.jsonl for operator visibility
+    const projectDir = process.env['CLAUDE_PROJECT_DIR'];
+    if (projectDir) {
+      try {
+        const bashDir = join(projectDir, '.bash');
+        mkdirSync(bashDir, { recursive: true });
+        const entry = JSON.stringify({
+          ts: new Date().toISOString(),
+          command,
+          rule: result.rule,
+        });
+        appendFileSync(join(bashDir, 'refused.jsonl'), entry + '\n', 'utf8');
+      } catch {
+        // Best-effort — don't let a log write block the hook response
+      }
+    }
+
+    // Deny the tool call
+    process.stdout.write(JSON.stringify({ continue: false, stopReason: result.reason }));
+    process.exit(0);
+  }
+
+  // Passthrough — empty stdout
+  process.exit(0);
+});
