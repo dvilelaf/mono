@@ -196,7 +196,7 @@ Refusal is logged to `workingDir/.bash/refused.jsonl` for operator visibility an
 
 **Recommendations queue (§3.4)** is the structured output channel for plug-in suggestions the harness wants to pass to the operator.
 
-**Why this defense.** Closes N4 directly; matches field standard (Claude Code, Cursor, Gemini CLI all require user confirmation for `npm install`-class commands; Gemini CLI's CVSS-10 was caused by a non-interactive mode bypassing this). Cost: ~2 days. Coverage: removes the autonomous-install attack vector entirely.
+**Why this defense.** Closes N4 directly; matches field standard (Claude Code, Cursor, Gemini CLI all require user confirmation for `npm install`-class commands; Gemini CLI's CVSS-10 was caused by a non-interactive mode bypassing this). Cost: ~2 days. Coverage: removes the autonomous-install attack vector entirely. The filter ships in two forms — as the MCP `run_bash` tool for runners that route Bash through MCP, and as a `PreToolUse` hook on the `claude-code-learner` plug-in for sessions running Claude Code's native Bash. Both paths share the same `isPackageInstallCommand` logic in `client/src/runner/bash-filter.ts`.
 
 ### 3.4 Recommendations queue
 
