@@ -5,7 +5,7 @@ import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
 
-export type SolverNetOperatorRole = 'solving' | 'evaluating';
+export type SolverNetOperatorRole = 'solving' | 'evaluating' | 'launching';
 export type SolverNetTaskRole = 'restoration' | 'evaluation';
 
 export interface SolverNetConfig {
@@ -37,8 +37,14 @@ export interface LoadedSolverNet {
   taskGenerator: { enabled: boolean };
 }
 
-function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole {
-  return role === 'evaluating' ? 'evaluation' : 'restoration';
+function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole | undefined {
+  if (role === 'solving') return 'restoration';
+  if (role === 'evaluating') return 'evaluation';
+  // 'launching' is an operator-side launcher loop, not a Task-claiming role —
+  // it does not map to a SolverNetTaskRole. Task 4 of the launcher plan wires
+  // up the runtime gate that consumes this role; until then, it just falls
+  // out of `forSolverType` task-role filtering.
+  return undefined;
 }
 
 /**
@@ -98,7 +104,10 @@ export class SolverNetRegistry {
       net.enabled &&
       net.solverType === solverType &&
       (taskRole === undefined ||
-        net.roles.some((r) => taskRoleForOperatorRole(r) === taskRole)),
+        net.roles.some((r) => {
+          const tr = taskRoleForOperatorRole(r);
+          return tr !== undefined && tr === taskRole;
+        })),
     );
   }
 
