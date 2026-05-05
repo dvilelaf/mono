@@ -71,7 +71,7 @@ export { IDENTITY_REGISTRY_SET_METADATA_ABI, PAYLOAD_TUPLE };
 export type ExecutionTier = 0 | 1 | 3;
 
 /** Metadata key prefix. See payload-schema §6.1. */
-export type ContentKind = 'envelope' | 'evaluation';
+export type ContentKind = 'envelope' | 'evaluation' | 'plug-in-attestation';
 
 /**
  * v1 payload as caller-friendly hex strings. The encoder validates and
@@ -229,6 +229,52 @@ export function buildMetadataKey(kind: ContentKind, cid: string): string {
   return `${kind}:${cid}`;
 }
 
+// ── Plug-in attestation payload encoder ──────────────────────────────────────
+//
+// Plug-in attestations use a compact on-chain payload: (uint8 version, bytes32 manifestHash).
+// The version anchors the schema; the manifestHash ties the attestation to a specific
+// package release without fetching IPFS. The full attestation JSON lives at the CID
+// carried in the metadata key `plug-in-attestation:<cid>`.
+
+const PLUG_IN_ATTESTATION_PAYLOAD_TUPLE = [
+  { name: 'version', type: 'uint8' },
+  { name: 'manifestHash', type: 'bytes32' },
+] as const;
+
+/**
+ * ABI-encode a plug-in attestation payload: (uint8 version=1, bytes32 manifestHash).
+ *
+ * The `manifestHash` is the attested package's manifest hash (sha256 hex),
+ * giving consumers a cheap on-chain integrity check without an IPFS round-trip.
+ */
+export function encodePlugInAttestationPayload(manifestHash: Hex): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(manifestHash)) {
+    throw new Error(`manifestHash must be 32-byte hex (0x + 64 hex chars), got: ${manifestHash}`);
+  }
+  return encodeAbiParameters(PLUG_IN_ATTESTATION_PAYLOAD_TUPLE, [1, manifestHash]);
+}
+
+/**
+ * Decode a plug-in attestation payload encoded by `encodePlugInAttestationPayload`.
+ * Returns `{ version: 1, manifestHash: '0x...' }`.
+ */
+export function decodePlugInAttestationPayload(payload: Hex): { version: number; manifestHash: Hex } {
+  // Manual ABI decode: skip the version word and read the manifestHash word.
+  // Layout (2 words × 32 bytes = 64 bytes):
+  //   [0..32)  uint8 version (right-aligned in 32 bytes)
+  //   [32..64) bytes32 manifestHash
+  if (payload.length < 2 + 128) {
+    throw new Error(`plug-in attestation payload too short: ${payload.length} chars`);
+  }
+  const withoutPrefix = payload.slice(2); // strip 0x
+  const versionHex = withoutPrefix.slice(0, 64);
+  const manifestHashHex = withoutPrefix.slice(64, 128);
+  return {
+    version: parseInt(versionHex, 16),
+    manifestHash: `0x${manifestHashHex}` as Hex,
+  };
+}
+
 // ── Publisher ────────────────────────────────────────────────────────────────
 
 /**
@@ -271,6 +317,23 @@ export class IdentityPublisher {
   async publishContent(args: PublishContentArgs): Promise<Hex> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayload(args.payload);
+    return this._setMetadata(metadataKey, metadataValue);
+  }
+
+  /**
+   * Publish with an already-encoded payload bytes.
+   *
+   * Used by `identity-bridge.ts` (plug-in attestations) where the payload is
+   * encoded by `encodePlugInAttestationPayload` rather than the execution payload
+   * encoder — the two encoders produce different ABI shapes.
+   */
+  async publishRaw(args: { kind: ContentKind; cid: string; payload: Hex }): Promise<Hex> {
+    const metadataKey = buildMetadataKey(args.kind, args.cid);
+    return this._setMetadata(metadataKey, args.payload);
+  }
+
+  /** Shared `setMetadata` call, extracted to avoid duplication. */
+  private async _setMetadata(metadataKey: string, metadataValue: Hex): Promise<Hex> {
 
     const account = this.walletClient.account;
     if (!account) {
