@@ -18,7 +18,13 @@ export const predictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
   },
   buildGenerator: (config) => makePredictionV1Generator(config),
   getTestnetAutoConfig: (ctx) => {
-    if (ctx.network !== 'testnet' || !ctx.predictionV1LauncherEnabled) return undefined;
+    // spec/2026-05-05-launcher-role-and-mode.md §5.2: hot-spawn the generator
+    // unconditionally on testnet. The runtime `roles.includes('launching')`
+    // gate inside the generator's tick is what actually controls whether
+    // Polymarket gets polled — see `getRoles` in PredictionV1AutoConfig and
+    // the wiring in main.ts. Toggling roles takes effect within one cadence,
+    // no daemon restart.
+    if (ctx.network !== 'testnet') return undefined;
     return {
       agentEoa: ctx.agentEoa,
       safeAddress: ctx.safeAddress,
@@ -30,6 +36,7 @@ export const predictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
       maxOpenRounds: ctx.predictionV1MaxOpenRounds ?? nonNegativeNumberEnv(ctx.env, 'JINN_PREDICTION_V1_MAX_OPEN_ROUNDS'),
       allowlistConditionIds: ctx.predictionV1AllowlistConditionIds ?? csvEnv(ctx.env, 'JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS'),
       blocklistConditionIds: ctx.predictionV1BlocklistConditionIds ?? csvEnv(ctx.env, 'JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS'),
+      getRoles: ctx.getPredictionRoles,
     };
   },
   ui: {

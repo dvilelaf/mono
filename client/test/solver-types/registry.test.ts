@@ -229,24 +229,29 @@ describe('SOLVER_TYPES manifest', () => {
     await expect(SOLVER_TYPES['prediction.v1']!.parseSpec(raw)).rejects.toThrow();
   });
 
-  it('collectTestnetAutoTaskGenerators leaves Polymarket disabled for ordinary operators', () => {
+  it('collectTestnetAutoTaskGenerators always spawns the Polymarket generator on testnet (role-gated at tick time)', () => {
+    // spec/2026-05-05-launcher-role-and-mode.md §5.2 — hot-spawn. The
+    // generator is registered unconditionally on testnet; the runtime
+    // `roles.includes('launching')` check inside its tick is what controls
+    // whether work happens. Ordinary operator daemons (no 'launching' role)
+    // will have a registered generator that no-ops on each tick.
     const { generators, logLines } = collectTestnetAutoTaskGenerators({
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       autoTasksDisabled: false,
       env: {},
     });
-    expect(generators.map((g) => g.solverType)).not.toContain('prediction.v1');
-    expect(logLines.some((l) => l.includes('prediction.v1'))).toBe(false);
+    expect(generators.map((g) => g.solverType)).toContain('prediction.v1');
+    expect(logLines.some((l) => l.includes('prediction.v1'))).toBe(true);
   });
 
-  it('collectTestnetAutoTaskGenerators keeps disable-all ahead of launcher opt-in', () => {
+  it('collectTestnetAutoTaskGenerators keeps disable-all ahead of role-gated spawn', () => {
     const { generators, logLines } = collectTestnetAutoTaskGenerators({
       network: 'testnet',
       rpcUrl: 'https://sepolia.base.org',
       autoTasksDisabled: true,
       env: { JINN_ENABLE_APY_AUTO_TASKS: '1' },
-      predictionV1LauncherEnabled: true,
+      getPredictionRoles: () => ['launching'],
     });
     expect(generators).toEqual([]);
     expect(logLines).toEqual([]);
@@ -258,7 +263,7 @@ describe('SOLVER_TYPES manifest', () => {
       rpcUrl: 'https://sepolia.base.org',
       autoTasksDisabled: false,
       env: { JINN_ENABLE_APY_AUTO_TASKS: '1' },
-      predictionV1LauncherEnabled: true,
+      getPredictionRoles: () => ['launching'],
     });
     expect(generators.length).toBe(2);
     expect(generators.map((g) => g.solverType)).toEqual(['prediction.v1', 'prediction.apy.v0']);
@@ -291,7 +296,7 @@ describe('SOLVER_TYPES manifest', () => {
       agentEoa: account.address as `0x${string}`,
       safeAddress,
       agentPrivateKey: pk,
-      predictionV1LauncherEnabled: true,
+      getPredictionRoles: () => ['launching'],
       predictionV1WindowMs: 60 * 60 * 1000,
     });
     const prediction = generators.find((g) => g.solverType === 'prediction.v1');
@@ -371,7 +376,7 @@ describe('SOLVER_TYPES manifest', () => {
       rpcUrl: 'https://sepolia.base.org',
       autoTasksDisabled: false,
       env: {},
-      predictionV1LauncherEnabled: true,
+      getPredictionRoles: () => ['launching'],
       predictionV1WindowMs: 30 * 60 * 1000,
       predictionV1CadenceMs: 67890,
       predictionV1MaxNewRoundsPerPoll: 3,

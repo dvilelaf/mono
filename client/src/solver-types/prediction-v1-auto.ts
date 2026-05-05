@@ -32,6 +32,16 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
   agentPrivateKey?: `0x${string}`;
   allowlistConditionIds?: string[];
   blocklistConditionIds?: string[];
+  /**
+   * Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
+   * The daemon always creates this generator; if `getRoles` is provided and
+   * the returned array does not include `'launching'`, each tick early-returns
+   * without polling Polymarket. Toggling `'launching'` in/out of
+   * `solverNets.prediction.roles` therefore takes effect within one cadence
+   * — no daemon restart. When `getRoles` is unset (e.g. direct test usage)
+   * the generator polls unconditionally, preserving the prior public API.
+   */
+  getRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
 }
 
 interface EligibleMarket {
@@ -63,6 +73,15 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
   let lastPollStartedAt = 0;
 
   return async (): Promise<Task[] | null> => {
+    // Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
+    // Always-spawn loop, tick-time gate: if `getRoles` is supplied and the
+    // operator's `solverNets.prediction.roles` does not include 'launching',
+    // skip the poll entirely. Cadence bookkeeping is intentionally NOT
+    // updated here — leaving `lastPollStartedAt` untouched means the very
+    // first tick after the operator flips 'launching' on will run.
+    if (config.getRoles && !config.getRoles().includes('launching')) {
+      return null;
+    }
     const now = Date.now();
     const cadenceMs = config.cadenceMs ?? DEFAULTS.cadenceMs;
     if (cadenceMs > 0 && lastPollStartedAt > 0 && now - lastPollStartedAt < cadenceMs) {

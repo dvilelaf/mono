@@ -33,10 +33,15 @@ export interface TestnetAutoContext {
   /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedTaskV1. */
   agentPrivateKey?: `0x${string}`;
   /**
-   * Explicit opt-in for the launcher-owned Polymarket prediction.v1 generator.
-   * Ordinary operator daemons leave this unset/false and do not create rounds.
+   * Live role-getter for the prediction SolverNet, threaded into the
+   * Polymarket prediction.v1 generator so its tick can early-return when
+   * `'launching'` is not in the operator's `solverNets.prediction.roles`.
+   * Replaces the legacy startup-time `predictionV1LauncherEnabled` boolean
+   * (spec/2026-05-05-launcher-role-and-mode.md §5.2). Returning a closure
+   * (rather than a snapshot) is what makes role flips take effect within
+   * one cadence — no daemon restart.
    */
-  predictionV1LauncherEnabled?: boolean;
+  getPredictionRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
   /**
    * Override the prediction.v1 Polymarket submission window (ms).
    * The generator default applies when unset.
