@@ -67,6 +67,7 @@ export class ClaudeRunner implements Runner {
               ? JSON.stringify(task.context.restorationResult)
               : '',
             STORE_PATH: context.storePath ?? '',
+            JINN_WORKING_DIR: context.workingDirectory ?? '',
             DAEMON_API_URL: context.daemonApiUrl ?? '',
             // Bearer token for the daemon's cost-mutating routes. MCP
             // subprocess attaches this as `Authorization: Bearer <token>`

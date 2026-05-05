@@ -20,6 +20,7 @@ import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
+import { executeBashWithFilter } from '../runner/bash-executor.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -41,6 +42,7 @@ const task = {
 
 const requestId = process.env['REQUEST_ID'] ?? '';
 const storePath = process.env['STORE_PATH'] ?? '';
+const workingDir = process.env['JINN_WORKING_DIR'] ?? '';
 const store = storePath ? new Store(storePath) : null;
 const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 // Bearer token for daemon API cost-mutating routes. Empty string when
@@ -347,6 +349,59 @@ server.tool(
           ...(result.sourceOperator ? { sourceOperator: result.sourceOperator } : {}),
         }),
       }],
+    };
+  },
+);
+
+server.tool(
+  'run_bash',
+  [
+    'Run a shell command in the task working directory.',
+    'Package-install commands (yarn add, npm install, pnpm add, jinn solver-plugins add, etc.)',
+    'and direct npm-registry HTTP calls are refused — they require explicit operator action.',
+    'Use this tool instead of the native Bash tool to ensure autonomous-mode safety constraints apply.',
+  ].join(' '),
+  {
+    command: z.string().describe('The shell command to execute'),
+  },
+  async ({ command }) => {
+    const dir = workingDir;
+    if (!dir) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ error: 'JINN_WORKING_DIR not set — cannot execute bash commands' }),
+        }],
+      };
+    }
+    const result = await executeBashWithFilter(command, dir);
+    if (result.refusal) {
+      console.error(`[mcp] run_bash refused (rule: ${result.refusal.rule}): ${command.slice(0, 100)}`);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            refused: true,
+            rule: result.refusal.rule,
+            reason: result.refusal.reason,
+          }),
+        }],
+        isError: true,
+      };
+    }
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        }),
+      }],
+      ...(result.exitCode !== 0 ? { isError: true as const } : {}),
     };
   },
 );
