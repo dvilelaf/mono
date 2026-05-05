@@ -1342,7 +1342,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentEoa: agentEoaAddress,
     safeAddress,
     agentPrivateKey,
-    predictionV1LauncherEnabled: config.predictionV1LauncherEnabled,
+    // Task 4 (spec/2026-05-05-launcher-role-and-mode.md) replaces this with a
+    // role-array gate (`solverNets[*].roles` includes `'launching'`). Until
+    // then, hard-disable the launcher loop here so the schema removal of
+    // `predictionV1LauncherEnabled` does not break this read.
+    predictionV1LauncherEnabled: false,
     predictionV1WindowMs: config.predictionV1WindowMs,
     predictionV1CadenceMs: config.predictionV1CadenceMs,
     predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,

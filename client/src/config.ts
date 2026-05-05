@@ -28,16 +28,20 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
   solverType: string;
   /**
    * Operator-selected roles for this SolverNet. A non-empty subset of
-   * `['solving', 'evaluating']`. Both roles can be set concurrently — the
-   * daemon enforces `disallowSolverSelfEvaluation` on-chain so the operator
-   * never evaluates its own Solutions, and the on-chain
-   * TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
+   * `['solving', 'evaluating', 'launching']`. Multiple roles can run
+   * concurrently — the daemon enforces `disallowSolverSelfEvaluation`
+   * on-chain so the operator never evaluates its own Solutions, and the
+   * on-chain TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
    * `verdictDeliveryWeight` as independent additive counters.
+   *
+   * `'launching'` gates the SolverNet's launcher loop (e.g. prediction.v1
+   * Polymarket Task generator) — replaces the legacy
+   * `predictionV1LauncherEnabled` boolean with a per-SolverNet role gate.
    *
    * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
    * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
    */
-  roles?: Array<'solving' | 'evaluating'>;
+  roles?: Array<'solving' | 'evaluating' | 'launching'>;
   harness?: string;
   model?: string;
   plugins?: Array<string | { name?: string; source: string; version?: string }>;
@@ -311,13 +315,6 @@ export const JinnConfigSchema = z.object({
   predictionV1ResolveGapMs: z.number().int().positive().optional(),
 
   /**
-   * Enables launcher-owned Polymarket prediction.v1 Task generation.
-   * Default false: ordinary operator daemons do not create Polymarket rounds.
-   * Env: JINN_PREDICTION_V1_LAUNCHER_ENABLED
-   */
-  predictionV1LauncherEnabled: z.boolean().default(false),
-
-  /**
    * prediction.v1 Polymarket generator cadence (ms). Default 21600000 (6h).
    * Set to 0 only for launcher/test loops that intentionally poll every tick.
    * Env: JINN_PREDICTION_V1_CADENCE_MS
@@ -388,12 +385,15 @@ export const JinnConfigSchema = z.object({
   /**
    * SolverNet activation, Harness selection, and operator-configured runtime plugins.
    *
-   * Each entry's `roles` is a non-empty subset of `['solving', 'evaluating']`.
-   * Both roles can run concurrently for the same SolverNet; the protocol-level
+   * Each entry's `roles` is a non-empty subset of
+   * `['solving', 'evaluating', 'launching']`. Multiple roles can run
+   * concurrently for the same SolverNet; the protocol-level
    * `disallowSolverSelfEvaluation` flag prevents the operator from evaluating
    * its own Solutions and the on-chain TaskActivityCheckerV3 tracks
    * Solution and Verdict counters independently (additive into
-   * `eligibleActivityWeight`).
+   * `eligibleActivityWeight`). `'launching'` gates the SolverNet's launcher
+   * loop (e.g. prediction.v1 Polymarket Task generator) — see
+   * spec/2026-05-05-launcher-role-and-mode.md.
    *
    * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field is
    * auto-promoted to `roles: [<role>]` by the zod preprocessor below so
@@ -420,7 +420,7 @@ export const JinnConfigSchema = z.object({
     z.object({
       enabled: z.boolean().default(true),
       solverType: z.string(),
-      roles: z.array(z.enum(['solving', 'evaluating']))
+      roles: z.array(z.enum(['solving', 'evaluating', 'launching']))
         .min(1, 'each SolverNet must enable at least one role')
         .default(['solving'])
         // Deduplicate to keep downstream consumers simple.
@@ -700,10 +700,6 @@ export function loadConfig(configPath?: string): JinnConfig {
     const parsed = Number(env['JINN_PREDICTION_V1_RESOLVE_GAP_MS'].trim());
     if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1ResolveGapMs = parsed;
   }
-  if (env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'] !== undefined) {
-    const v = env['JINN_PREDICTION_V1_LAUNCHER_ENABLED'].trim().toLowerCase();
-    merged.predictionV1LauncherEnabled = v === '1' || v === 'true' || v === 'yes';
-  }
   if (env['JINN_PREDICTION_V1_CADENCE_MS']) {
     const parsed = Number(env['JINN_PREDICTION_V1_CADENCE_MS'].trim());
     if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1CadenceMs = parsed;
@@ -921,7 +917,6 @@ const TRACKED_ENV_VARS = [
   'JINN_MIN_SAFE_ETH_WEI',
   'JINN_PREDICTION_V1_WINDOW_MS',
   'JINN_PREDICTION_V1_RESOLVE_GAP_MS',
-  'JINN_PREDICTION_V1_LAUNCHER_ENABLED',
   'JINN_PREDICTION_V1_CADENCE_MS',
   'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL',
   'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY',

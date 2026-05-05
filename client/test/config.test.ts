@@ -544,6 +544,78 @@ describe('loadConfig solverNets roles migration', () => {
   });
 });
 
+describe('config: launching role', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('accepts roles: ["launching"] for a SolverNet', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['launching'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['launching']);
+  });
+
+  it('accepts roles: ["solving", "launching"] (multi-role)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['solving', 'launching'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'launching']);
+  });
+
+  it('rejects empty roles array', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: [],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        },
+      },
+    });
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+});
+
 describe('buildConfigProvenance', () => {
   const dirs: string[] = [];
 
