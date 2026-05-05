@@ -37,7 +37,7 @@ export interface LoadedSolverNet {
   taskGenerator: { enabled: boolean };
 }
 
-function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole | undefined {
+export function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole | undefined {
   if (role === 'solving') return 'restoration';
   if (role === 'evaluating') return 'evaluation';
   // 'launching' is an operator-side launcher loop, not a Task-claiming role —
