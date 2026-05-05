@@ -291,6 +291,7 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: '12px',
                     padding: '10px 14px',
                     border: '1px solid var(--border)',
                     borderRadius: '6px',
@@ -299,32 +300,83 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
                   }}
                 >
                   <span style={{ fontSize: '14px' }}>{p}</span>
-                  <span style={{ color: 'var(--fg-dim)', fontSize: '12px' }}>
-                    {meta ? `${meta.source} · ${meta.version}` : '—'}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ color: 'var(--fg-dim)', fontSize: '12px' }}>
+                      {meta ? `${meta.source} · ${meta.version}` : '—'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDraft({ ...draft, plugins: draft.plugins.filter((x) => x !== p) })}
+                      aria-label={`Remove ${p}`}
+                      style={{
+                        border: '1px solid var(--border)',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        background: 'transparent',
+                        color: 'var(--fg-muted)',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Remove
+                    </button>
                   </span>
                 </div>
               );
             })}
-            <button
-              type="button"
-              disabled
-              style={{
-                border: '1px dashed var(--border)',
-                borderRadius: '6px',
-                padding: '10px 14px',
-                background: 'transparent',
-                color: 'var(--fg-dim)',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '11px',
-                fontWeight: 500,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                cursor: 'not-allowed',
-                textAlign: 'center',
-              }}
-            >
-              + Add plugin (coming soon)
-            </button>
+            {(() => {
+              const available = catalog.compatiblePlugins.filter(
+                (cp) => !draft.plugins.includes(cp.name),
+              );
+              if (catalog.compatiblePlugins.length === 0) {
+                return (
+                  <span
+                    style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '12px',
+                      color: 'var(--fg-dim)',
+                      padding: '4px 2px',
+                    }}
+                  >
+                    No plugins available for this SolverNet
+                  </span>
+                );
+              }
+              if (available.length === 0) return null;
+              return (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const picked = e.target.value;
+                    if (!picked) return;
+                    setDraft({ ...draft, plugins: [...draft.plugins, picked] });
+                  }}
+                  aria-label="Add plugin"
+                  style={{
+                    background: 'var(--bg)',
+                    border: '1px dashed var(--border)',
+                    borderRadius: '6px',
+                    padding: '10px 12px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '14px',
+                    color: 'var(--fg)',
+                  }}
+                >
+                  <option value="" disabled>
+                    + Add plugin
+                  </option>
+                  {available.map((cp) => (
+                    <option key={cp.name} value={cp.name}>
+                      {cp.name} ({cp.source} · {cp.version})
+                    </option>
+                  ))}
+                </select>
+              );
+            })()}
           </div>
         </div>
       )}
