@@ -320,15 +320,93 @@ async function publishReview(
   });
 }
 
-// ── Feedback list placeholder (Task 6.4) ─────────────────────────────────────
+// ── Feedback list (Task 6.4) ──────────────────────────────────────────────────
 
 async function runFeedbackList(
   ctx: CommandContext,
-  _args: { subjectType: 'plug-in' | 'harness'; subject: string; rest: string[] },
+  args: { subjectType: 'plug-in' | 'harness'; subject: string; rest: string[] },
   _home: string,
 ): Promise<void> {
-  writeJson(ctx, { error: { code: 'not_implemented', message: 'feedback list is not yet implemented (Task 6.4)' } });
-  ctx.exit(1);
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: args.rest,
+      allowPositionals: false,
+      options: {
+        'include-history': { type: 'boolean', default: false },
+        from: { type: 'string' },
+      },
+    });
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+
+  const includeHistory = parsed.values['include-history'] === true;
+  const fromFilter = typeof parsed.values['from'] === 'string' ? parsed.values['from'] : undefined;
+
+  // Resolve followedAttestors from env (JINN_FOLLOWED_ATTESTORS).
+  const followedAttestors = resolveFollowedAttestors(ctx);
+  if (fromFilter) {
+    // If --from is set, narrow to that attestor only (if it's in followedAttestors).
+    const filtered = followedAttestors.filter((a) => a.toLowerCase() === fromFilter.toLowerCase());
+    if (filtered.length === 0 && followedAttestors.length > 0) {
+      writeJson(ctx, { error: { code: 'not_found', message: `Attestor ${fromFilter} is not in followedAttestors` } });
+      ctx.exit(1);
+      return;
+    }
+  }
+
+  const { createNoOpFeedbackReader, formatFeedbackSummary, groupByKind } =
+    await import('../../network-trust/feedback-reader.js');
+
+  // In the CLI context we don't have an RPC/IPFS client wired.
+  // The no-op reader returns empty results; a future integration phase
+  // will wire the real on-chain reader. Users who want live reads can
+  // call the daemon API (a later Phase 7-8 extension).
+  const reader = createNoOpFeedbackReader();
+
+  const atts = await reader.fetchAttestations({
+    subject: args.subject,
+    followedAttestors: fromFilter ? [fromFilter] : followedAttestors,
+    includeHistory,
+  });
+
+  const summary = groupByKind(atts, args.subject);
+  const formatted = formatFeedbackSummary(summary);
+
+  // Output: human-readable format to stdout; JSON envelope for scripting.
+  writeJson(ctx, {
+    verb: `${args.subjectType === 'plug-in' ? 'solver-plugins' : 'harnesses'} feedback list`,
+    subject: args.subject,
+    followedAttestors,
+    attestationCount: atts.length,
+    summary: {
+      endorsements: summary.endorsements.length,
+      warnings: summary.warnings.length,
+      blocks: summary.blocks.length,
+      reviews: summary.reviews.length,
+    },
+    attestations: atts,
+    note: followedAttestors.length === 0
+      ? 'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS or config.followedAttestors[] to see network attestations.'
+      : undefined,
+  });
+  ctx.writer.write(formatted);
+}
+
+function resolveFollowedAttestors(ctx: CommandContext): string[] {
+  const envVal = ctx.env['JINN_FOLLOWED_ATTESTORS'];
+  if (!envVal) return [];
+  // Accept comma-separated or JSON array.
+  try {
+    const parsed = JSON.parse(envVal) as unknown;
+    if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === 'string');
+  } catch {
+    // not JSON
+  }
+  return envVal.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 // ── Shared feedback helper ────────────────────────────────────────────────────

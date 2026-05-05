@@ -470,10 +470,73 @@ async function runHarnessReviewImpl(
 }
 
 async function runHarnessFeedbackList(ctx: CommandContext, rest: string[], _home: string): Promise<void> {
-  // Task 6.4: on-chain event read — implemented in the next task.
-  void rest;
-  emitJson(ctx, { error: { code: 'not_implemented', message: 'harnesses feedback list not yet implemented (Task 6.4)' } });
-  ctx.exit(1);
+  // Expects args: ['list', '<subject>', ...options]
+  const [sub, subject, ...opts] = rest;
+  if (sub !== 'list' || !subject) {
+    emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses feedback list <name> [--include-history] [--from <attestor>]');
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: opts,
+      allowPositionals: false,
+      options: {
+        'include-history': { type: 'boolean' as const, default: false },
+        from: { type: 'string' as const },
+      },
+    });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+
+  const includeHistory = parsed.values['include-history'] === true;
+  const fromFilter = typeof parsed.values['from'] === 'string' ? parsed.values['from'] : undefined;
+
+  const followedAttestors = resolveFollowedAttestorsH(ctx);
+
+  const { createNoOpFeedbackReader, formatFeedbackSummary, groupByKind } =
+    await import('../../network-trust/feedback-reader.js');
+
+  const reader = createNoOpFeedbackReader();
+  const atts = await reader.fetchAttestations({
+    subject,
+    followedAttestors: fromFilter ? [fromFilter] : followedAttestors,
+    includeHistory,
+  });
+
+  const summary = groupByKind(atts, subject);
+  const formatted = formatFeedbackSummary(summary);
+
+  emitJson(ctx, {
+    verb: 'harnesses feedback list',
+    subject,
+    followedAttestors,
+    attestationCount: atts.length,
+    summary: {
+      endorsements: summary.endorsements.length,
+      warnings: summary.warnings.length,
+      blocks: summary.blocks.length,
+      reviews: summary.reviews.length,
+    },
+    attestations: atts,
+    note: followedAttestors.length === 0
+      ? 'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS or config.followedAttestors[].'
+      : undefined,
+  });
+  ctx.writer.write(formatted);
+}
+
+function resolveFollowedAttestorsH(ctx: CommandContext): string[] {
+  const envVal = ctx.env['JINN_FOLLOWED_ATTESTORS'];
+  if (!envVal) return [];
+  try {
+    const parsed = JSON.parse(envVal) as unknown;
+    if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === 'string');
+  } catch { /* not JSON */ }
+  return envVal.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
