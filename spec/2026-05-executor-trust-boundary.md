@@ -666,6 +666,8 @@ no revocation list is published (or the operator is not subscribed
 to one). It also forces operators to periodically re-engage with
 their fleet — defense against silent decay.
 
+**Network-visible registration surface — see `spec/2026-05-05-plug-in-and-harness-network-trust.md`.** The per-impl signer-untrust + manifest-revoke + maintainer-revocation primitives defined in this section are consumed by the network-trust spec's revocation surface (R1). Specifically, `jinn harnesses untrust <signer>` (this spec) is the local action that the network-trust spec's R1 verb invokes; negative ERC-8004 attestations (R2) are advisories about packages that operators may then locally untrust.
+
 ## 6. Evolution to out-of-process (option C)
 
 The audit (`jinn-mono-j75` §8 decision #1) lists three options for
