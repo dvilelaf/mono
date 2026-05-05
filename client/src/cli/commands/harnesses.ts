@@ -35,7 +35,7 @@ import {
   computeTarballHash,
   computeEntryPointHashes,
 } from '../../harnesses/manifest/content-hash.js';
-import { writeInstalledHarness } from '../../installed-records.js';
+import { writeInstalledHarness, readInstalledHarnesses, addBlockedHarness } from '../../installed-records.js';
 import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
 
@@ -261,6 +261,139 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
 }
 
 // ---------------------------------------------------------------------------
+// endorse / warn / block / review / feedback
+// ---------------------------------------------------------------------------
+
+async function runFeedbackVerb(
+  ctx: CommandContext,
+  args: { kind: 'endorse' | 'warn' | 'block'; subject: string; reason: string | undefined },
+  home: string,
+): Promise<void> {
+  if ((args.kind === 'warn' || args.kind === 'block') && !args.reason) {
+    emitJson(ctx, {
+      error: { code: 'invalid_invocation', message: `--reason is required for ${args.kind}` },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  const records = readInstalledHarnesses(home);
+  const installed = records[args.subject];
+  if (!installed) {
+    emitJson(ctx, {
+      error: {
+        code: 'not_installed',
+        message: `${args.subject} is not installed; nothing to attest`,
+      },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  const score: -2 | -1 | 0 | 1 =
+    args.kind === 'endorse' ? 1 : args.kind === 'warn' ? -1 : -2;
+
+  const attestation: PlugInAttestation = {
+    subject: args.subject,
+    subjectType: 'harness',
+    version: installed.version,
+    manifestHash: installed.manifestHash,
+    tarballHash: installed.tarballHash,
+    tier: installed.tier,
+    kind: args.kind,
+    score,
+    reason: args.reason ?? '',
+    reviewCid: '',
+    attestedAt: Math.floor(Date.now() / 1000),
+  };
+
+  // For block: apply local disable first — this must succeed even if on-chain fails.
+  if (args.kind === 'block') {
+    addBlockedHarness(home, args.subject);
+  }
+
+  const ipfsStub = {
+    pinJson: async () => { throw new Error('no IPFS client configured for CLI feedback'); },
+    fetchJson: async () => null,
+  };
+  const reputationStub = {
+    giveFeedback: async () => { throw new Error('no reputation client configured for CLI feedback'); },
+  };
+
+  const result = await publishAttestation({
+    attestation,
+    targetAgentId: 0n,
+    ipfs: ipfsStub,
+    reputation: reputationStub,
+  });
+
+  emitJson(ctx, {
+    verb: `harnesses ${args.kind}`,
+    subject: args.subject,
+    kind: args.kind,
+    score,
+    txHash: result.txHash ?? null,
+    cid: result.cid ?? null,
+    ok: result.ok,
+    publishError: result.ok ? undefined : result.error,
+    ...(args.kind === 'block' ? { blocked: args.subject } : {}),
+  });
+}
+
+async function runEndorse(ctx: CommandContext, rest: string[], home: string): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: { reason: { type: 'string' as const } } });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) { emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses endorse <name>'); return; }
+  await runFeedbackVerb(ctx, { kind: 'endorse', subject, reason: parsed.values.reason }, home);
+}
+
+async function runWarn(ctx: CommandContext, rest: string[], home: string): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: { reason: { type: 'string' as const } } });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) { emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses warn <name>'); return; }
+  await runFeedbackVerb(ctx, { kind: 'warn', subject, reason: parsed.values.reason }, home);
+}
+
+async function runBlock(ctx: CommandContext, rest: string[], home: string): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: { reason: { type: 'string' as const } } });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) { emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses block <name>'); return; }
+  await runFeedbackVerb(ctx, { kind: 'block', subject, reason: parsed.values.reason }, home);
+}
+
+async function runReview(ctx: CommandContext, rest: string[], _home: string): Promise<void> {
+  // Task 6.3: IPFS-pinned notes — implemented in the next task.
+  void rest;
+  emitJson(ctx, { error: { code: 'not_implemented', message: 'harnesses review not yet implemented (Task 6.3)' } });
+  ctx.exit(1);
+}
+
+async function runHarnessFeedbackList(ctx: CommandContext, rest: string[], _home: string): Promise<void> {
+  // Task 6.4: on-chain event read — implemented in the next task.
+  void rest;
+  emitJson(ctx, { error: { code: 'not_implemented', message: 'harnesses feedback list not yet implemented (Task 6.4)' } });
+  ctx.exit(1);
+}
+
+// ---------------------------------------------------------------------------
 // recommendations
 // ---------------------------------------------------------------------------
 
@@ -343,6 +476,24 @@ async function run(ctx: CommandContext): Promise<void> {
   if (!sub || sub === '--help' || sub === '-h') {
     ctx.writer.write(HELP_TEXT);
     return;
+  }
+
+  // Feedback verbs have their own arg shapes (--reason, --notes-file, etc.)
+  // and must be dispatched before the common parseArgs that only knows
+  // --config, --json, --publish. The raw rest args (everything after the
+  // subverb) are passed directly to the verb handler's own parseArgs call.
+  const feedbackVerbs = ['endorse', 'warn', 'block', 'review', 'feedback'] as const;
+  if ((feedbackVerbs as readonly string[]).includes(sub)) {
+    const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+      ? ctx.env['JINN_HOME']
+      : homedir();
+    // ctx.argv = [subverb, ...rest]; slice(1) gives everything after the subverb.
+    const rawRest = ctx.argv.slice(1);
+    if (sub === 'endorse') { await runEndorse(ctx, rawRest, home); return; }
+    if (sub === 'warn') { await runWarn(ctx, rawRest, home); return; }
+    if (sub === 'block') { await runBlock(ctx, rawRest, home); return; }
+    if (sub === 'review') { await runReview(ctx, rawRest, home); return; }
+    if (sub === 'feedback') { await runHarnessFeedbackList(ctx, rawRest, home); return; }
   }
 
   let parsed;

@@ -20,7 +20,7 @@ import {
   computeTarballHash,
   computeEntryPointHashes,
 } from '../../harnesses/manifest/content-hash.js';
-import { writeInstalledPlugIn } from '../../installed-records.js';
+import { writeInstalledPlugIn, readInstalledPlugIns, addBlockedPlugIn } from '../../installed-records.js';
 import { formatRecommendations } from '../../recommendations/format.js';
 import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
@@ -220,6 +220,177 @@ async function add(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 }
 
+// ── Placeholders replaced by Tasks 6.3 / 6.4 ─────────────────────────────────
+// These forward-declare the shared impl functions so the dispatcher and the
+// verb wrappers compile before the full implementations are dropped in.
+// Task 6.3 replaces publishReview's body; Task 6.4 replaces runFeedbackList's body.
+
+async function publishReview(
+  ctx: CommandContext,
+  _args: { subjectType: 'plug-in' | 'harness'; subject: string; notesFile: string },
+  _home: string,
+): Promise<void> {
+  writeJson(ctx, { error: { code: 'not_implemented', message: 'review is not yet implemented (Task 6.3)' } });
+  ctx.exit(1);
+}
+
+async function runFeedbackList(
+  ctx: CommandContext,
+  _args: { subjectType: 'plug-in' | 'harness'; subject: string; rest: string[] },
+  _home: string,
+): Promise<void> {
+  writeJson(ctx, { error: { code: 'not_implemented', message: 'feedback list is not yet implemented (Task 6.4)' } });
+  ctx.exit(1);
+}
+
+// ── Shared feedback helper ────────────────────────────────────────────────────
+
+async function publishFeedback(
+  ctx: CommandContext,
+  args: {
+    kind: 'endorse' | 'warn' | 'block';
+    subject: string;
+    reason: string | undefined;
+  },
+  home: string,
+): Promise<void> {
+  if ((args.kind === 'warn' || args.kind === 'block') && !args.reason) {
+    writeJson(ctx, {
+      error: { code: 'invalid_invocation', message: `--reason is required for ${args.kind}` },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  const records = readInstalledPlugIns(home);
+  const installed = records[args.subject];
+  if (!installed) {
+    writeJson(ctx, {
+      error: {
+        code: 'not_installed',
+        message: `${args.subject} is not installed; nothing to attest`,
+      },
+    });
+    ctx.exit(1);
+    return;
+  }
+
+  const score: -2 | -1 | 0 | 1 =
+    args.kind === 'endorse' ? 1 : args.kind === 'warn' ? -1 : -2;
+
+  const attestation: PlugInAttestation = {
+    subject: args.subject,
+    subjectType: 'plug-in',
+    version: installed.version,
+    manifestHash: installed.manifestHash,
+    tarballHash: installed.tarballHash,
+    tier: installed.tier,
+    kind: args.kind,
+    score,
+    reason: args.reason ?? '',
+    reviewCid: '',
+    attestedAt: Math.floor(Date.now() / 1000),
+  };
+
+  // For block: apply local disable first — this must succeed even if on-chain fails.
+  if (args.kind === 'block') {
+    addBlockedPlugIn(home, args.subject);
+  }
+
+  const ipfsStub = {
+    pinJson: async () => { throw new Error('no IPFS client configured for CLI feedback'); },
+    fetchJson: async () => null,
+  };
+  const reputationStub = {
+    giveFeedback: async () => { throw new Error('no reputation client configured for CLI feedback'); },
+  };
+
+  const result = await publishAttestation({
+    attestation,
+    targetAgentId: 0n,
+    ipfs: ipfsStub,
+    reputation: reputationStub,
+  });
+
+  writeJson(ctx, {
+    verb: `solver-plugins ${args.kind}`,
+    subject: args.subject,
+    kind: args.kind,
+    score,
+    txHash: result.txHash ?? null,
+    cid: result.cid ?? null,
+    ok: result.ok,
+    publishError: result.ok ? undefined : result.error,
+    ...(args.kind === 'block' ? { blocked: args.subject } : {}),
+  });
+}
+
+async function endorse(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: {
+      reason: { type: 'string' },
+    }});
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'solver-plugins endorse requires <name>' } });
+    ctx.exit(1);
+    return;
+  }
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME'] : homedir();
+  await publishFeedback(ctx, { kind: 'endorse', subject, reason: parsed.values.reason }, home);
+}
+
+async function warn(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: {
+      reason: { type: 'string' },
+    }});
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'solver-plugins warn requires <name>' } });
+    ctx.exit(1);
+    return;
+  }
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME'] : homedir();
+  await publishFeedback(ctx, { kind: 'warn', subject, reason: parsed.values.reason }, home);
+}
+
+async function block(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: {
+      reason: { type: 'string' },
+    }});
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'solver-plugins block requires <name>' } });
+    ctx.exit(1);
+    return;
+  }
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME'] : homedir();
+  await publishFeedback(ctx, { kind: 'block', subject, reason: parsed.values.reason }, home);
+}
+
 async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
   try {
@@ -278,6 +449,46 @@ async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
     });
     ctx.exit(1);
   }
+}
+
+async function review(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: {
+      'notes-file': { type: 'string' },
+    }});
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'solver-plugins review requires <name>' } });
+    ctx.exit(1);
+    return;
+  }
+  const notesFile = parsed.values['notes-file'];
+  if (!notesFile) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'solver-plugins review requires --notes-file <path>' } });
+    ctx.exit(1);
+    return;
+  }
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME'] : homedir();
+  await publishReview(ctx, { subjectType: 'plug-in', subject, notesFile }, home);
+}
+
+async function feedbackList(ctx: CommandContext, rest: string[]): Promise<void> {
+  const [sub, subject, ...feedbackRest] = rest;
+  if (sub !== 'list' || !subject) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: 'usage: jinn solver-plugins feedback list <name> [--include-history] [--from <attestor>]' } });
+    ctx.exit(1);
+    return;
+  }
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME'] : homedir();
+  await runFeedbackList(ctx, { subjectType: 'plug-in', subject, rest: feedbackRest }, home);
 }
 
 async function recommendations(ctx: CommandContext, rest: string[]): Promise<void> {
@@ -355,11 +566,16 @@ plugin for runtime use. Attach runtime plugins with:
     if (subverb === 'validate') return validate(ctx, rest);
     if (subverb === 'pack') return pack(ctx, rest);
     if (subverb === 'recommendations') return recommendations(ctx, rest);
+    if (subverb === 'endorse') return endorse(ctx, rest);
+    if (subverb === 'warn') return warn(ctx, rest);
+    if (subverb === 'block') return block(ctx, rest);
+    if (subverb === 'review') return review(ctx, rest);
+    if (subverb === 'feedback') return feedbackList(ctx, rest);
     writeJson(ctx, {
       error: {
         code: 'invalid_invocation',
         message: `Unknown solver-plugins subverb: ${subverb}`,
-        expected: 'add|show|validate|pack|recommendations',
+        expected: 'add|show|validate|pack|recommendations|endorse|warn|block|review|feedback',
       },
     });
     ctx.exit(1);

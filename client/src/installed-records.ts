@@ -67,3 +67,50 @@ export function writeInstalledHarness(
   r[pkg] = rec;
   write(harnessesPath(home), r);
 }
+
+// ── Local block lists ────────────────────────────────────────────────────────
+
+/**
+ * Locally blocked plug-in / harness names. The `block` CLI verb writes here;
+ * the runtime loader respects this list at boot to refuse loading blocked packages.
+ */
+
+type BlockedList = string[];
+
+const blockedPlugInsPath = (home: string) =>
+  join(home, '.jinn-client', 'blocked-plug-ins.json');
+const blockedHarnessesPath = (home: string) =>
+  join(home, '.jinn-client', 'blocked-harnesses.json');
+
+function readBlocked(p: string): BlockedList {
+  return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as BlockedList) : [];
+}
+
+function writeBlocked(p: string, list: BlockedList): void {
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(list, null, 2) + '\n', 'utf8');
+}
+
+export function readBlockedPlugIns(home: string): BlockedList {
+  return readBlocked(blockedPlugInsPath(home));
+}
+
+export function addBlockedPlugIn(home: string, pkg: string): void {
+  const list = readBlockedPlugIns(home);
+  if (!list.includes(pkg)) {
+    list.push(pkg);
+    writeBlocked(blockedPlugInsPath(home), list);
+  }
+}
+
+export function readBlockedHarnesses(home: string): BlockedList {
+  return readBlocked(blockedHarnessesPath(home));
+}
+
+export function addBlockedHarness(home: string, pkg: string): void {
+  const list = readBlockedHarnesses(home);
+  if (!list.includes(pkg)) {
+    list.push(pkg);
+    writeBlocked(blockedHarnessesPath(home), list);
+  }
+}
