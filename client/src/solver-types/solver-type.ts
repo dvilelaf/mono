@@ -4,6 +4,7 @@
  */
 
 import type { TaskGenerator } from '../tasks/sources.js';
+import type { PredictionV1LiveConfig } from './prediction-v1-auto.js';
 
 /** Overlay fields merged into Task when posting from --spec-file. */
 export type ParsedSpecOverlay = {
@@ -42,6 +43,12 @@ export interface TestnetAutoContext {
    * one cadence — no daemon restart.
    */
   getPredictionRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
+  /**
+   * Live prediction.v1 launcher config getter. The Polymarket generator reads
+   * this inside each tick so Launcher PATCH edits hot-apply without daemon
+   * restart or generator recreation.
+   */
+  getPredictionV1Config?: () => PredictionV1LiveConfig;
   /**
    * Override the prediction.v1 Polymarket submission window (ms).
    * The generator default applies when unset.

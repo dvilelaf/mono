@@ -53,6 +53,12 @@ export interface LauncherRoutesDeps extends Omit<GatherLauncherStatusDeps, 'conf
    * `/v1/launcher/status` read.
    */
   onSolverNetsUpdated?: (solverNets: Record<string, Record<string, unknown>>) => void;
+  /**
+   * Hot-apply hook for top-level generator config keys. The route persists
+   * these keys to disk, then calls this hook so the running daemon's live
+   * config object observes the same values before the next generator tick.
+   */
+  onConfigValuesUpdated?: (values: Record<string, unknown>) => void;
 }
 
 const MIN_LIMIT = 1;
@@ -212,6 +218,9 @@ export function addLauncherRoutes(app: Hono, deps: LauncherRoutesDeps): void {
       // per-tick config reads (no restart needed; spec §5.2).
       for (const [key, value] of Object.entries(generatorPatch)) {
         persistConfigValue(key, value, configPath);
+      }
+      if (Object.keys(generatorPatch).length > 0) {
+        deps.onConfigValuesUpdated?.(generatorPatch);
       }
     } catch (err) {
       return c.json(

@@ -8,6 +8,7 @@ import { predictionV1 } from './prediction-v1.js';
 import { predictionApyV0 } from './prediction-apy-v0.js';
 import { learnerLoopTest } from './learner-loop-test.js';
 import type { SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
+import type { PredictionV1LiveConfig } from './prediction-v1-auto.js';
 
 export type { ParsedSpecOverlay, ParseDeps, SolverTypeDefinition, TestnetAutoContext } from './solver-type.js';
 export { PREDICTION_V1_KIND } from './constants.js';
@@ -51,6 +52,8 @@ export function collectTestnetAutoTaskGenerators(opts: {
    * See spec/2026-05-05-launcher-role-and-mode.md §5.2 (hot-spawn).
    */
   getPredictionRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
+  /** Live prediction.v1 launcher config getter for hot-apply PATCH edits. */
+  getPredictionV1Config?: () => PredictionV1LiveConfig;
   /** Override prediction.v1 submission window (ms). */
   predictionV1WindowMs?: number;
   /** Override prediction.v1 Polymarket generator cadence (ms). */
@@ -78,6 +81,7 @@ export function collectTestnetAutoTaskGenerators(opts: {
     safeAddress: opts.safeAddress,
     agentPrivateKey: opts.agentPrivateKey,
     getPredictionRoles: opts.getPredictionRoles,
+    getPredictionV1Config: opts.getPredictionV1Config,
     predictionV1WindowMs: opts.predictionV1WindowMs,
     predictionV1CadenceMs: opts.predictionV1CadenceMs,
     predictionV1MaxNewRoundsPerPoll: opts.predictionV1MaxNewRoundsPerPoll,
@@ -94,7 +98,24 @@ export function collectTestnetAutoTaskGenerators(opts: {
     const g = entry.buildGenerator?.(genConfig as never);
     if (g) {
       generators.push({ solverType: entry.solverType, generator: g });
-      logLines.push(`[main] auto-task generator enabled: ${entry.solverType} (testnet)`);
+      if (entry.solverType === 'prediction.v1') {
+        const roles = opts.getPredictionRoles?.();
+        if (!roles) {
+          logLines.push(
+            `[main] auto-task generator registered: ${entry.solverType} (testnet; ungated direct config)`,
+          );
+        } else if (roles.includes('launching')) {
+          logLines.push(
+            `[main] auto-task generator active: ${entry.solverType} (testnet; launching role present)`,
+          );
+        } else {
+          logLines.push(
+            `[main] auto-task generator registered: ${entry.solverType} (testnet; inactive until launching role present)`,
+          );
+        }
+      } else {
+        logLines.push(`[main] auto-task generator active: ${entry.solverType} (testnet)`);
+      }
     }
   }
   return { generators, logLines };

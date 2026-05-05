@@ -538,8 +538,9 @@ describe('loadConfig solverNets roles migration', () => {
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'evaluating']);
   });
 
-  it('default config seeds prediction with roles: [solving] when no file is provided', () => {
-    const cfg = loadConfig();
+  it('default config seeds prediction with roles: [solving] when no SolverNet config is provided', async () => {
+    const configPath = await writeConfigFile({});
+    const cfg = loadConfig(configPath);
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
   });
 });

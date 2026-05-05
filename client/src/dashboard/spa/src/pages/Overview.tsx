@@ -43,7 +43,7 @@ interface OverviewStatusV1 {
       solverNet?: {
         name?: string;
         enabled?: boolean;
-        roles?: Array<'solving' | 'evaluating'>;
+        roles?: string[];
       };
     };
     operatorError?: string;
@@ -62,6 +62,12 @@ function formatEth(wei?: string): string {
   }
 }
 
+function operatorVisibleRoles(roles?: string[]): Array<'solving' | 'evaluating'> {
+  return (roles ?? []).filter(
+    (role): role is 'solving' | 'evaluating' => role === 'solving' || role === 'evaluating',
+  );
+}
+
 export function OverviewPage(): JSX.Element {
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -70,12 +76,11 @@ export function OverviewPage(): JSX.Element {
   });
 
   const operator = status?.predictionV1?.operator;
-  // `solverNet.enabled` is the canonical opt-in signal coming from
-  // `PredictionOperatorStatus.solverNet.enabled`, which mirrors
-  // `config.solverNets.<name>.enabled`. Treat any enabled SolverNet as
-  // opted-in regardless of role (solving / evaluating); the future
-  // multi-role surface (jinn-mono-l2zl.15.4.8) keeps the same predicate.
-  const operatorEnabled = operator?.solverNet?.enabled === true;
+  const operatorRoles = operatorVisibleRoles(operator?.solverNet?.roles);
+  // `roles[]` is the canonical operator participation signal. Launcher mode
+  // owns `launching`, so Overview only treats solving/evaluating as visible
+  // operator roles and ignores the legacy `solverNet.enabled` flag.
+  const operatorParticipating = operatorRoles.length > 0;
   const totals = {
     tasks: status?.predictionV1?.totals?.observedTasks ?? 0,
     active: status?.predictionV1?.totals?.activeTaskRuns ?? 0,
@@ -122,17 +127,14 @@ export function OverviewPage(): JSX.Element {
 
       {/*
        * Operator-side state vs. empty-state — strictly mutually exclusive.
-       * Show OperatorCard whenever the operator has toggled the SolverNet
-       * on, regardless of role; show the "Pick a SolverNet" prompt only
-       * when no SolverNet is enabled. The operator-status payload does
-       * not currently expose role (see jinn-mono-l2zl.15.4.8 for the
-       * upcoming multi-role surface), so we render the default 'solving'
-       * label until that lands.
+       * Show OperatorCard whenever the operator has solving/evaluating roles;
+       * show the "Pick a SolverNet" prompt only when no operator-visible role
+       * is active.
        */}
-      {operatorEnabled ? (
+      {operatorParticipating ? (
         <OperatorCard
-          name="prediction"
-          roles={operator?.solverNet?.roles ?? ['solving']}
+          name={operator?.solverNet?.name ?? 'prediction'}
+          roles={operatorRoles}
           state="live"
           waitingMessage={operator?.nextAction?.description}
         />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SectionCard } from '../../components/SectionCard.js';
 import { ConfigField } from '../../components/ConfigField.js';
 
@@ -62,40 +62,58 @@ export function GeneratorConfigSection({
   config,
   onSave,
 }: GeneratorConfigSectionProps): JSX.Element {
+  const [baseline, setBaseline] = useState<GeneratorConfig>(config);
   const [draft, setDraft] = useState<GeneratorConfig>(config);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBaseline(config);
+    setDraft(config);
+    setError(null);
+    setSuccess(null);
+  }, [config]);
+
+  const updateDraft = (patch: Partial<GeneratorConfig>): void => {
+    setDraft((current) => ({ ...current, ...patch }));
+    setError(null);
+    setSuccess(null);
+  };
 
   const dirty =
-    draft.cadenceMs !== config.cadenceMs ||
-    draft.maxNewRoundsPerPoll !== config.maxNewRoundsPerPoll ||
-    draft.maxNewRoundsPerDay !== config.maxNewRoundsPerDay ||
-    draft.maxOpenRounds !== config.maxOpenRounds ||
-    draft.windowMs !== config.windowMs ||
-    draft.resolveGapMs !== config.resolveGapMs ||
-    !arraysEqual(draft.allowlistConditionIds, config.allowlistConditionIds) ||
-    !arraysEqual(draft.blocklistConditionIds, config.blocklistConditionIds);
+    draft.cadenceMs !== baseline.cadenceMs ||
+    draft.maxNewRoundsPerPoll !== baseline.maxNewRoundsPerPoll ||
+    draft.maxNewRoundsPerDay !== baseline.maxNewRoundsPerDay ||
+    draft.maxOpenRounds !== baseline.maxOpenRounds ||
+    draft.windowMs !== baseline.windowMs ||
+    draft.resolveGapMs !== baseline.resolveGapMs ||
+    !arraysEqual(draft.allowlistConditionIds, baseline.allowlistConditionIds) ||
+    !arraysEqual(draft.blocklistConditionIds, baseline.blocklistConditionIds);
 
   const onSubmit = async (): Promise<void> => {
     setSaving(true);
     setError(null);
+    setSuccess(null);
     try {
       const patch: Partial<GeneratorConfig> = {};
-      if (draft.cadenceMs !== config.cadenceMs) patch.cadenceMs = draft.cadenceMs;
-      if (draft.maxNewRoundsPerPoll !== config.maxNewRoundsPerPoll)
+      if (draft.cadenceMs !== baseline.cadenceMs) patch.cadenceMs = draft.cadenceMs;
+      if (draft.maxNewRoundsPerPoll !== baseline.maxNewRoundsPerPoll)
         patch.maxNewRoundsPerPoll = draft.maxNewRoundsPerPoll;
-      if (draft.maxNewRoundsPerDay !== config.maxNewRoundsPerDay)
+      if (draft.maxNewRoundsPerDay !== baseline.maxNewRoundsPerDay)
         patch.maxNewRoundsPerDay = draft.maxNewRoundsPerDay;
-      if (draft.maxOpenRounds !== config.maxOpenRounds)
+      if (draft.maxOpenRounds !== baseline.maxOpenRounds)
         patch.maxOpenRounds = draft.maxOpenRounds;
-      if (draft.windowMs !== config.windowMs) patch.windowMs = draft.windowMs;
-      if (draft.resolveGapMs !== config.resolveGapMs)
+      if (draft.windowMs !== baseline.windowMs) patch.windowMs = draft.windowMs;
+      if (draft.resolveGapMs !== baseline.resolveGapMs)
         patch.resolveGapMs = draft.resolveGapMs;
-      if (!arraysEqual(draft.allowlistConditionIds, config.allowlistConditionIds))
+      if (!arraysEqual(draft.allowlistConditionIds, baseline.allowlistConditionIds))
         patch.allowlistConditionIds = draft.allowlistConditionIds;
-      if (!arraysEqual(draft.blocklistConditionIds, config.blocklistConditionIds))
+      if (!arraysEqual(draft.blocklistConditionIds, baseline.blocklistConditionIds))
         patch.blocklistConditionIds = draft.blocklistConditionIds;
       await onSave({ generator: patch });
+      setBaseline(draft);
+      setSuccess(`${netName} generator saved`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -114,7 +132,7 @@ export function GeneratorConfigSection({
           aria-label="Cadence"
           type="number"
           value={draft.cadenceMs}
-          onChange={(e) => setDraft({ ...draft, cadenceMs: Number(e.target.value) })}
+          onChange={(e) => updateDraft({ cadenceMs: Number(e.target.value) })}
           style={inputStyle}
         />
       </ConfigField>
@@ -124,7 +142,7 @@ export function GeneratorConfigSection({
           type="number"
           value={draft.maxNewRoundsPerPoll}
           onChange={(e) =>
-            setDraft({ ...draft, maxNewRoundsPerPoll: Number(e.target.value) })
+            updateDraft({ maxNewRoundsPerPoll: Number(e.target.value) })
           }
           style={inputStyle}
         />
@@ -135,7 +153,7 @@ export function GeneratorConfigSection({
           type="number"
           value={draft.maxNewRoundsPerDay}
           onChange={(e) =>
-            setDraft({ ...draft, maxNewRoundsPerDay: Number(e.target.value) })
+            updateDraft({ maxNewRoundsPerDay: Number(e.target.value) })
           }
           style={inputStyle}
         />
@@ -145,7 +163,7 @@ export function GeneratorConfigSection({
           aria-label="Max open rounds"
           type="number"
           value={draft.maxOpenRounds}
-          onChange={(e) => setDraft({ ...draft, maxOpenRounds: Number(e.target.value) })}
+          onChange={(e) => updateDraft({ maxOpenRounds: Number(e.target.value) })}
           style={inputStyle}
         />
       </ConfigField>
@@ -154,7 +172,7 @@ export function GeneratorConfigSection({
           aria-label="Window"
           type="number"
           value={draft.windowMs}
-          onChange={(e) => setDraft({ ...draft, windowMs: Number(e.target.value) })}
+          onChange={(e) => updateDraft({ windowMs: Number(e.target.value) })}
           style={inputStyle}
         />
       </ConfigField>
@@ -163,7 +181,7 @@ export function GeneratorConfigSection({
           aria-label="Resolve gap"
           type="number"
           value={draft.resolveGapMs}
-          onChange={(e) => setDraft({ ...draft, resolveGapMs: Number(e.target.value) })}
+          onChange={(e) => updateDraft({ resolveGapMs: Number(e.target.value) })}
           style={inputStyle}
         />
       </ConfigField>
@@ -176,7 +194,7 @@ export function GeneratorConfigSection({
           type="text"
           value={draft.allowlistConditionIds.join(',')}
           onChange={(e) =>
-            setDraft({ ...draft, allowlistConditionIds: parseCsv(e.target.value) })
+            updateDraft({ allowlistConditionIds: parseCsv(e.target.value) })
           }
           style={inputStyle}
         />
@@ -190,7 +208,7 @@ export function GeneratorConfigSection({
           type="text"
           value={draft.blocklistConditionIds.join(',')}
           onChange={(e) =>
-            setDraft({ ...draft, blocklistConditionIds: parseCsv(e.target.value) })
+            updateDraft({ blocklistConditionIds: parseCsv(e.target.value) })
           }
           style={inputStyle}
         />
@@ -206,6 +224,19 @@ export function GeneratorConfigSection({
           }}
         >
           {error}
+        </p>
+      )}
+      {success && (
+        <p
+          role="status"
+          style={{
+            color: 'var(--vow-green)',
+            marginTop: '12px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+          }}
+        >
+          {success}
         </p>
       )}
       <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>

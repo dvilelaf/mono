@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LauncherConfigurationPage } from './LauncherConfiguration.js';
 import { api } from '../api/client.js';
@@ -89,5 +89,47 @@ describe('LauncherConfigurationPage', () => {
     wrap(<LauncherConfigurationPage />);
     await waitFor(() => expect(screen.queryByText(/prediction generator/i)).toBeTruthy());
     expect(screen.queryByText(/forecast generator/i)).toBeTruthy();
+  });
+
+  it('shows pending and success feedback when generator config saves', async () => {
+    vi.mocked(api.fetchLauncherStatus).mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-05-05T15:00:00Z',
+      nets: [
+        {
+          name: 'prediction',
+          generator: { state: 'active', cadenceMs: 21_600_000, stale: false },
+          openTasks: 0,
+          budget: {
+            safeAddress: '0xabc',
+            safeBalanceWei: '0',
+            reservedBudgetWei: '0',
+          },
+        },
+      ],
+    });
+    let resolvePatch: () => void = () => undefined;
+    vi.mocked(api.patchLauncherSolverNet).mockReturnValue(
+      new Promise((resolve) => {
+        resolvePatch = () =>
+          resolve({
+            ok: true,
+            name: 'prediction',
+            roles: ['launching'],
+            generator: { cadenceMs: 120_000 },
+          });
+      }),
+    );
+
+    wrap(<LauncherConfigurationPage />);
+    await waitFor(() => expect(screen.queryByLabelText(/^Cadence$/i)).toBeTruthy());
+    fireEvent.change(screen.getByLabelText(/^Cadence$/i), { target: { value: '120000' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    expect(screen.getByRole('button', { name: /Saving/i })).toBeTruthy();
+    resolvePatch();
+    await waitFor(() =>
+      expect(screen.queryByText(/prediction generator saved/i)).toBeTruthy(),
+    );
   });
 });

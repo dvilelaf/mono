@@ -83,6 +83,8 @@ function buildTestApp(args: BuildArgs): {
   readPersistedConfig: () => Record<string, unknown>;
   /** Returns the most recent solverNets payload passed to onSolverNetsUpdated. */
   readNotifiedSolverNets: () => Record<string, Record<string, unknown>> | undefined;
+  /** Returns the mutable live config view after hot-apply hooks run. */
+  readLiveConfig: () => Record<string, unknown>;
 } {
   const app = new Hono();
   if (args.withAuth ?? true) {
@@ -101,6 +103,7 @@ function buildTestApp(args: BuildArgs): {
   // getConfig() (the production wiring does the same thing — main.ts mutates
   // `config.solverNets` in place from the onSolverNetsUpdated hook).
   let liveSolverNets: JinnConfig['solverNets'] | undefined = args.solverNets ?? {};
+  const liveConfig: Record<string, unknown> = { solverNets: liveSolverNets };
   const persistShim = buildPersistShim();
   let lastNotified: Record<string, Record<string, unknown>> | undefined;
   addLauncherRoutes(app, {
@@ -123,6 +126,10 @@ function buildTestApp(args: BuildArgs): {
       // post-edit object so subsequent reads (status, follow-up patches)
       // see the fresh state.
       liveSolverNets = solverNets as JinnConfig['solverNets'];
+      liveConfig['solverNets'] = liveSolverNets;
+    },
+    onConfigValuesUpdated: (values) => {
+      Object.assign(liveConfig, values);
     },
   });
   return {
@@ -131,6 +138,7 @@ function buildTestApp(args: BuildArgs): {
     fetchSpy,
     readPersistedConfig: persistShim.read,
     readNotifiedSolverNets: () => lastNotified,
+    readLiveConfig: () => ({ ...liveConfig }),
   };
 }
 
@@ -526,7 +534,7 @@ describe('PATCH /v1/launcher/solvernets/:name', () => {
   });
 
   it('persists only generator-config keys when launching is omitted', async () => {
-    const { app, token, readPersistedConfig, readNotifiedSolverNets } = buildTestApp({
+    const { app, token, readPersistedConfig, readNotifiedSolverNets, readLiveConfig } = buildTestApp({
       solverNets: { prediction: launchingAndSolvingNet },
     });
     const res = await app.request('/v1/launcher/solvernets/prediction', {
@@ -540,6 +548,8 @@ describe('PATCH /v1/launcher/solvernets/:name', () => {
     const persisted = readPersistedConfig();
     expect(persisted['predictionV1AllowlistConditionIds']).toEqual(['0xabc', '0xdef']);
     expect(persisted['predictionV1WindowMs']).toBe(90_000);
+    expect(readLiveConfig()['predictionV1AllowlistConditionIds']).toEqual(['0xabc', '0xdef']);
+    expect(readLiveConfig()['predictionV1WindowMs']).toBe(90_000);
     // Roles weren't touched → no solverNets write, no cache invalidation.
     expect(persisted['solverNets']).toBeUndefined();
     expect(readNotifiedSolverNets()).toBeUndefined();

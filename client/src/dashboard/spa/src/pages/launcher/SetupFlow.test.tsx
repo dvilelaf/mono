@@ -38,7 +38,9 @@ describe('SetupFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 
     // Step 3: budget plan.
-    expect(screen.getByText(/funds approximately/i)).toBeTruthy();
+    expect(screen.getByText(/Safe balance 1.0000 ETH is available/i)).toBeTruthy();
+    expect(screen.queryByText(/approximately N Tasks/i)).toBeNull();
+    expect(screen.getByText(/unknown until the current per-attempt payment/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 
     // Step 4: confirm + save.

@@ -241,7 +241,31 @@ describe('SOLVER_TYPES manifest', () => {
       env: {},
     });
     expect(generators.map((g) => g.solverType)).toContain('prediction.v1');
-    expect(logLines.some((l) => l.includes('prediction.v1'))).toBe(true);
+    expect(logLines.some((l) => l.includes('auto-task generator registered: prediction.v1'))).toBe(true);
+  });
+
+  it('logs prediction.v1 generator startup as active only when launching role is present', () => {
+    const inactive = collectTestnetAutoTaskGenerators({
+      network: 'testnet',
+      rpcUrl: 'https://sepolia.base.org',
+      autoTasksDisabled: false,
+      env: {},
+      getPredictionRoles: () => ['solving'],
+    });
+    expect(inactive.logLines).toContain(
+      '[main] auto-task generator registered: prediction.v1 (testnet; inactive until launching role present)',
+    );
+
+    const active = collectTestnetAutoTaskGenerators({
+      network: 'testnet',
+      rpcUrl: 'https://sepolia.base.org',
+      autoTasksDisabled: false,
+      env: {},
+      getPredictionRoles: () => ['launching'],
+    });
+    expect(active.logLines).toContain(
+      '[main] auto-task generator active: prediction.v1 (testnet; launching role present)',
+    );
   });
 
   it('collectTestnetAutoTaskGenerators keeps disable-all ahead of role-gated spawn', () => {

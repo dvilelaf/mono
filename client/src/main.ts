@@ -73,6 +73,7 @@ import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
 import { GeneratedTaskSource, StaticConfiguredTaskSource } from './tasks/sources.js';
+import { generatedTaskSourceSupported } from './tasks/generated-source-gate.js';
 import { checkRpcNetwork, logRpcLocalDevToStderr, rpcNetworkFailureHint } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
 import { openBrowser } from './cli/open-browser.js';
@@ -849,6 +850,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           config.solverNets = solverNets as typeof config.solverNets;
           invalidatePredictionOperatorStatusCache(config);
         },
+        onConfigValuesUpdated: (values) => {
+          for (const [key, value] of Object.entries(values)) {
+            (config as unknown as Record<string, unknown>)[key] = value;
+          }
+        },
         getGeneratorState: (netName) => {
           if (netName !== 'prediction') return undefined;
           return predictionGeneratorRef?.getState();
@@ -1439,6 +1445,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // launcher mode in/out via the operator UX takes effect within one
     // generator cadence — no daemon restart required.
     getPredictionRoles: () => config.solverNets?.prediction?.roles ?? [],
+    getPredictionV1Config: () => ({
+      submissionWindowMs: config.predictionV1WindowMs,
+      cadenceMs: config.predictionV1CadenceMs,
+      maxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,
+      maxNewRoundsPerDay: config.predictionV1MaxNewRoundsPerDay,
+      maxOpenRounds: config.predictionV1MaxOpenRounds,
+      allowlistConditionIds: config.predictionV1AllowlistConditionIds,
+      blocklistConditionIds: config.predictionV1BlocklistConditionIds,
+      resolveGapMs: config.predictionV1ResolveGapMs,
+    }),
     predictionV1WindowMs: config.predictionV1WindowMs,
     predictionV1CadenceMs: config.predictionV1CadenceMs,
     predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,
@@ -1469,9 +1485,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const taskSources = [
     new StaticConfiguredTaskSource(config.tasks),
     ...autoTaskGenerators
-      .filter(({ solverType }) =>
-        solverNetRegistry.forSolverType(solverType, 'restoration')?.taskGenerator.enabled,
-      )
+      .filter(({ solverType }) => generatedTaskSourceSupported(config.solverNets, solverType))
       .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
   ];
 

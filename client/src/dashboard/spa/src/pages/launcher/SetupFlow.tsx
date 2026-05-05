@@ -54,6 +54,18 @@ function formatEth(wei: string): string {
   }
 }
 
+function describeBudgetRunway(defaults: GeneratorDefaults): string {
+  const dailyCap =
+    Number.isFinite(defaults.maxNewRoundsPerDay) && defaults.maxNewRoundsPerDay > 0
+      ? `${defaults.maxNewRoundsPerDay} Tasks/day`
+      : 'an unknown daily Task cap';
+  const openCap =
+    Number.isFinite(defaults.maxOpenRounds) && defaults.maxOpenRounds > 0
+      ? `${defaults.maxOpenRounds} open Tasks`
+      : 'an unknown open-Task cap';
+  return `Approximate task count is unknown until the current per-attempt payment is reported; these defaults allow up to ${dailyCap} and ${openCap}.`;
+}
+
 const buttonBase = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '14px',
@@ -122,6 +134,7 @@ export function SetupFlow({
   const cadenceMin = Math.round(defaults.cadenceMs / 60_000);
   const safeEth = formatEth(safeBalanceWei);
   const scoreboard = scoreboardFor(netName);
+  const budgetRunway = describeBudgetRunway(defaults);
 
   return (
     <SectionCard
@@ -166,8 +179,8 @@ export function SetupFlow({
         <div>
           <h2 style={stepHeading}>Budget plan</h2>
           <p style={stepBody}>
-            Safe balance {safeEth} ETH funds approximately N Tasks at the current per-attempt
-            payment. Top up the Launcher Safe to extend the runway.
+            Safe balance {safeEth} ETH is available. {budgetRunway} Top up the Launcher Safe to
+            extend the runway.
           </p>
         </div>
       )}

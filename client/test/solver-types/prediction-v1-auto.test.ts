@@ -171,6 +171,33 @@ describe('prediction.v1 auto-generator', () => {
     expect((fetchImpl as any).mock.calls.filter((call: unknown[]) => String(call[0]).includes('/markets'))).toHaveLength(3);
   });
 
+  it('hot-applies cadence changes on the same generator instance', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [market('abc', 'yes-abc')],
+      { 'yes-abc': book('0.60', '0.64') },
+    );
+    let liveConfig = { cadenceMs: 6 * 60 * 60 * 1000 };
+    const generator = makePredictionV1Generator({
+      fetchImpl,
+      cadenceMs: 6 * 60 * 60 * 1000,
+      getConfig: () => liveConfig,
+    });
+
+    await generator();
+    await generator();
+    const marketListCalls = () =>
+      (fetchImpl as any).mock.calls.filter((call: unknown[]) => new URL(String(call[0])).pathname === '/markets');
+    expect(marketListCalls()).toHaveLength(1);
+
+    liveConfig = { cadenceMs: 0 };
+    await generator();
+
+    expect(marketListCalls()).toHaveLength(2);
+    expect(generator.getState().cadenceMs).toBe(0);
+  });
+
   it('prioritizes valid allowlisted markets when per-poll caps bind', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -196,6 +223,70 @@ describe('prediction.v1 auto-generator', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xmanual' } });
     expect(tasks![0].eligibility).toMatchObject({ manualAllowlistHit: true });
+  });
+
+  it('hot-applies caps, allow/block lists, and submission window between ticks', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const fetchImpl = fetchFixture(
+      [
+        market('liquid', 'yes-liquid', { liquidity: '90000' }),
+        market('manual', 'yes-manual', { liquidity: '12000' }),
+        market('later', 'yes-later', { liquidity: '13000' }),
+      ],
+      {
+        'yes-liquid': book('0.60', '0.64'),
+        'yes-manual': book('0.51', '0.55'),
+        'yes-later': book('0.52', '0.56'),
+      },
+    );
+    let liveConfig = {
+      cadenceMs: 0,
+      maxNewRoundsPerPoll: 1,
+      maxNewRoundsPerDay: 5,
+      maxOpenRounds: 5,
+      allowlistConditionIds: ['0xmanual'],
+      blocklistConditionIds: ['0xlater'],
+      submissionWindowMs: 10_000,
+    };
+    const generator = makePredictionV1Generator({
+      fetchImpl,
+      getConfig: () => liveConfig,
+    });
+
+    const first = await generator();
+    expect(first).toHaveLength(1);
+    expect(first![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xmanual' } });
+    expect(first![0].window!.endTs - first![0].window!.startTs).toBe(10_000);
+    expect(first![0].eligibility).toMatchObject({
+      generatorCadenceMs: 0,
+      maxNewRoundsPerPoll: 1,
+      maxNewRoundsPerDay: 5,
+      maxOpenRounds: 5,
+      manualAllowlistHit: true,
+    });
+
+    liveConfig = {
+      cadenceMs: 0,
+      maxNewRoundsPerPoll: 2,
+      maxNewRoundsPerDay: 6,
+      maxOpenRounds: 6,
+      allowlistConditionIds: ['0xlater'],
+      blocklistConditionIds: ['0xliquid'],
+      submissionWindowMs: 20_000,
+    };
+    const second = await generator();
+
+    expect(second).toHaveLength(1);
+    expect(second![0].spec?.source).toMatchObject({ identifiers: { conditionId: '0xlater' } });
+    expect(second![0].window!.endTs - second![0].window!.startTs).toBe(20_000);
+    expect(second![0].eligibility).toMatchObject({
+      generatorCadenceMs: 0,
+      maxNewRoundsPerPoll: 2,
+      maxNewRoundsPerDay: 6,
+      maxOpenRounds: 6,
+      manualAllowlistHit: true,
+    });
   });
 
   it('keeps blocklist above allowlist and does not let allowlist bypass validation', async () => {

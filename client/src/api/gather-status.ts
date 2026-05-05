@@ -56,7 +56,7 @@ const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promis
  * The cache key is the live `JinnConfig` object reference. When the SPA
  * mutates `config.solverNets` in place via `onSolverNetsUpdated`
  * (see `main.ts`), the WeakMap still resolves to the previously-built
- * status — leaving Overview reading a stale `solverNet.enabled = false`
+ * status — leaving Overview reading stale operator metadata
  * even though the operator just toggled it on. Invalidating here keeps
  * the Overview gating in sync with the latest config without a daemon
  * restart. (jinn-mono-l2zl.15.4.12)
@@ -174,13 +174,35 @@ function predictionOperatorUnavailable(
 function narrowOperatorStatusForApi(
   status: PredictionOperatorStatus,
 ): PredictionOperatorStatusForApi {
+  const roles = status.solverNet.roles.filter(
+    (r): r is 'solving' | 'evaluating' => r === 'solving' || r === 'evaluating',
+  );
+  const hasOperatorRole = roles.length > 0;
+  const diagnostics = hasOperatorRole
+    ? status.diagnostics.filter((d) => d.code !== 'prediction_solvernet_disabled')
+    : status.diagnostics;
+  const disabledNextAction =
+    status.nextAction?.description === 'Enable the Prediction SolverNet before participating.';
+  const nextDiagnosticAction = diagnostics.find(
+    (d) => (d.severity === 'error' || d.severity === 'warning') && d.nextAction,
+  )?.nextAction;
+
   return {
     ...status,
+    ok: diagnostics.every((diagnostic) => diagnostic.severity !== 'error'),
+    diagnostics,
+    nextAction: hasOperatorRole && disabledNextAction
+      ? (nextDiagnosticAction ?? {
+          description: 'Waiting for Tasks. SolverNet active, Harness loaded; no incoming Tasks since startup.',
+        })
+      : status.nextAction,
     solverNet: {
       ...status.solverNet,
-      roles: status.solverNet.roles.filter(
-        (r): r is 'solving' | 'evaluating' => r === 'solving' || r === 'evaluating',
-      ),
+      // `roles[]` is canonical for operator participation. Preserve the
+      // legacy field for older consumers, but derive it from operator-visible
+      // roles so stale `enabled: false` configs do not hide active operators.
+      enabled: hasOperatorRole,
+      roles,
     },
   };
 }

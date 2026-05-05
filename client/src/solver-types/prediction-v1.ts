@@ -36,7 +36,9 @@ export const predictionV1: SolverTypeDefinition<PredictionV1AutoConfig> = {
       maxOpenRounds: ctx.predictionV1MaxOpenRounds ?? nonNegativeNumberEnv(ctx.env, 'JINN_PREDICTION_V1_MAX_OPEN_ROUNDS'),
       allowlistConditionIds: ctx.predictionV1AllowlistConditionIds ?? csvEnv(ctx.env, 'JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS'),
       blocklistConditionIds: ctx.predictionV1BlocklistConditionIds ?? csvEnv(ctx.env, 'JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS'),
+      resolveGapMs: ctx.predictionV1ResolveGapMs,
       getRoles: ctx.getPredictionRoles,
+      getConfig: ctx.getPredictionV1Config,
     };
   },
   ui: {

@@ -15,7 +15,7 @@ import {
   type PolymarketClientConfig,
 } from '../venues/polymarket/client.js';
 
-export interface PredictionV1AutoConfig extends PolymarketClientConfig {
+export interface PredictionV1LiveConfig {
   minTimeToResolutionHours?: number;
   maxTimeToResolutionHours?: number;
   minLiquidityUsd?: string;
@@ -32,6 +32,10 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
   agentPrivateKey?: `0x${string}`;
   allowlistConditionIds?: string[];
   blocklistConditionIds?: string[];
+  resolveGapMs?: number;
+}
+
+export interface PredictionV1AutoConfig extends PolymarketClientConfig, PredictionV1LiveConfig {
   /**
    * Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
    * The daemon always creates this generator; if `getRoles` is provided and
@@ -42,6 +46,13 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
    * the generator polls unconditionally, preserving the prior public API.
    */
   getRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
+  /**
+   * Live launcher config getter. Values returned here override construction
+   * values on each tick, so Launcher PATCH edits hot-apply without recreating
+   * the generator. Undefined values are ignored, preserving env/constructor
+   * defaults until a real value is configured.
+   */
+  getConfig?: () => PredictionV1LiveConfig;
 }
 
 interface EligibleMarket {
@@ -92,8 +103,6 @@ const DEFAULTS = {
 export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): PredictionV1GeneratorTick {
   const postedAtByCondition = new Map<string, number>();
   const postedCountByDay = new Map<string, number>();
-  const allowlist = conditionIdSet(config.allowlistConditionIds);
-  const blocklist = conditionIdSet(config.blocklistConditionIds);
   let lastPollStartedAt = 0;
   // Mutable state, observable via getState(). The role-gate early-return
   // intentionally does not touch this — a closed gate is "no poll happened",
@@ -101,17 +110,18 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
   const state: PredictionV1GeneratorState = {};
 
   const tick = async (): Promise<Task[] | null> => {
+    const current = currentConfig(config);
     // Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
     // Always-spawn loop, tick-time gate: if `getRoles` is supplied and the
     // operator's `solverNets.prediction.roles` does not include 'launching',
     // skip the poll entirely. Cadence bookkeeping is intentionally NOT
     // updated here — leaving `lastPollStartedAt` untouched means the very
     // first tick after the operator flips 'launching' on will run.
-    if (config.getRoles && !config.getRoles().includes('launching')) {
+    if (current.getRoles && !current.getRoles().includes('launching')) {
       return null;
     }
     const now = Date.now();
-    const cadenceMs = config.cadenceMs ?? DEFAULTS.cadenceMs;
+    const cadenceMs = current.cadenceMs ?? DEFAULTS.cadenceMs;
     if (cadenceMs > 0 && lastPollStartedAt > 0 && now - lastPollStartedAt < cadenceMs) {
       return null;
     }
@@ -122,9 +132,9 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
     pruneOpenRounds(postedAtByCondition, now);
     const dayKey = new Date(now).toISOString().slice(0, 10);
     const todayCount = postedCountByDay.get(dayKey) ?? 0;
-    const dailyRemaining = Math.max(0, (config.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay) - todayCount);
-    const openRemaining = Math.max(0, (config.maxOpenRounds ?? DEFAULTS.maxOpenRounds) - postedAtByCondition.size);
-    const pollLimit = Math.min(config.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll, dailyRemaining, openRemaining);
+    const dailyRemaining = Math.max(0, (current.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay) - todayCount);
+    const openRemaining = Math.max(0, (current.maxOpenRounds ?? DEFAULTS.maxOpenRounds) - postedAtByCondition.size);
+    const pollLimit = Math.min(current.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll, dailyRemaining, openRemaining);
     if (pollLimit <= 0) {
       state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
       state.lastError = undefined;
@@ -133,7 +143,7 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
 
     let candidates: MarketCandidate[];
     try {
-      candidates = await listMarketCandidates({ ...config, limit: 250 });
+      candidates = await listMarketCandidates({ ...current, limit: 250 });
     } catch (err) {
       // Preserve existing swallow-and-return-null contract; record the error
       // for getState() so the launcher status endpoint can render it.
@@ -145,6 +155,8 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
       return null;
     }
 
+    const allowlist = conditionIdSet(current.allowlistConditionIds);
+    const blocklist = conditionIdSet(current.blocklistConditionIds);
     const eligible: EligibleMarket[] = [];
     let evaluatedCount = 0;
     for (const market of prioritizeAllowlisted(candidates, allowlist)) {
@@ -152,7 +164,7 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
       const conditionId = normalizeConditionId(market.conditionId);
       if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
       evaluatedCount += 1;
-      const checked = await checkMarketEligibility(market, config, now);
+      const checked = await checkMarketEligibility(market, current, now);
       if (checked) eligible.push(checked);
     }
 
@@ -171,7 +183,7 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
     const selected = eligible.slice(0, pollLimit);
     const tasks: Task[] = [];
     for (const entry of selected) {
-      const task = await buildTask(entry, config, now);
+      const task = await buildTask(entry, current, now);
       postedAtByCondition.set(normalizeConditionId(entry.market.conditionId), Date.parse(entry.market.endTime));
       tasks.push(task);
     }
@@ -194,15 +206,28 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): 
 
   return Object.assign(tick, {
     getState(): PredictionV1GeneratorStateSnapshot {
+      const current = currentConfig(config);
       // Return a defensive copy so callers can't mutate internal state.
       return {
         lastPollAt: state.lastPollAt,
         lastPollSummary: state.lastPollSummary ? { ...state.lastPollSummary } : undefined,
         lastError: state.lastError ? { ...state.lastError } : undefined,
-        cadenceMs: config.cadenceMs ?? DEFAULTS.cadenceMs,
+        cadenceMs: current.cadenceMs ?? DEFAULTS.cadenceMs,
       };
     },
   });
+}
+
+function currentConfig(config: PredictionV1AutoConfig): PredictionV1AutoConfig {
+  const live = config.getConfig?.();
+  if (!live) return config;
+  const merged: PredictionV1AutoConfig = { ...config };
+  for (const [key, value] of Object.entries(live) as Array<[keyof PredictionV1LiveConfig, unknown]>) {
+    if (value !== undefined) {
+      (merged as Record<string, unknown>)[key] = value;
+    }
+  }
+  return merged;
 }
 
 async function checkMarketEligibility(
