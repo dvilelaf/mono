@@ -317,7 +317,8 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     let body: {
       enabled?: unknown;
       solverType?: unknown; // deprecated; accepted for one release cycle
-      role?: unknown;
+      role?: unknown;       // legacy singular form, accepted for one release cycle
+      roles?: unknown;
       harness?: unknown;
       model?: unknown;
       plugins?: unknown;
@@ -329,7 +330,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
 
     const editableFields: Array<keyof typeof body> = [
-      'enabled', 'solverType', 'role', 'harness', 'model', 'plugins',
+      'enabled', 'solverType', 'role', 'roles', 'harness', 'model', 'plugins',
     ];
     if (!editableFields.some((f) => body[f] !== undefined)) {
       return c.json({ error: 'invalid_body', detail: 'must include at least one editable field' }, 400);
@@ -345,8 +346,27 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 400);
     }
     const KNOWN_ROLES = ['solving', 'evaluating'];
-    if (body.role !== undefined && (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role))) {
-      return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
+    let normalizedRoles: string[] | undefined;
+    if (body.roles !== undefined) {
+      if (
+        !Array.isArray(body.roles) ||
+        body.roles.length === 0 ||
+        !body.roles.every((r): r is string => typeof r === 'string' && KNOWN_ROLES.includes(r))
+      ) {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`roles` must be a non-empty array of `solving` and/or `evaluating`',
+        }, 400);
+      }
+      // Deduplicate so the persisted shape is canonical even if the SPA double-includes a value.
+      normalizedRoles = Array.from(new Set(body.roles as string[]));
+    } else if (body.role !== undefined) {
+      // Legacy singular form. Accept it (operators on older config tooling),
+      // promote to the canonical roles array.
+      if (typeof body.role !== 'string' || !KNOWN_ROLES.includes(body.role)) {
+        return c.json({ error: 'invalid_body', detail: '`role` must be `solving` or `evaluating`' }, 400);
+      }
+      normalizedRoles = [body.role];
     }
     if (body.harness !== undefined && typeof body.harness !== 'string') {
       return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
@@ -387,7 +407,13 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
     if (body.enabled !== undefined) existing.enabled = body.enabled;
     if (body.solverType !== undefined) existing.solverType = body.solverType;
-    if (body.role !== undefined) existing.role = body.role;
+    if (normalizedRoles !== undefined) {
+      existing.roles = normalizedRoles;
+      // Strip any legacy singular `role` so the persisted shape is canonical.
+      // Eliminates ambiguity if a third-party tool reads the file and prefers
+      // `role` over `roles`.
+      delete existing['role'];
+    }
     if (body.harness !== undefined) existing.harness = body.harness;
     if (body.model !== undefined) existing.model = body.model;
     if (body.plugins !== undefined) existing.plugins = body.plugins;

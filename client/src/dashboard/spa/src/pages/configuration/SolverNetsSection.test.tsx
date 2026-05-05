@@ -30,7 +30,7 @@ describe('SolverNetsSection', () => {
       <QueryClientProvider client={qc}>
         <SolverNetsSection
           configByName={{
-            prediction: { enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] },
+            prediction: { enabled: false, roles: ['solving'], harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] },
           }}
           onSaved={() => undefined}
           onRestartPending={() => undefined}

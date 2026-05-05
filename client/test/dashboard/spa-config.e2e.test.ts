@@ -35,7 +35,7 @@ const RUNNING_BOOTSTRAP = {
   solverNets: {
     prediction: {
       enabled: true,
-      role: 'solving',
+      roles: ['solving'],
       harness: 'claude-code-learner',
       model: 'claude-haiku-4-5-20251001',
       plugins: ['jinn-prediction-plugin'],
@@ -50,9 +50,8 @@ const STATUS_PAYLOAD = {
     operator: {
       ok: true,
       enabled: true,
-      role: 'solving',
       diagnostics: [],
-      solverNet: { name: 'prediction', enabled: true },
+      solverNet: { name: 'prediction', enabled: true, roles: ['solving'] },
       nextAction: { description: 'Waiting for Tasks. SolverNet active, Harness loaded.' },
     },
     totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
@@ -145,7 +144,7 @@ async function mockDaemonApi(page: Page): Promise<void> {
         ok: true,
         restartRequired: true,
         name: 'prediction',
-        config: { enabled: true, role: 'evaluating' },
+        config: { enabled: true, roles: ['solving', 'evaluating'] },
       }),
     }),
   );
@@ -155,7 +154,7 @@ async function mockDaemonApi(page: Page): Promise<void> {
   );
 }
 
-test('operator opens Configuration, swaps SolverNet role, sees restart banner', async ({ page }) => {
+test('operator opens Configuration, enables Evaluator role alongside Solver, sees restart banner', async ({ page }) => {
   await mockDaemonApi(page);
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
 
@@ -167,9 +166,9 @@ test('operator opens Configuration, swaps SolverNet role, sees restart banner', 
   await expect(page.getByText(/solvernets/i).first()).toBeVisible();
 
   // Open the prediction net body (toggle is on by default per the mocked
-  // bootstrap), then click the Evaluating role and Save.
+  // bootstrap), then check the Evaluator box (Solver stays checked) and Save.
   await expect(page.getByText('prediction').first()).toBeVisible();
-  await page.getByRole('button', { name: /evaluating/i }).click();
+  await page.getByLabel('Evaluator').check();
   await page.getByRole('button', { name: /save changes/i }).click();
 
   // Restart banner appears across both tabs.

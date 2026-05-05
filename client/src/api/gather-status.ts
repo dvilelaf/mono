@@ -128,6 +128,13 @@ function predictionOperatorUnavailable(
     },
   };
 
+  // Roles are best-effort: an unavailable status path means the daemon
+  // could not load the SolverNet, so we surface whatever the operator has
+  // configured (post-migration) without trying to default further.
+  const netRoles = Array.isArray((net as { roles?: unknown } | undefined)?.roles)
+    ? ((net as { roles?: ('solving' | 'evaluating')[] }).roles ?? [])
+    : [];
+
   return {
     kind: 'prediction.v1.operatorStatus',
     ok: false,
@@ -136,6 +143,7 @@ function predictionOperatorUnavailable(
       name,
       enabled: net?.enabled ?? false,
       solverType: net?.solverType ?? 'prediction.v1',
+      roles: netRoles,
       harness: net?.harness,
       taskGeneratorEnabled: net?.taskGenerator.enabled ?? false,
     },

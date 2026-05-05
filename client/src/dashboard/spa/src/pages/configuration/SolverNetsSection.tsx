@@ -8,18 +8,29 @@ const STATE_RANK: Record<string, number> = { live: 0, available: 1, coming_soon:
 
 /**
  * The bootstrap response can return per-SolverNet config that's missing
- * any combination of fields (enabled, role, harness, model, plugins) —
- * older configs predate role, third-party configs may omit model, etc.
+ * any combination of fields (enabled, roles, harness, model, plugins) —
+ * older configs predate roles, third-party configs may omit model, etc.
  * Merge into a fully-populated NetCardConfig so the card renders sensibly
  * even on partially-shaped input.
+ *
+ * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field on the
+ * stored config (from a daemon that hasn't been restarted since the
+ * roles-array migration) is promoted to `roles: [<role>]` here so the
+ * Configuration page never displays a confusingly empty Roles section.
  */
 function resolveConfig(
   catalog: SolverNetCatalogEntry,
-  stored: Partial<NetCardConfig> | undefined,
+  stored: (Partial<NetCardConfig> & { role?: 'solving' | 'evaluating' }) | undefined,
 ): NetCardConfig {
+  const fallbackRole = catalog.supportedRoles[0] ?? 'solving';
+  const storedRoles = (() => {
+    if (Array.isArray(stored?.roles) && (stored?.roles?.length ?? 0) > 0) return stored!.roles!;
+    if (stored?.role === 'solving' || stored?.role === 'evaluating') return [stored.role];
+    return [fallbackRole];
+  })();
   return {
     enabled: stored?.enabled ?? false,
-    role: stored?.role ?? (catalog.supportedRoles[0] ?? 'solving'),
+    roles: storedRoles,
     harness: stored?.harness ?? (catalog.compatibleHarnesses[0]?.name ?? ''),
     model: stored?.model ?? 'claude-haiku-4-5-20251001',
     modelExplicit: stored?.model !== undefined,
@@ -29,8 +40,10 @@ function resolveConfig(
 
 export interface SolverNetsSectionProps {
   /** Stored per-net config from /v1/bootstrap. May be partially-shaped;
-   *  resolveConfig fills missing fields with catalog-derived defaults. */
-  configByName: Record<string, Partial<NetCardConfig>>;
+   *  resolveConfig fills missing fields with catalog-derived defaults.
+   *  Accepts both the legacy `role` field and the canonical `roles`
+   *  array — resolveConfig migrates the singular form. */
+  configByName: Record<string, Partial<NetCardConfig> & { role?: 'solving' | 'evaluating' }>;
   onSaved: () => void;
   onRestartPending: () => void;
   defaultExpanded?: boolean;

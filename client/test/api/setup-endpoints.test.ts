@@ -489,11 +489,15 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(persisted.solverNets.prediction).toMatchObject({
       enabled: false,
       solverType: 'prediction.v1',
-      role: 'solving',
+      roles: ['solving'],
       harness: 'claude-code-learner',
       plugins: [],
       taskGenerator: { enabled: true },
     });
+    // The default seed must NOT carry the legacy singular `role` field —
+    // we want a clean `roles` shape on disk so future readers don't
+    // disagree about which one wins.
+    expect(persisted.solverNets.prediction.role).toBeUndefined();
   });
 
   it('seeds the default SolverNet when a legacy config lacks solverNets', async () => {
@@ -513,12 +517,15 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(persisted.network).toBe('testnet');
+    // Legacy singular `role: 'evaluating'` body is promoted to the
+    // canonical `roles: ['evaluating']` shape on persist.
     expect(persisted.solverNets.prediction).toMatchObject({
       enabled: true,
       solverType: 'prediction.v1',
-      role: 'evaluating',
+      roles: ['evaluating'],
       harness: 'claude-code-learner',
     });
+    expect(persisted.solverNets.prediction.role).toBeUndefined();
   });
 
   it('swaps solverType and accepts both enabled+solverType in one call', async () => {
@@ -580,7 +587,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(body.available).toEqual(['prediction']);
   });
 
-  it('accepts role and persists it', async () => {
+  it('accepts a roles array and persists it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
     const configPath = join(dir, 'config.json');
     writeConfig(configPath, baseConfig());
@@ -597,13 +604,69 @@ describe('POST /v1/setup/solvernets/:name', () => {
     const res = await app.request('/v1/setup/solvernets/prediction', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solving', 'evaluating'] }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.solverNets.prediction.roles).toEqual(['solving', 'evaluating']);
+    expect(observed?.prediction?.roles).toEqual(['solving', 'evaluating']);
+  });
+
+  it('accepts the legacy singular role field and promotes it to roles', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, baseConfig());
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/solvernets/prediction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ role: 'evaluating' }),
     });
 
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.solverNets.prediction.role).toBe('evaluating');
-    expect(observed?.prediction?.role).toBe('evaluating');
+    expect(persisted.solverNets.prediction.roles).toEqual(['evaluating']);
+    // Legacy `role` is dropped when `roles` is set so the persisted shape
+    // is canonical and there is exactly one source of truth.
+    expect(persisted.solverNets.prediction.role).toBeUndefined();
+  });
+
+  it('rejects an empty roles array', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, baseConfig());
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/solvernets/prediction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: [] }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a roles array with an unknown role', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, baseConfig());
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/solvernets/prediction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solving', 'creator'] }),
+    });
+
+    expect(res.status).toBe(400);
   });
 
   it('accepts harness, model, and plugins together', async () => {

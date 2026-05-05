@@ -18,7 +18,9 @@ const baseCatalog = {
   intrinsicSolverType: 'prediction.v1',
   state: 'live' as const,
   supportedRoles: ['solving' as const, 'evaluating' as const],
-  compatibleHarnesses: [{ name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] }],
+  compatibleHarnesses: [
+    { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const, 'evaluating' as const] },
+  ],
   compatiblePlugins: [{ name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' }],
 };
 
@@ -41,7 +43,7 @@ describe('NetCard', () => {
     render(
       <NetCard
         catalog={baseCatalog}
-        config={{ enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
+        config={{ enabled: false, roles: ['solving'], harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
         onSaved={vi.fn()}
         onRestartPending={vi.fn()}
       />,
@@ -51,18 +53,90 @@ describe('NetCard', () => {
     expect(screen.getByText(/available/i)).toBeTruthy();
   });
 
-  it('expands the body when enabled and shows Solving role active', () => {
+  it('expands the body when enabled and shows the Solver checkbox active', () => {
     render(
       <NetCard
         catalog={baseCatalog}
-        config={{ enabled: true, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: ['jinn-prediction-plugin'] }}
+        config={{ enabled: true, roles: ['solving'], harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: ['jinn-prediction-plugin'] }}
         onSaved={vi.fn()}
         onRestartPending={vi.fn()}
       />,
     );
     expect(screen.getByText(/live/i)).toBeTruthy();
-    const solving = screen.getByText('Solving').closest('button');
-    expect(solving?.getAttribute('data-role-active')).toBe('true');
+    const solver = screen.getByLabelText('Solver') as HTMLInputElement;
+    const evaluator = screen.getByLabelText('Evaluator') as HTMLInputElement;
+    expect(solver.checked).toBe(true);
+    expect(evaluator.checked).toBe(false);
+  });
+
+  it('renders both checkboxes checked when both roles are configured', () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          roles: ['solving', 'evaluating'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    const solver = screen.getByLabelText('Solver') as HTMLInputElement;
+    const evaluator = screen.getByLabelText('Evaluator') as HTMLInputElement;
+    expect(solver.checked).toBe(true);
+    expect(evaluator.checked).toBe(true);
+  });
+
+  it('persists both roles when the operator enables Evaluator alongside Solver', async () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          roles: ['solving'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          modelExplicit: false,
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(apiMock.updateSolverNet).toHaveBeenCalled());
+    // Order should be canonical (catalog ordering: ['solving', 'evaluating']).
+    expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
+      roles: ['solving', 'evaluating'],
+    }));
+  });
+
+  it('disables save and surfaces validation when both checkboxes are unchecked', () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          roles: ['solving'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+    expect(screen.getByRole('alert').textContent).toMatch(/at least one role required/i);
+    const save = screen.getByRole('button', { name: /save changes/i }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
   });
 
   it('does not persist the displayed fallback model when saving another field', async () => {
@@ -71,7 +145,7 @@ describe('NetCard', () => {
         catalog={baseCatalog}
         config={{
           enabled: false,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-haiku-4-5-20251001',
           modelExplicit: false,
@@ -127,7 +201,7 @@ describe('NetCard', () => {
         catalog={baseCatalog}
         config={{
           enabled: true,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-haiku-4-5-20251001',
           modelExplicit: false,
