@@ -3,6 +3,7 @@ import type { SolverNetCatalogEntry } from '../../api/types.js';
 import { ConfigField } from '../../components/ConfigField.js';
 import { api } from '../../api/client.js';
 import { SolverNetSigil } from './solverNetSigils.js';
+import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
 
 /**
  * Per-SolverNet card inside the Configuration > SolverNets section. Shows
@@ -236,20 +237,36 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
           </ConfigField>
 
           <ConfigField label="Claude model" restartRequired>
-            <input
-              type="text"
-              value={draft.model}
-              onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-              style={{
-                background: 'var(--bg)',
-                border: `1px solid ${draft.model !== config.model ? 'var(--accent-sky)' : 'var(--border)'}`,
-                borderRadius: '6px',
-                padding: '10px 12px',
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: '14px',
-                color: 'var(--fg)',
-              }}
-            />
+            {(() => {
+              const resolved = resolveModelOption(draft.model);
+              return (
+                <select
+                  aria-label="Claude model"
+                  value={draft.model}
+                  onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+                  style={{
+                    background: 'var(--bg)',
+                    border: `1px solid ${draft.model !== config.model ? 'var(--accent-sky)' : 'var(--border)'}`,
+                    borderRadius: '6px',
+                    padding: '10px 12px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '14px',
+                    color: 'var(--fg)',
+                  }}
+                >
+                  {CLAUDE_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                  {resolved.isCustom && (
+                    <option key={draft.model} value={draft.model}>
+                      {resolved.label}
+                    </option>
+                  )}
+                </select>
+              );
+            })()}
           </ConfigField>
 
           <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
