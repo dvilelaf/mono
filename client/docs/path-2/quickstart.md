@@ -6,6 +6,19 @@ A 60-second walkthrough for shipping a Harness as an external npm package.
 
 Builders with a working forecaster, evaluator, or alternative harness who want it dispatched against Jinn tasks. Polymarket / Kalshi bot operators, Numerai-orbit forecasters, MiroFish-orbit quants, Bittensor SN6 (Numinous Signals) miners, prediction-tool builders. If you only have solverType-specific schemas, MCP tools, or skills for Claude Code, ship a SolverPlugin instead.
 
+## Security
+
+Before installing any third-party plug-in or harness, read [security.md](../security.md). Key points:
+
+- Run the daemon in an isolated environment (VM / devcontainer / dedicated user account).
+- Third-party plug-ins and harnesses run with the daemon's full capabilities.
+- Jinn does not audit third-party code — operator vigilance is required.
+- The learner does not autonomously install; recommendations land in `~/.jinn-client/recommendations.jsonl` for your explicit review.
+
+The full disclaimer is at [security.md](../security.md).
+
+---
+
 ## 1. Pick a pattern
 
 Three patterns cover the vast majority of Phase A.2 recruit shapes. Full walkthroughs at [patterns/](./patterns/README.md).
@@ -105,6 +118,21 @@ package's CID + hash, and appends to `~/.jinn-client/config.json` under
 Restart the daemon. At boot, the loader walks `harnesses.externalImpls`, dynamic-imports each entry, and constructs your Harness via its factory. For each Task, the engine resolves the SolverNet and then calls `supports(solverType, role)` on registered Harnesses as needed. When your Harness matches, `run(ctx)` is invoked.
 
 `jinn harnesses list` shows what's installed; `jinn harnesses show <name>` shows the manifest; `jinn harnesses remove <name>` uninstalls.
+
+## Discovery, feedback, and revocation
+
+Once installed, you can:
+
+- `jinn harnesses recommendations` — review what the learner suggests installing
+- `jinn harnesses discover` — list harnesses endorsed by attestors you follow
+- `jinn harnesses endorse @yourname/your-package` — publish an attestation backing the package
+- `jinn harnesses warn @yourname/your-package --reason "..."` / `block @yourname/your-package --reason "..."` — flag a package
+- `jinn harnesses review @yourname/your-package --notes-file review.md` — pin a code review to IPFS and publish attestation
+- `jinn harnesses status` — cross-check installed harnesses against followed-attestor advisories
+
+See [security.md — followedAttestors guidance](../security.md#followedattestors--populating-your-trust-set) for how to populate your followed-attestor set (default: empty).
+
+---
 
 ## Next
 
