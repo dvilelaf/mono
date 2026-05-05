@@ -408,7 +408,15 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     if (body.enabled !== undefined) existing.enabled = body.enabled;
     if (body.solverType !== undefined) existing.solverType = body.solverType;
     if (normalizedRoles !== undefined) {
-      existing.roles = normalizedRoles;
+      // Operator-mode patch only addresses solving/evaluating. Preserve any
+      // non-operator roles (today: 'launching') so launcher-mode state is
+      // never clobbered by an operator-mode role edit. Strict mode
+      // separation per spec/2026-05-05-launcher-role-and-mode.md §3.
+      const existingRoles = Array.isArray(existing['roles'])
+        ? (existing['roles'] as unknown[]).filter((r): r is string => typeof r === 'string')
+        : [];
+      const preservedRoles = existingRoles.filter((r) => !KNOWN_ROLES.includes(r));
+      existing.roles = Array.from(new Set([...normalizedRoles, ...preservedRoles]));
       // Strip any legacy singular `role` so the persisted shape is canonical.
       // Eliminates ambiguity if a third-party tool reads the file and prefers
       // `role` over `roles`.
