@@ -383,6 +383,167 @@ describe('loadConfig RPC override handling', () => {
   });
 });
 
+describe('loadConfig solverNets roles migration', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('migrates a legacy `role: solving` field to `roles: [solving]`', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          role: 'solving',
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+    // Loader output is the canonical shape — the singular `role` does not
+    // re-appear after migration.
+    expect((cfg.solverNets['prediction'] as Record<string, unknown>)?.['role']).toBeUndefined();
+  });
+
+  it('migrates a legacy `role: evaluating` field to `roles: [evaluating]`', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          role: 'evaluating',
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['evaluating']);
+  });
+
+  it('round-trips an explicit `roles: [solving]` config', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['solving'],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+  });
+
+  it('persists both roles when the operator opts into Solver and Evaluator', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['solving', 'evaluating'],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'evaluating']);
+  });
+
+  it('prefers `roles` over a stale legacy `role` when both are present', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          role: 'evaluating', // legacy stale field
+          roles: ['solving'],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+  });
+
+  it('rejects an empty roles array', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: [],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    let captured: unknown;
+    try {
+      loadConfig(configPath);
+    } catch (err) {
+      captured = err;
+    }
+    expect(captured).toBeDefined();
+    // The loader wraps zod errors in ConfigLoadError with structured details;
+    // assert that the underlying validation issue mentions the constraint
+    // that we care about (the operator should see "at least one role").
+    const issues = ((captured as { details?: { issues?: Array<{ message: string }> } }).details?.issues) ?? [];
+    expect(issues.some((issue) => /at least one role/i.test(issue.message))).toBe(true);
+  });
+
+  it('deduplicates roles entries', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['solving', 'solving', 'evaluating'],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'evaluating']);
+  });
+
+  it('default config seeds prediction with roles: [solving] when no file is provided', () => {
+    const cfg = loadConfig();
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+  });
+});
+
 describe('buildConfigProvenance', () => {
   const dirs: string[] = [];
 

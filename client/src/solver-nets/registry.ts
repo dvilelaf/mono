@@ -11,7 +11,13 @@ export type SolverNetTaskRole = 'restoration' | 'evaluation';
 export interface SolverNetConfig {
   enabled: boolean;
   solverType: string;
-  role?: SolverNetOperatorRole;
+  /**
+   * Non-empty subset of operator roles this SolverNet runs concurrently.
+   * Optional only because legacy callers (pre-migration helpers) may omit it;
+   * the config loader normalises absence to `['solving']` and migrates any
+   * legacy singular `role` to `[role]`.
+   */
+  roles?: SolverNetOperatorRole[];
   harness: string;
   model?: string;
   plugins: SolverPluginEntry[];
@@ -22,7 +28,8 @@ export interface LoadedSolverNet {
   name: string;
   enabled: boolean;
   solverType: string;
-  role: SolverNetOperatorRole;
+  /** Active operator roles (non-empty after load). */
+  roles: SolverNetOperatorRole[];
   contract: SolverNetContract;
   harness: string;
   model?: string;
@@ -32,6 +39,17 @@ export interface LoadedSolverNet {
 
 function taskRoleForOperatorRole(role: SolverNetOperatorRole): SolverNetTaskRole {
   return role === 'evaluating' ? 'evaluation' : 'restoration';
+}
+
+/**
+ * Resolve a non-empty roles array from a config entry. Falls back to
+ * `['solving']` for shapes that omit `roles` entirely (e.g. a stub used by
+ * unit tests or a legacy migration helper that hasn't run through the zod
+ * preprocessor). Deduplicates to keep set semantics simple.
+ */
+function rolesFromConfig(net: SolverNetConfig): SolverNetOperatorRole[] {
+  if (net.roles && net.roles.length > 0) return Array.from(new Set(net.roles));
+  return ['solving'];
 }
 
 function runtimePluginFrom(
@@ -79,7 +97,8 @@ export class SolverNetRegistry {
     return [...this.nets.values()].find((net) =>
       net.enabled &&
       net.solverType === solverType &&
-      (taskRole === undefined || taskRoleForOperatorRole(net.role) === taskRole),
+      (taskRole === undefined ||
+        net.roles.some((r) => taskRoleForOperatorRole(r) === taskRole)),
     );
   }
 
@@ -144,7 +163,7 @@ export async function loadSolverNets(
       name,
       enabled: net.enabled,
       solverType: net.solverType,
-      role: net.role ?? 'solving',
+      roles: rolesFromConfig(net),
       contract,
       harness: net.harness,
       ...(net.model ? { model: net.model } : {}),

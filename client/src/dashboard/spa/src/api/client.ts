@@ -75,7 +75,7 @@ export const api = {
     name: string,
     patch: {
       enabled?: boolean;
-      role?: 'solving' | 'evaluating';
+      roles?: Array<'solving' | 'evaluating'>;
       harness?: string;
       model?: string;
       plugins?: string[];
@@ -88,7 +88,7 @@ export const api = {
       name: string;
       config: {
         enabled?: boolean;
-        role?: 'solving' | 'evaluating';
+        roles?: Array<'solving' | 'evaluating'>;
         harness?: string;
         model?: string;
         plugins?: string[];

@@ -38,9 +38,14 @@ interface OverviewStatusV1 {
      */
     operator?: {
       ok?: boolean;
+      enabled?: boolean;
       nextAction?: { description?: string };
       diagnostics?: Array<{ code: string; severity: string; message: string; configField?: string }>;
-      solverNet?: { name?: string; enabled?: boolean };
+      solverNet?: {
+        name?: string;
+        enabled?: boolean;
+        roles?: Array<'solving' | 'evaluating'>;
+      };
     };
     operatorError?: string;
     totals?: { observedTasks?: number; activeTaskRuns?: number; solutions?: number; verdicts?: number; failed?: number };
@@ -128,7 +133,7 @@ export function OverviewPage(): JSX.Element {
       {operatorEnabled ? (
         <OperatorCard
           name="prediction"
-          role="solving"
+          roles={operator?.solverNet?.roles ?? ['solving']}
           state="live"
           waitingMessage={operator?.nextAction?.description}
         />

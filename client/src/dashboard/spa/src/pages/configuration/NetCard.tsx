@@ -15,13 +15,28 @@ import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
  * before discarding the edits.
  */
 
+export type NetCardRole = 'solving' | 'evaluating';
+
 export interface NetCardConfig {
   enabled: boolean;
-  role: 'solving' | 'evaluating';
+  /**
+   * Active operator roles for this SolverNet. Non-empty when persisted —
+   * the operator disables the net via the enable toggle, not by clearing
+   * roles. Both roles can be active concurrently; the daemon enforces
+   * `disallowSolverSelfEvaluation` so the operator never grades its own
+   * Solutions.
+   */
+  roles: NetCardRole[];
   harness: string;
   model: string;
   modelExplicit?: boolean;
   plugins: string[];
+}
+
+function rolesEqual(a: NetCardRole[], b: NetCardRole[]): boolean {
+  if (a.length !== b.length) return false;
+  const aset = new Set(a);
+  return b.every((r) => aset.has(r));
 }
 
 export interface NetCardProps {
@@ -39,10 +54,12 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
 
   const dirty =
     draft.enabled !== config.enabled ||
-    draft.role !== config.role ||
+    !rolesEqual(draft.roles, config.roles) ||
     draft.harness !== config.harness ||
     draft.model !== config.model ||
     draft.plugins.join(',') !== config.plugins.join(',');
+
+  const rolesValid = draft.roles.length > 0;
 
   const stateLabel: { label: string; color: string } = (() => {
     if (catalog.state === 'coming_soon') return { label: 'Coming soon', color: 'var(--fg-dim)' };
@@ -70,12 +87,16 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
   };
 
   const save = async (): Promise<void> => {
+    if (!rolesValid) {
+      setError('At least one role required');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const patch: Parameters<typeof api.updateSolverNet>[1] = {
         enabled: draft.enabled,
-        role: draft.role,
+        roles: draft.roles,
         harness: draft.harness,
         plugins: draft.plugins,
       };
@@ -91,6 +112,25 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
     } finally {
       setSaving(false);
     }
+  };
+
+  const toggleRole = (role: NetCardRole): void => {
+    if (!catalog.supportedRoles.includes(role)) return;
+    const has = draft.roles.includes(role);
+    if (has) {
+      // Allow unchecking even when it leaves zero roles — the validation
+      // banner explains the requirement and the Save button is disabled.
+      const next = draft.roles.filter((r) => r !== role);
+      setDraft({ ...draft, roles: next });
+      return;
+    }
+    // Preserve the catalog ordering ['solving', 'evaluating'] so the
+    // persisted shape is canonical regardless of the order the operator
+    // clicks the boxes.
+    const ordered = catalog.supportedRoles.filter(
+      (r) => r === role || draft.roles.includes(r),
+    );
+    setDraft({ ...draft, roles: ordered });
   };
 
   return (
@@ -178,38 +218,77 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
                 color: 'var(--fg-muted)',
               }}
             >
-              Role
+              Roles
             </span>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${catalog.supportedRoles.length}, 1fr)`, border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${catalog.supportedRoles.length}, 1fr)`,
+                border: '1px solid var(--border)',
+                borderRadius: '6px',
+                overflow: 'hidden',
+              }}
+            >
               {catalog.supportedRoles.map((role, idx) => {
-                const active = draft.role === role;
+                const active = draft.roles.includes(role);
+                const checkboxId = `role-${catalog.name}-${role}`;
                 return (
-                  <button
+                  <label
                     key={role}
-                    type="button"
+                    htmlFor={checkboxId}
+                    data-role={role}
                     data-role-active={active ? 'true' : 'false'}
-                    onClick={() => setDraft({ ...draft, role })}
                     style={{
                       padding: '10px 14px',
-                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: '6px',
                       color: active ? 'var(--fg)' : 'var(--fg-muted)',
                       background: active ? 'var(--bg)' : 'transparent',
                       borderRight: idx < catalog.supportedRoles.length - 1 ? '1px solid var(--border)' : 'none',
-                      border: 'none',
                       cursor: 'pointer',
                       fontFamily: "'JetBrains Mono', monospace",
                     }}
                   >
-                    <span style={{ display: 'block', fontSize: '14px', fontWeight: 500 }}>
-                      {role.charAt(0).toUpperCase() + role.slice(1)}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        id={checkboxId}
+                        type="checkbox"
+                        checked={active}
+                        onChange={() => toggleRole(role)}
+                        aria-label={role === 'solving' ? 'Solver' : 'Evaluator'}
+                        style={{ accentColor: 'var(--accent-sky)', width: '14px', height: '14px' }}
+                      />
+                      <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                        {role === 'solving' ? 'Solver' : 'Evaluator'}
+                      </span>
                     </span>
-                    <span style={{ display: 'block', fontSize: '11px', color: active ? 'var(--fg-muted)' : 'var(--fg-dim)' }}>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        color: active ? 'var(--fg-muted)' : 'var(--fg-dim)',
+                        paddingLeft: '22px',
+                      }}
+                    >
                       {role === 'solving' ? 'attempt forecasts' : "verify others' forecasts"}
                     </span>
-                  </button>
+                  </label>
                 );
               })}
             </div>
+            {!rolesValid && (
+              <span
+                role="alert"
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--break-red)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                At least one role required
+              </span>
+            )}
           </div>
 
           <ConfigField label="Harness" restartRequired>
@@ -227,7 +306,14 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
               }}
             >
               {catalog.compatibleHarnesses
-                .filter((h) => h.supportsRoles.includes(draft.role))
+                // Show every harness that supports at least one currently-active role.
+                // The daemon picks the right harness per-role at task-acceptance time;
+                // a single Harness is allowed to cover both roles or only one.
+                .filter((h) =>
+                  draft.roles.length === 0
+                    ? true
+                    : draft.roles.some((r) => h.supportsRoles.includes(r)),
+                )
                 .map((h) => (
                   <option key={h.name} value={h.name}>
                     {h.name}@{h.version}
@@ -426,8 +512,8 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
             fontFamily: "'JetBrains Mono', monospace",
           }}
         >
-          <span style={{ fontSize: '12px', color: error ? 'var(--break-red)' : 'var(--accent-sky)' }}>
-            {error ?? (saving ? 'Saving…' : 'Changes pending')}
+          <span style={{ fontSize: '12px', color: error || !rolesValid ? 'var(--break-red)' : 'var(--accent-sky)' }}>
+            {error ?? (!rolesValid ? 'At least one role required' : saving ? 'Saving…' : 'Changes pending')}
           </span>
           <span style={{ display: 'flex', gap: '8px' }}>
             <button
@@ -441,8 +527,17 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
             <button
               type="button"
               onClick={() => { void save(); }}
-              disabled={saving}
-              style={{ border: '1px solid var(--accent-sky)', borderRadius: '6px', padding: '10px 20px', background: 'var(--accent-sky)', color: 'var(--bg-sunken)', fontFamily: 'inherit', fontSize: '14px' }}
+              disabled={saving || !rolesValid}
+              style={{
+                border: `1px solid ${rolesValid ? 'var(--accent-sky)' : 'var(--border)'}`,
+                borderRadius: '6px',
+                padding: '10px 20px',
+                background: rolesValid ? 'var(--accent-sky)' : 'transparent',
+                color: rolesValid ? 'var(--bg-sunken)' : 'var(--fg-dim)',
+                fontFamily: 'inherit',
+                fontSize: '14px',
+                cursor: rolesValid ? 'pointer' : 'not-allowed',
+              }}
             >
               Save changes
             </button>

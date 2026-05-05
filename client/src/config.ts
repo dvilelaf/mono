@@ -26,7 +26,18 @@ import type { Task } from './types/task.js';
 export interface DefaultSolverNetConfig extends Record<string, unknown> {
   enabled?: boolean;
   solverType: string;
-  role?: 'solving' | 'evaluating';
+  /**
+   * Operator-selected roles for this SolverNet. A non-empty subset of
+   * `['solving', 'evaluating']`. Both roles can be set concurrently — the
+   * daemon enforces `disallowSolverSelfEvaluation` on-chain so the operator
+   * never evaluates its own Solutions, and the on-chain
+   * TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
+   * `verdictDeliveryWeight` as independent additive counters.
+   *
+   * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
+   * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
+   */
+  roles?: Array<'solving' | 'evaluating'>;
   harness?: string;
   model?: string;
   plugins?: Array<string | { name?: string; source: string; version?: string }>;
@@ -37,7 +48,7 @@ export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
   prediction: {
     enabled: true,
     solverType: 'prediction.v1',
-    role: 'solving',
+    roles: ['solving'],
     harness: 'claude-code-learner',
     plugins: [],
     taskGenerator: { enabled: true },
@@ -395,25 +406,61 @@ export const JinnConfigSchema = z.object({
     })
     .default({ mode: 'train' }),
 
-  /** SolverNet activation, Harness selection, and operator-configured runtime plugins. */
-  solverNets: z.record(z.object({
-    enabled: z.boolean().default(true),
-    solverType: z.string(),
-    role: z.enum(['solving', 'evaluating']).default('solving'),
-    harness: z.string().default('claude-code-learner'),
-    model: z.string().optional(),
-    plugins: z.array(z.union([
-      z.string(),
-      z.object({
-        name: z.string().optional(),
-        source: z.string(),
-        version: z.string().optional(),
-      }),
-    ])).default([]),
-    taskGenerator: z.object({
+  /**
+   * SolverNet activation, Harness selection, and operator-configured runtime plugins.
+   *
+   * Each entry's `roles` is a non-empty subset of `['solving', 'evaluating']`.
+   * Both roles can run concurrently for the same SolverNet; the protocol-level
+   * `disallowSolverSelfEvaluation` flag prevents the operator from evaluating
+   * its own Solutions and the on-chain TaskActivityCheckerV3 tracks
+   * Solution and Verdict counters independently (additive into
+   * `eligibleActivityWeight`).
+   *
+   * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field is
+   * auto-promoted to `roles: [<role>]` by the zod preprocessor below so
+   * existing `~/.jinn-client/config.json` files keep loading without an
+   * operator migration step.
+   */
+  solverNets: z.record(z.preprocess(
+    (raw) => {
+      if (typeof raw !== 'object' || raw === null) return raw;
+      const obj = raw as Record<string, unknown>;
+      // Promote legacy `role: X` → `roles: [X]` when only the singular form
+      // is provided. If both are present (mid-migration third-party config),
+      // `roles` wins and `role` is dropped.
+      if (Array.isArray(obj['roles']) && obj['roles'].length > 0) {
+        const { role: _legacyRole, ...rest } = obj;
+        return rest;
+      }
+      if (typeof obj['role'] === 'string' && (obj['role'] === 'solving' || obj['role'] === 'evaluating')) {
+        const { role, ...rest } = obj;
+        return { ...rest, roles: [role] };
+      }
+      return obj;
+    },
+    z.object({
       enabled: z.boolean().default(true),
-    }).default({ enabled: true }),
-  })).default(DEFAULT_SOLVER_NETS),
+      solverType: z.string(),
+      roles: z.array(z.enum(['solving', 'evaluating']))
+        .min(1, 'each SolverNet must enable at least one role')
+        .default(['solving'])
+        // Deduplicate to keep downstream consumers simple.
+        .transform((arr) => Array.from(new Set(arr))),
+      harness: z.string().default('claude-code-learner'),
+      model: z.string().optional(),
+      plugins: z.array(z.union([
+        z.string(),
+        z.object({
+          name: z.string().optional(),
+          source: z.string(),
+          version: z.string().optional(),
+        }),
+      ])).default([]),
+      taskGenerator: z.object({
+        enabled: z.boolean().default(true),
+      }).default({ enabled: true }),
+    }),
+  )).default(DEFAULT_SOLVER_NETS),
 
   /**
    * Trusted ed25519 publishers for external harness impls. The daemon
