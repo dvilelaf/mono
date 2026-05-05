@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -7,6 +7,7 @@ import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { CANONICAL_DISCLAIMER } from '../../network-trust/disclaimer.js';
 import {
   resolveCliPassword as defaultResolveCliPassword,
 } from '../password.js';
@@ -22,6 +23,24 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
+
+/**
+ * Print the canonical disclaimer on first run, then write a marker file so
+ * subsequent runs do not re-print it. The marker path is
+ * `<home>/.jinn-client/disclaimer-acknowledged`.
+ *
+ * Exported for testing — the test injects a temp home directory via the
+ * `HOME` env var and asserts the marker is written + disclaimer is printed.
+ */
+export function maybePrintDisclaimer(home: string): void {
+  const markerPath = join(home, '.jinn-client', 'disclaimer-acknowledged');
+  if (existsSync(markerPath)) return;
+  process.stderr.write('=== Jinn — security expectations ===\n\n');
+  process.stderr.write(CANONICAL_DISCLAIMER + '\n');
+  process.stderr.write('\n=== End of disclaimer ===\n\n');
+  mkdirSync(join(home, '.jinn-client'), { recursive: true });
+  writeFileSync(markerPath, `${new Date().toISOString()}\n`, 'utf8');
+}
 
 function routeConsoleToStderr(): void {
   const writer = (line: string): void => {
@@ -194,6 +213,10 @@ Failure example (funding gate):
         return;
       }
 
+      // Print the canonical disclaimer on first run (writes marker to suppress future prints).
+      const home = ctx.env['HOME'] ?? homedir();
+      maybePrintDisclaimer(home);
+
       // Resolve password: env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run
       // `jinn run` with no env var, no setup, no input. Plaintext lives at
@@ -205,7 +228,6 @@ Failure example (funding gate):
       if (probe.ok) {
         resolvedPassword = probe.password;
       } else {
-        const home = ctx.env['HOME'] ?? homedir();
         const pwFilePath = join(home, '.jinn-client', 'keystore-password');
         // Defensive: probe.ok=false means neither env, fd, nor a non-empty
         // file existed. Generate, persist, and continue.
