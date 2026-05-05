@@ -12,8 +12,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  *
  * `detectJoinedSolverNet` accepts:
  *   1. the new manifestCid-keyed shape (`solverNets[<cid>].roles`) — wins
- *   2. the legacy short-name shape (`solverNets.prediction.enabled`)
- *   3. the predictionV1 status flag as a last-resort signal
+ *   2. the legacy short-name shape (`solverNets.prediction.enabled` or roles)
+ *   3. the predictionV1 status flag/roles as a last-resort signal
  */
 const getStatusMock = vi.fn();
 const getBootstrapMock = vi.fn();
@@ -92,6 +92,28 @@ describe('OverviewPage empty-state gating', () => {
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
+  });
+
+  it('shows the OperatorCard from operator roles even when legacy enabled is false', async () => {
+    getStatusMock.mockResolvedValue({
+      predictionV1: {
+        operator: {
+          ok: true,
+          solverNet: { name: 'prediction', enabled: false, roles: ['solving'] },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(screen.getByText(operatorEyebrow('prediction'))).toBeTruthy(),
+    );
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
+    expect(screen.getByText(/^solver$/i)).toBeTruthy();
   });
 
   it('shows the OperatorCard for the new manifestCid-keyed shape (spec §12)', async () => {

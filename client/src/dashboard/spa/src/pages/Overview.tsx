@@ -53,7 +53,7 @@ interface OverviewStatusV1 {
       solverNet?: {
         name?: string;
         enabled?: boolean;
-        roles?: Array<'solving' | 'evaluating'>;
+        roles?: string[];
       };
     };
     operatorError?: string;
@@ -119,12 +119,12 @@ function detectJoinedSolverNet(
         roles: roles.length > 0 ? roles : ['solving'],
       };
     }
-    // Pass 2: legacy short-name shape — any entry with `enabled: true`.
+    // Pass 2: legacy short-name shape — enabled entries or operator-visible roles.
     for (const [key, entry] of Object.entries(bootstrapSolverNets)) {
       if (!entry || typeof entry !== 'object') continue;
-      if (entry.enabled !== true) continue;
       const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
       const roles = mapRolesToOperatorVocab(rawRoles);
+      if (entry.enabled !== true && roles.length === 0) continue;
       return {
         name: entry.name ?? key,
         roles: roles.length > 0 ? roles : ['solving'],
@@ -134,10 +134,11 @@ function detectJoinedSolverNet(
 
   // Pass 3: predictionV1 status payload as a last-resort signal. The daemon
   // surfaces this for back-compat with the pre-spec-§12 single-net world.
-  if (predictionEnabled) {
+  const mappedPredictionRoles = mapRolesToOperatorVocab(predictionRoles ?? []);
+  if (predictionEnabled || mappedPredictionRoles.length > 0) {
     return {
       name: 'prediction',
-      roles: predictionRoles ?? ['solving'],
+      roles: mappedPredictionRoles.length > 0 ? mappedPredictionRoles : ['solving'],
     };
   }
   return null;
