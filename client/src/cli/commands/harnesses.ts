@@ -24,6 +24,7 @@ import {
 import { dirname, isAbsolute, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
+import { formatRecommendations } from '../../recommendations/format.js';
 import {
   loadManifest,
   verifyManifestSignature,
@@ -207,11 +208,47 @@ function runRemove(ctx: CommandContext, configPath: string, name: string): void 
 }
 
 // ---------------------------------------------------------------------------
+// recommendations
+// ---------------------------------------------------------------------------
+
+async function runRecommendations(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        limit: { type: 'string' as const },
+        since: { type: 'string' as const },
+      },
+    });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME']
+    : homedir();
+  const limit = parsed.values.limit !== undefined ? Math.max(1, Number(parsed.values.limit)) : 20;
+  const since = typeof parsed.values.since === 'string' ? parsed.values.since : undefined;
+
+  const output = formatRecommendations({
+    kind: 'harness',
+    addVerb: 'jinn harnesses add',
+    home,
+    limit,
+    since,
+  });
+  ctx.writer.write(output);
+}
+
+// ---------------------------------------------------------------------------
 // dispatcher
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `\
-jinn harnesses <list|add|remove> [options]
+jinn harnesses <list|add|remove|recommendations> [options]
 
 Manage operator-supplied external Harnesses (Path 2 plug-in surface).
 
@@ -221,6 +258,9 @@ Subcommands:
                          trustedImplSigners[] and append the entry to
                          harnesses.externalImpls in the config file
   remove <name>          Drop the named entry from the config file
+  recommendations        Print Harness packages the learner has recommended
+  [--limit <N>]          for operator review (default: 20)
+  [--since <iso>]        Filter to recommendations newer than an ISO date
 
 Options:
   --config <path>        Path to config file (default: ~/.jinn-client/config.json)
@@ -230,6 +270,8 @@ Examples:
   jinn harnesses list
   jinn harnesses add ./node_modules/@example/forecaster
   jinn harnesses remove @example/forecaster
+  jinn harnesses recommendations
+  jinn harnesses recommendations --since 2026-05-01T00:00:00Z
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -281,11 +323,14 @@ async function run(ctx: CommandContext): Promise<void> {
       runRemove(ctx, configPath, name);
       return;
     }
+    case 'recommendations':
+      await runRecommendations(ctx, ctx.argv.slice(1));
+      return;
     default:
       emitError(
         ctx,
         'invalid_invocation',
-        `Unknown harnesses subcommand: ${sub} (expected list|add|remove)`,
+        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|recommendations)`,
       );
       return;
   }

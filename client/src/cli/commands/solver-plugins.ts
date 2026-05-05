@@ -21,6 +21,7 @@ import {
   computeEntryPointHashes,
 } from '../../harnesses/manifest/content-hash.js';
 import { writeInstalledPlugIn } from '../../installed-records.js';
+import { formatRecommendations } from '../../recommendations/format.js';
 
 function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -219,6 +220,39 @@ async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 }
 
+async function recommendations(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        limit: { type: 'string' },
+        since: { type: 'string' },
+      },
+    });
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME']
+    : homedir();
+  const limit = parsed.values.limit !== undefined ? Math.max(1, Number(parsed.values.limit)) : 20;
+  const since = typeof parsed.values.since === 'string' ? parsed.values.since : undefined;
+
+  const output = formatRecommendations({
+    kind: 'plug-in',
+    addVerb: 'jinn solver-plugins add',
+    home,
+    limit,
+    since,
+  });
+  ctx.writer.write(output);
+}
+
 const command: CommandModule = {
   name: 'solver-plugins',
   summary: 'Inspect, validate, pack, and register SolverPlugin packages',
@@ -227,10 +261,14 @@ const command: CommandModule = {
   jinn solver-plugins show <source-or-path>
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
+  jinn solver-plugins recommendations [--limit <N>] [--since <iso>]
 
   add <path>         Record content-hash binding for a local SolverPlugin
                      package so the runtime loader can detect changes.
                      Respects JINN_HOME env var (default: ~/.jinn-client).
+  recommendations    Print SolverPlugin packages the learner has recommended
+                     for operator review. Agents emit recommendations via the
+                     recommend_plugin MCP tool; the operator decides to install.
 
 SolverPlugin commands are author and curator tooling. They do not activate a
 plugin for runtime use. Attach runtime plugins with:
@@ -246,11 +284,12 @@ plugin for runtime use. Attach runtime plugins with:
     if (subverb === 'show') return show(ctx, rest);
     if (subverb === 'validate') return validate(ctx, rest);
     if (subverb === 'pack') return pack(ctx, rest);
+    if (subverb === 'recommendations') return recommendations(ctx, rest);
     writeJson(ctx, {
       error: {
         code: 'invalid_invocation',
         message: `Unknown solver-plugins subverb: ${subverb}`,
-        expected: 'add|show|validate|pack',
+        expected: 'add|show|validate|pack|recommendations',
       },
     });
     ctx.exit(1);
