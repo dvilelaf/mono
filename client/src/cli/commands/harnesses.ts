@@ -40,6 +40,7 @@ import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
 import { rankDiscovery, formatDiscovery } from '../../network-trust/discover.js';
 import { computeStatus, formatStatus } from '../../network-trust/status.js';
+import { ABRIDGED_DISCLAIMER } from '../../network-trust/disclaimer.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -240,6 +241,7 @@ async function runAdd(
     added: { name: manifest.name, entry: absPkg, version: manifest.version },
     configPath,
   });
+  ctx.writer.write(ABRIDGED_DISCLAIMER + '\n');
 }
 
 // ---------------------------------------------------------------------------

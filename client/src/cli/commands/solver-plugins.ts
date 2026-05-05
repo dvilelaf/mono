@@ -26,6 +26,7 @@ import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
 import { rankDiscovery, formatDiscovery } from '../../network-trust/discover.js';
 import { computeStatus, formatStatus } from '../../network-trust/status.js';
+import { ABRIDGED_DISCLAIMER } from '../../network-trust/disclaimer.js';
 
 function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -211,6 +212,7 @@ async function add(ctx: CommandContext, rest: string[]): Promise<void> {
         entryPointCount: skills.length,
       },
     });
+    ctx.writer.write(ABRIDGED_DISCLAIMER + '\n');
   } catch (err) {
     writeJson(ctx, {
       error: {
