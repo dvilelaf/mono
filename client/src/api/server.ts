@@ -37,6 +37,7 @@ import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
+import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -84,6 +85,13 @@ export interface ApiServerConfig {
   bootstrap?: BootstrapEndpointConfig;
   /** Optional panel-driven setup actions such as testnet faucet funding. */
   setup?: SetupRoutesConfig;
+  /**
+   * Launcher mode routes (`/v1/launcher/*`). Mounted only when supplied so
+   * tests and bootstrap-only API instances don't pay the deps wiring cost.
+   * Gated by the same UI token as `/v1/setup/*` — see the `app.use` block
+   * inside `startApiServer` below.
+   */
+  launcher?: LauncherRoutesDeps;
   /** When set, GET /v1/solvernets exposes the catalog from a daemon registry. */
   solverNets?: { registry: SolverNetsRegistry };
   /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
@@ -261,6 +269,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/solvernets', requireUiToken(config.ui.token));
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
     app.use('/v1/setup/*', requireUiToken(config.ui.token));
+    app.use('/v1/launcher', requireUiToken(config.ui.token));
+    app.use('/v1/launcher/*', requireUiToken(config.ui.token));
     app.use('/api/admin/*', requireUiToken(config.ui.token));
     app.use('/api/harness/*', requireUiToken(config.ui.token));
   }
@@ -292,6 +302,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
     addSetupRoutes(app, config.setup);
+  }
+
+  // Launcher mode routes — gated by the UI token via the `app.use` block
+  // above. The launcher mode SPA is the only legitimate consumer; external
+  // callers cannot fingerprint per-SolverNet generator state without it.
+  if (config.ui && config.launcher) {
+    addLauncherRoutes(app, config.launcher);
   }
 
   // x402 payment-gated routes (if configured)
