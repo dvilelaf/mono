@@ -1342,11 +1342,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentEoa: agentEoaAddress,
     safeAddress,
     agentPrivateKey,
-    // Task 4 (spec/2026-05-05-launcher-role-and-mode.md) replaces this with a
-    // role-array gate (`solverNets[*].roles` includes `'launching'`). Until
-    // then, hard-disable the launcher loop here so the schema removal of
-    // `predictionV1LauncherEnabled` does not break this read.
-    predictionV1LauncherEnabled: false,
+    // spec/2026-05-05-launcher-role-and-mode.md §5.2 — hot-spawn: the
+    // Polymarket prediction.v1 generator is always created on testnet, but
+    // each tick early-returns unless `solverNets.prediction.roles` includes
+    // `'launching'`. The closure below reads the live `config` reference (in
+    // the same JS object that `onSolverNetsUpdated` mutates), so toggling
+    // launcher mode in/out via the operator UX takes effect within one
+    // generator cadence — no daemon restart required.
+    getPredictionRoles: () => config.solverNets?.prediction?.roles ?? [],
     predictionV1WindowMs: config.predictionV1WindowMs,
     predictionV1CadenceMs: config.predictionV1CadenceMs,
     predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,

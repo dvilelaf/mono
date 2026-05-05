@@ -45,8 +45,12 @@ export function collectTestnetAutoTaskGenerators(opts: {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — passed to generator configs that sign tasks. */
   agentPrivateKey?: `0x${string}`;
-  /** Explicit launcher opt-in for Polymarket prediction.v1 Task generation. */
-  predictionV1LauncherEnabled?: boolean;
+  /**
+   * Live role-getter for the prediction SolverNet — passed through to the
+   * generator so it can early-return when `'launching'` is not in roles.
+   * See spec/2026-05-05-launcher-role-and-mode.md §5.2 (hot-spawn).
+   */
+  getPredictionRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
   /** Override prediction.v1 submission window (ms). */
   predictionV1WindowMs?: number;
   /** Override prediction.v1 Polymarket generator cadence (ms). */
@@ -73,7 +77,7 @@ export function collectTestnetAutoTaskGenerators(opts: {
     agentEoa: opts.agentEoa,
     safeAddress: opts.safeAddress,
     agentPrivateKey: opts.agentPrivateKey,
-    predictionV1LauncherEnabled: opts.predictionV1LauncherEnabled,
+    getPredictionRoles: opts.getPredictionRoles,
     predictionV1WindowMs: opts.predictionV1WindowMs,
     predictionV1CadenceMs: opts.predictionV1CadenceMs,
     predictionV1MaxNewRoundsPerPoll: opts.predictionV1MaxNewRoundsPerPoll,

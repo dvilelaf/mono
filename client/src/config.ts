@@ -35,8 +35,11 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
    * `verdictDeliveryWeight` as independent additive counters.
    *
    * `'launching'` gates the SolverNet's launcher loop (e.g. prediction.v1
-   * Polymarket Task generator) — replaces the legacy
-   * `predictionV1LauncherEnabled` boolean with a per-SolverNet role gate.
+   * Polymarket Task generator) — replaces the legacy startup-time
+   * launcher boolean with a per-SolverNet role gate evaluated at every
+   * generator tick, so toggling launcher mode in/out takes effect within
+   * one cadence (no daemon restart). See
+   * spec/2026-05-05-launcher-role-and-mode.md §5.2.
    *
    * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
    * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
