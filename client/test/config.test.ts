@@ -547,3 +547,51 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
     expect(() => loadConfig(configPath)).toThrow();
   });
 });
+
+describe('config — network-trust fields', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeNetworkTrustConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  it('defaults followedAttestors to empty array', () => {
+    const cfg = loadConfig();
+    expect(cfg.followedAttestors).toEqual([]);
+  });
+
+  it('defaults publishInstallAttestations to false', () => {
+    const cfg = loadConfig();
+    expect(cfg.publishInstallAttestations).toBe(false);
+  });
+
+  it('defaults recommendationsDedupeWindowDays to 7', () => {
+    const cfg = loadConfig();
+    expect(cfg.recommendationsDedupeWindowDays).toBe(7);
+  });
+
+  it('accepts followedAttestors as 0x-prefixed hex addresses', async () => {
+    const configPath = await writeNetworkTrustConfigFile({
+      rpcUrl: 'http://localhost:8545',
+      followedAttestors: ['0x' + 'a'.repeat(40), '0x' + 'b'.repeat(40)],
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.followedAttestors).toHaveLength(2);
+  });
+
+  it('rejects malformed addresses in followedAttestors', async () => {
+    const configPath = await writeNetworkTrustConfigFile({
+      rpcUrl: 'http://localhost:8545',
+      followedAttestors: ['not-an-address'],
+    });
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+});

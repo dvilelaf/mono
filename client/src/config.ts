@@ -503,6 +503,32 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_REPUTATION_ENABLED
    */
   reputationEnabled: z.boolean().default(false),
+
+  /**
+   * Network-trust: list of ERC-8004 attestor addresses to follow for
+   * plug-in / harness security recommendations. Each address must be a
+   * 0x-prefixed 20-byte Ethereum address. Defaults to empty (no network trust).
+   * Env: JINN_FOLLOWED_ATTESTORS (comma-separated or JSON array)
+   */
+  followedAttestors: z
+    .array(z.string().regex(/^0x[0-9a-fA-F]{40}$/))
+    .default([]),
+
+  /**
+   * Network-trust: whether to publish install attestations (assertions that
+   * the operator installed a specific plug-in / harness version) to
+   * configured attestor contracts for reputation tracking.
+   * Defaults to false. Env: JINN_PUBLISH_INSTALL_ATTESTATIONS
+   */
+  publishInstallAttestations: z.boolean().default(false),
+
+  /**
+   * Network-trust: window (days) within which install attestations from the
+   * same (operator, package, version) tuple are deduplicated on-chain to avoid
+   * pointless gas waste. Defaults to 7 days. Must be between 1 and 365.
+   * Env: JINN_RECOMMENDATIONS_DEDUPE_WINDOW_DAYS
+   */
+  recommendationsDedupeWindowDays: z.number().int().min(1).max(365).default(7),
 }).refine(
   (cfg) => !cfg.jinnDistributorAddress || !!cfg.ethereumRpcUrl,
   {
@@ -691,6 +717,27 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_REPUTATION_ENABLED'] !== undefined) {
     const rv = env['JINN_REPUTATION_ENABLED'].trim().toLowerCase();
     merged.reputationEnabled = rv === '1' || rv === 'true' || rv === 'yes';
+  }
+
+  if (env['JINN_FOLLOWED_ATTESTORS'] !== undefined) {
+    try {
+      merged.followedAttestors = JSON.parse(env['JINN_FOLLOWED_ATTESTORS']);
+    } catch {
+      merged.followedAttestors = env['JINN_FOLLOWED_ATTESTORS']
+        .split(',')
+        .map((addr) => addr.trim())
+        .filter(Boolean);
+    }
+  }
+  if (env['JINN_PUBLISH_INSTALL_ATTESTATIONS'] !== undefined) {
+    const rv = env['JINN_PUBLISH_INSTALL_ATTESTATIONS'].trim().toLowerCase();
+    merged.publishInstallAttestations = rv === '1' || rv === 'true' || rv === 'yes';
+  }
+  if (env['JINN_RECOMMENDATIONS_DEDUPE_WINDOW_DAYS'] !== undefined) {
+    const parsed = Number(env['JINN_RECOMMENDATIONS_DEDUPE_WINDOW_DAYS'].trim());
+    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 365) {
+      merged.recommendationsDedupeWindowDays = parsed;
+    }
   }
 
   if (
