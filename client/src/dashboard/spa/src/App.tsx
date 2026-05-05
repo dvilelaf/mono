@@ -13,6 +13,8 @@ import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
 import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
+import { LauncherPage } from './pages/Launcher.js';
+import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
 
 /**
  * App routes between two distinct phases of operator life:
@@ -67,6 +69,8 @@ export default function App(): JSX.Element {
           <Route path="/configuration">
             <ConfigurationPage onRestartPending={() => setRestartPending(true)} />
           </Route>
+          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
+          <Route path="/launcher" component={LauncherPage} />
           <Route path="/leaderboard/:solverNet">
             {(params: { solverNet: string }) => (
               <LeaderboardPage solverNet={params.solverNet} />

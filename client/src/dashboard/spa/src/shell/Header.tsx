@@ -1,4 +1,7 @@
-import { Link } from 'wouter';
+import { useEffect } from 'react';
+import { Link, useLocation } from 'wouter';
+import { ModeSwitch } from './ModeSwitch.js';
+import { useAppMode, type AppMode } from './useAppMode.js';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
@@ -11,7 +14,26 @@ function trunc(addr?: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+function modeForPath(path: string): AppMode {
+  return path.startsWith('/launcher') ? 'launcher' : 'operator';
+}
+
 export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX.Element {
+  const { mode, setMode } = useAppMode();
+  const [location, setLocation] = useLocation();
+
+  // Hydrate mode from URL on mount and on navigation, so deep links and
+  // browser back/forward keep mode and route coherent.
+  useEffect(() => {
+    const next = modeForPath(location);
+    if (next !== mode) setMode(next);
+  }, [location, mode, setMode]);
+
+  const onModeChange = (m: AppMode): void => {
+    setMode(m);
+    setLocation(m === 'operator' ? '/overview' : '/launcher');
+  };
+
   return (
     <header
       style={{
@@ -21,17 +43,20 @@ export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX
         padding: '14px 24px',
       }}
     >
-      <Link href="/overview" style={{ textDecoration: 'none', color: 'var(--fg)' }}>
-        <span
-          style={{
-            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
-            fontSize: '26px',
-            color: 'var(--fg)',
-          }}
-        >
-          jinn operator
-        </span>
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <Link href="/overview" style={{ textDecoration: 'none', color: 'var(--fg)' }}>
+          <span
+            style={{
+              fontFamily: "'Instrument Serif', 'Times New Roman', serif",
+              fontSize: '26px',
+              color: 'var(--fg)',
+            }}
+          >
+            jinn operator
+          </span>
+        </Link>
+        <ModeSwitch mode={mode} onChange={onModeChange} />
+      </div>
       <div
         style={{
           display: 'flex',
