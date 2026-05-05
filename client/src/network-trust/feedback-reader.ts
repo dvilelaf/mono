@@ -29,6 +29,16 @@ export interface AttestationFeedbackReader {
     followedAttestors: string[];
     includeHistory: boolean;
   }): Promise<AttestationWithAttestor[]>;
+
+  /**
+   * Fetch all attestations from a list of followed attestors, for any subject.
+   * Used by the `discover` and `status` verbs to build a broad cross-subject view.
+   *
+   * The caller applies most-recent-wins resolution as needed.
+   */
+  readAllAttestationsFromAttestors(
+    followedAttestors: string[],
+  ): Promise<AttestationWithAttestor[]>;
 }
 
 export interface FeedbackListArgs {
@@ -78,50 +88,69 @@ export interface OnChainFeedbackReaderConfig {
 export function createOnChainFeedbackReader(
   config: OnChainFeedbackReaderConfig,
 ): AttestationFeedbackReader {
+  /**
+   * Shared helper: fetch all attestation events from followed attestors,
+   * optionally filtering to a specific subject. Returns raw (unresolved) list.
+   */
+  async function fetchRaw(
+    followedAttestors: string[],
+    subjectFilter?: string,
+  ): Promise<AttestationWithAttestor[]> {
+    const allAtts: AttestationWithAttestor[] = [];
+
+    for (const attestorAddr of followedAttestors) {
+      try {
+        // Fetch setMetadata events for plug-in-attestation keys.
+        // In a full implementation we'd filter by agentId indexed param.
+        // Here we fetch recent blocks and filter by key prefix in memory.
+        const logs = await config.publicClient.getLogs({
+          address: config.identityRegistryAddress,
+          event: METADATA_SET_EVENT[0],
+          fromBlock: 'earliest',
+          toBlock: 'latest',
+        });
+
+        for (const log of logs) {
+          const logAny = log as { args?: { metadataKey?: string; agentId?: bigint } };
+          const key = logAny.args?.metadataKey ?? '';
+          if (!key.startsWith('plug-in-attestation:')) continue;
+
+          const cid = key.replace('plug-in-attestation:', '');
+          let att: PlugInAttestation | null = null;
+          try {
+            const raw = await config.ipfs.fetchJson(cid);
+            att = validatePlugInAttestation(raw) ? raw : null;
+          } catch {
+            continue;
+          }
+
+          if (!att) continue;
+          if (subjectFilter !== undefined && att.subject !== subjectFilter) continue;
+
+          allAtts.push({ ...att, attestor: attestorAddr });
+        }
+      } catch {
+        // Skip attestors whose events we can't fetch (RPC errors, etc.)
+      }
+    }
+
+    return allAtts;
+  }
+
   return {
     async fetchAttestations({ subject, followedAttestors, includeHistory }) {
-      const allAtts: AttestationWithAttestor[] = [];
-
-      for (const attestorAddr of followedAttestors) {
-        try {
-          // Fetch setMetadata events for plug-in-attestation keys.
-          // In a full implementation we'd filter by agentId indexed param.
-          // Here we fetch recent blocks and filter by key prefix in memory.
-          const logs = await config.publicClient.getLogs({
-            address: config.identityRegistryAddress,
-            event: METADATA_SET_EVENT[0],
-            fromBlock: 'earliest',
-            toBlock: 'latest',
-          });
-
-          for (const log of logs) {
-            const logAny = log as { args?: { metadataKey?: string; agentId?: bigint } };
-            const key = logAny.args?.metadataKey ?? '';
-            if (!key.startsWith('plug-in-attestation:')) continue;
-
-            const cid = key.replace('plug-in-attestation:', '');
-            let att: PlugInAttestation | null = null;
-            try {
-              const raw = await config.ipfs.fetchJson(cid);
-              att = validatePlugInAttestation(raw) ? raw : null;
-            } catch {
-              continue;
-            }
-
-            if (!att || att.subject !== subject) continue;
-
-            allAtts.push({ ...att, attestor: attestorAddr });
-          }
-        } catch {
-          // Skip attestors whose events we can't fetch (RPC errors, etc.)
-        }
-      }
+      const allAtts = await fetchRaw(followedAttestors, subject);
 
       // Apply most-recent-wins resolution unless --include-history
       if (!includeHistory) {
         return resolveCurrentVerdict(allAtts);
       }
       return allAtts;
+    },
+
+    async readAllAttestationsFromAttestors(followedAttestors) {
+      // No subject filter — return everything, caller applies resolution.
+      return fetchRaw(followedAttestors);
     },
   };
 }
@@ -131,6 +160,9 @@ export function createOnChainFeedbackReader(
 export function createNoOpFeedbackReader(): AttestationFeedbackReader {
   return {
     async fetchAttestations() {
+      return [];
+    },
+    async readAllAttestationsFromAttestors() {
       return [];
     },
   };

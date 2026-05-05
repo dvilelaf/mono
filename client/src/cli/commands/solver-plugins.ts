@@ -24,6 +24,8 @@ import { writeInstalledPlugIn, readInstalledPlugIns, readInstalledHarnesses, add
 import { formatRecommendations } from '../../recommendations/format.js';
 import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
+import { rankDiscovery, formatDiscovery } from '../../network-trust/discover.js';
+import { computeStatus, formatStatus } from '../../network-trust/status.js';
 
 function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -657,6 +659,72 @@ async function feedbackList(ctx: CommandContext, rest: string[]): Promise<void> 
   await runFeedbackList(ctx, { subjectType: 'plug-in', subject, rest: feedbackRest }, home);
 }
 
+// ── discover (Task 7.1) ───────────────────────────────────────────────────────
+
+async function discover(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        limit: { type: 'string' },
+      },
+    });
+  } catch (err) {
+    writeJson(ctx, { error: { code: 'invalid_invocation', message: err instanceof Error ? err.message : String(err) } });
+    ctx.exit(1);
+    return;
+  }
+
+  const limit = parsed.values.limit !== undefined ? Math.max(1, Number(parsed.values.limit)) : 20;
+  const followedAttestors = resolveFollowedAttestors(ctx);
+
+  const { createNoOpFeedbackReader } = await import('../../network-trust/feedback-reader.js');
+  const reader = createNoOpFeedbackReader();
+
+  const atts = await reader.readAllAttestationsFromAttestors(followedAttestors);
+  const entries = rankDiscovery(atts, { subjectType: 'plug-in' });
+
+  if (followedAttestors.length === 0) {
+    ctx.writer.write(
+      'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS to see network attestations.\n',
+    );
+    return;
+  }
+
+  ctx.writer.write(formatDiscovery(entries, { limit }));
+}
+
+// ── status (Task 7.2) ─────────────────────────────────────────────────────────
+
+async function statusVerb(ctx: CommandContext, _rest: string[]): Promise<void> {
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME']
+    : homedir();
+
+  const installed = readInstalledPlugIns(home);
+  const followedAttestors = resolveFollowedAttestors(ctx);
+
+  const { createNoOpFeedbackReader } = await import('../../network-trust/feedback-reader.js');
+  const reader = createNoOpFeedbackReader();
+
+  const atts = await reader.readAllAttestationsFromAttestors(followedAttestors);
+  const entries = computeStatus(installed, atts, 'plug-in');
+
+  if (followedAttestors.length === 0) {
+    ctx.writer.write(
+      'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS to see network advisories.\n',
+    );
+    // Still show installed list without advisory data.
+    const noAdvisoryEntries = computeStatus(installed, [], 'plug-in');
+    ctx.writer.write(formatStatus(noAdvisoryEntries));
+    return;
+  }
+
+  ctx.writer.write(formatStatus(entries));
+}
+
 async function recommendations(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
   try {
@@ -699,6 +767,8 @@ const command: CommandModule = {
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
   jinn solver-plugins recommendations [--limit <N>] [--since <iso>]
+  jinn solver-plugins discover [--limit <N>]
+  jinn solver-plugins status
   jinn solver-plugins endorse <name> [--reason <text>]
   jinn solver-plugins warn <name> --reason <text>
   jinn solver-plugins block <name> --reason <text>
@@ -710,6 +780,10 @@ const command: CommandModule = {
                      Respects JINN_HOME env var (default: ~/.jinn-client).
   --publish          Also publish an install attestation on-chain (best-effort).
                      Also triggered by JINN_PUBLISH_INSTALL_ATTESTATIONS=1.
+  discover           List plug-ins attested by followed attestors, ranked by
+                     net positive signal (endorse - 2*block - warn).
+  status             Cross-check installed plug-ins against followed-attestor
+                     advisories. Shows warnings and block recommendations.
   endorse|warn|block Publish an attestation verdict for an installed plug-in.
   review             Pin review notes to IPFS and publish a review attestation.
   feedback list      List attestations from followed attestors for a plug-in.
@@ -732,6 +806,8 @@ plugin for runtime use. Attach runtime plugins with:
     if (subverb === 'validate') return validate(ctx, rest);
     if (subverb === 'pack') return pack(ctx, rest);
     if (subverb === 'recommendations') return recommendations(ctx, rest);
+    if (subverb === 'discover') return discover(ctx, rest);
+    if (subverb === 'status') return statusVerb(ctx, rest);
     if (subverb === 'endorse') return endorse(ctx, rest);
     if (subverb === 'warn') return warn(ctx, rest);
     if (subverb === 'block') return block(ctx, rest);
@@ -741,7 +817,7 @@ plugin for runtime use. Attach runtime plugins with:
       error: {
         code: 'invalid_invocation',
         message: `Unknown solver-plugins subverb: ${subverb}`,
-        expected: 'add|show|validate|pack|recommendations|endorse|warn|block|review|feedback',
+        expected: 'add|show|validate|pack|recommendations|discover|status|endorse|warn|block|review|feedback',
       },
     });
     ctx.exit(1);

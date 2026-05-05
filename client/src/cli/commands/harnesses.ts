@@ -38,6 +38,8 @@ import {
 import { writeInstalledHarness, readInstalledHarnesses, addBlockedHarness } from '../../installed-records.js';
 import { publishAttestation } from '../../network-trust/attestation.js';
 import type { PlugInAttestation } from '../../network-trust/schema.js';
+import { rankDiscovery, formatDiscovery } from '../../network-trust/discover.js';
+import { computeStatus, formatStatus } from '../../network-trust/status.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -540,6 +542,75 @@ function resolveFollowedAttestorsH(ctx: CommandContext): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// discover (Task 7.1)
+// ---------------------------------------------------------------------------
+
+async function runDiscover(ctx: CommandContext, rest: string[]): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        limit: { type: 'string' as const },
+      },
+    });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+
+  const limit = parsed.values.limit !== undefined ? Math.max(1, Number(parsed.values.limit)) : 20;
+  const followedAttestors = resolveFollowedAttestorsH(ctx);
+
+  const { createNoOpFeedbackReader } = await import('../../network-trust/feedback-reader.js');
+  const reader = createNoOpFeedbackReader();
+
+  const atts = await reader.readAllAttestationsFromAttestors(followedAttestors);
+  const entries = rankDiscovery(atts, { subjectType: 'harness' });
+
+  if (followedAttestors.length === 0) {
+    ctx.writer.write(
+      'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS to see network attestations.\n',
+    );
+    return;
+  }
+
+  ctx.writer.write(formatDiscovery(entries, { limit }));
+}
+
+// ---------------------------------------------------------------------------
+// status (Task 7.2)
+// ---------------------------------------------------------------------------
+
+async function runStatus(ctx: CommandContext, _rest: string[]): Promise<void> {
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME']
+    : homedir();
+
+  const installed = readInstalledHarnesses(home);
+  const followedAttestors = resolveFollowedAttestorsH(ctx);
+
+  const { createNoOpFeedbackReader } = await import('../../network-trust/feedback-reader.js');
+  const reader = createNoOpFeedbackReader();
+
+  const atts = await reader.readAllAttestationsFromAttestors(followedAttestors);
+  const entries = computeStatus(installed, atts, 'harness');
+
+  if (followedAttestors.length === 0) {
+    ctx.writer.write(
+      'No followedAttestors configured. Set JINN_FOLLOWED_ATTESTORS to see network advisories.\n',
+    );
+    // Still show installed list without advisory data.
+    const noAdvisoryEntries = computeStatus(installed, [], 'harness');
+    ctx.writer.write(formatStatus(noAdvisoryEntries));
+    return;
+  }
+
+  ctx.writer.write(formatStatus(entries));
+}
+
+// ---------------------------------------------------------------------------
 // recommendations
 // ---------------------------------------------------------------------------
 
@@ -580,7 +651,7 @@ async function runRecommendations(ctx: CommandContext, rest: string[]): Promise<
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `\
-jinn harnesses <list|add|remove|recommendations|endorse|warn|block|review|feedback> [options]
+jinn harnesses <list|add|remove|recommendations|discover|status|endorse|warn|block|review|feedback> [options]
 
 Manage operator-supplied external Harnesses (Path 2 plug-in surface).
 
@@ -593,6 +664,10 @@ Subcommands:
   recommendations        Print Harness packages the learner has recommended
   [--limit <N>]          for operator review (default: 20)
   [--since <iso>]        Filter to recommendations newer than an ISO date
+  discover [--limit <N>] List harnesses attested by followed attestors, ranked
+                         by net positive signal (endorse - 2*block - warn)
+  status                 Cross-check installed harnesses against followed-attestor
+                         advisories; shows warnings and block recommendations
   endorse <name>         Publish an endorse attestation for an installed harness
   warn <name>            Publish a warn attestation (--reason required)
   block <name>           Publish a block attestation + disable locally (--reason required)
@@ -611,6 +686,8 @@ Examples:
   jinn harnesses remove @example/forecaster
   jinn harnesses recommendations
   jinn harnesses recommendations --since 2026-05-01T00:00:00Z
+  jinn harnesses discover
+  jinn harnesses status
   jinn harnesses endorse @example/forecaster --reason "works well"
   jinn harnesses warn @example/forecaster --reason "subtle crash on edge case"
   jinn harnesses block @example/forecaster --reason "verified malware"
@@ -623,6 +700,11 @@ async function run(ctx: CommandContext): Promise<void> {
     ctx.writer.write(HELP_TEXT);
     return;
   }
+
+  // discover and status have their own arg shapes and must be dispatched
+  // before the common parseArgs that only knows --config, --json, --publish.
+  if (sub === 'discover') { await runDiscover(ctx, ctx.argv.slice(1)); return; }
+  if (sub === 'status') { await runStatus(ctx, ctx.argv.slice(1)); return; }
 
   // Feedback verbs have their own arg shapes (--reason, --notes-file, etc.)
   // and must be dispatched before the common parseArgs that only knows
@@ -699,7 +781,7 @@ async function run(ctx: CommandContext): Promise<void> {
       emitError(
         ctx,
         'invalid_invocation',
-        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|recommendations|endorse|warn|block|review|feedback)`,
+        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|recommendations|discover|status|endorse|warn|block|review|feedback)`,
       );
       return;
   }
