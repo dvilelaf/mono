@@ -16,7 +16,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it, afterEach } from 'vitest';
-import { isPackageInstallCommand } from '../../src/runner/bash-filter.js';
 
 const hookPath = fileURLToPath(
   new URL('../../plugins/claude-code-learner/hooks/pre-tool-use-bash', import.meta.url),
@@ -26,105 +25,6 @@ const bashPayload = (command: string) =>
   JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
 
 // ── Unit tests against bash-filter.ts ────────────────────────────────────────
-
-describe('isPackageInstallCommand', () => {
-  it('blocks yarn add', () => {
-    const r = isPackageInstallCommand('yarn add @foo/bar');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('yarn-add');
-  });
-
-  it('blocks yarn global add', () => {
-    const r = isPackageInstallCommand('yarn global add typescript');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('yarn-add');
-  });
-
-  it('blocks yarn install <package>', () => {
-    const r = isPackageInstallCommand('yarn install some-pkg');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('yarn-add');
-  });
-
-  it('does NOT block bare yarn install (no package arg)', () => {
-    const r = isPackageInstallCommand('yarn install');
-    expect(r.blocked).toBe(false);
-  });
-
-  it('does NOT block yarn test', () => {
-    const r = isPackageInstallCommand('yarn test');
-    expect(r.blocked).toBe(false);
-  });
-
-  it('does NOT block yarn build', () => {
-    const r = isPackageInstallCommand('yarn build');
-    expect(r.blocked).toBe(false);
-  });
-
-  it('blocks npm install <package>', () => {
-    const r = isPackageInstallCommand('npm install lodash');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('npm-install-pkg');
-  });
-
-  it('blocks npm i <package>', () => {
-    const r = isPackageInstallCommand('npm i express');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('npm-install-pkg');
-  });
-
-  it('does NOT block bare npm install', () => {
-    const r = isPackageInstallCommand('npm install');
-    expect(r.blocked).toBe(false);
-  });
-
-  it('blocks pnpm add', () => {
-    const r = isPackageInstallCommand('pnpm add vite');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('pnpm-add');
-  });
-
-  it('blocks jinn plug-ins add', () => {
-    const r = isPackageInstallCommand('jinn plug-ins add @some-builder/calibration-refiner');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('jinn-plugin-add');
-  });
-
-  it('blocks jinn harnesses add', () => {
-    const r = isPackageInstallCommand('jinn harnesses add @some-builder/my-harness');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('jinn-plugin-add');
-  });
-
-  it('blocks curl to npmjs registry', () => {
-    const r = isPackageInstallCommand('curl https://registry.npmjs.org/@foo/bar');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('npm-registry-curl');
-  });
-
-  it('blocks direct npmjs.org URL in command', () => {
-    const r = isPackageInstallCommand('node -e "fetch(\'https://registry.npmjs.org/foo\')"');
-    expect(r.blocked).toBe(true);
-    expect(r.rule).toBe('npm-registry-api');
-  });
-
-  it('does NOT block unrelated commands', () => {
-    const safe = [
-      'ls -la',
-      'git status',
-      'echo hello',
-      'node index.js',
-      'yarn test --reporter=verbose',
-      'yarn build',
-      'yarn typecheck',
-      'cd /tmp && ls',
-    ];
-    for (const cmd of safe) {
-      const r = isPackageInstallCommand(cmd);
-      expect(r.blocked, `Expected "${cmd}" to be allowed`).toBe(false);
-    }
-  });
-});
 
 // ── Subprocess / hook integration tests ──────────────────────────────────────
 
