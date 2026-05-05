@@ -5,6 +5,8 @@ import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
+import { LauncherPage } from './pages/Launcher.js';
+import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
 
 // Configuration + Overview pages both useQuery for the daemon API; mock so
 // the routing tests don't depend on a live server.
@@ -57,5 +59,31 @@ describe('App routes', () => {
     // Configuration is composed of three section cards; the SolverNets head
     // is the most stable assertion since it never collapses to nothing.
     expect(screen.getByText(/solvernets/i)).toBeTruthy();
+  });
+
+  it('renders LauncherPage on /launcher', () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher" component={LauncherPage} />
+          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
+        </Switch>,
+        '/launcher',
+      ),
+    );
+    expect(screen.getByRole('heading', { name: /launch a solvernet/i })).toBeTruthy();
+  });
+
+  it('renders LauncherConfigurationPage on /launcher/configuration', () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher" component={LauncherPage} />
+          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
+        </Switch>,
+        '/launcher/configuration',
+      ),
+    );
+    expect(screen.getByRole('heading', { name: /generator config/i })).toBeTruthy();
   });
 });
