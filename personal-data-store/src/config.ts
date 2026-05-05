@@ -19,5 +19,6 @@ export const config = {
     goals: { enabled: true, schedule: "0 2 * * *" },
     checkin_morning: { enabled: true, schedule: process.env.CHECKIN_MORNING_SCHEDULE ?? "0 7 * * *" },
     checkin_evening: { enabled: true, schedule: process.env.CHECKIN_EVENING_SCHEDULE ?? "0 21 * * *" },
+    morning_briefing: { enabled: true, schedule: process.env.BRIEFING_SCHEDULE ?? "30 6 * * *" },
   },
 } as const;
