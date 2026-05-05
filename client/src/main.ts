@@ -682,6 +682,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
   const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
+  // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
+  // The API server is constructed before bootstrap finishes, so the operator's
+  // Safe address and the prediction.v1 generator are not yet known at start-up.
+  // We capture both into closures here and let `addLauncherRoutes` read them
+  // lazily — by the time `/v1/launcher/status` is hit, both are populated.
+  let predictionGeneratorRef:
+    | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
+    | undefined;
+  let safeAddressForLauncher: `0x${string}` | undefined;
 
   let setupApiServer: ApiServer;
   try {
@@ -808,6 +817,26 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         engine: config.engine,
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+      },
+      // Launcher mode (Task 6). Deps are resolved lazily because the
+      // generator and Safe address are constructed after bootstrap, after
+      // this `startApiServer` call. By the time the SPA hits the route,
+      // bootstrap has completed and both refs are populated.
+      //
+      // TODO(jinn-mono launcher Task 7): replace the open-task-count and
+      // reserved-budget stubs with real accessors once the
+      // `/v1/launcher/tasks` query lands.
+      launcher: {
+        getConfig: () => ({ solverNets: config.solverNets }),
+        getGeneratorState: (netName) => {
+          if (netName !== 'prediction') return undefined;
+          return predictionGeneratorRef?.getState();
+        },
+        getOpenTaskCount: () => 0,
+        getReservedBudgetWei: () => '0',
+        getSafeBalanceWei: () => '0',
+        safeAddress: () =>
+          safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
       },
     });
   } catch (error) {
@@ -982,6 +1011,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentId,
     identityRegistryAddress,
   } = bootstrapResult;
+  // Now that bootstrap has resolved a Safe, expose it to the Launcher
+  // mode endpoint so `/v1/launcher/status.budget.safeAddress` is accurate
+  // on the very first SPA poll. (Task 6 of the launcher plan.)
+  safeAddressForLauncher = safeAddress;
 
   if (!mechAddress) {
     emitEnvelope({
@@ -1361,6 +1394,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   });
   for (const line of autoTaskLogLines) {
     console.log(line);
+  }
+  // Stash the prediction.v1 generator's state accessor for the Launcher mode
+  // status endpoint (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
+  // `makePredictionV1Generator` returns a callable whose extra `getState()`
+  // method survives the `TaskGenerator` widening; we do a runtime check before
+  // taking the reference so non-generator entries stay decoupled.
+  for (const entry of autoTaskGenerators) {
+    if (entry.solverType !== 'prediction.v1') continue;
+    const gen = entry.generator as unknown;
+    if (typeof gen === 'function' && typeof (gen as { getState?: unknown }).getState === 'function') {
+      predictionGeneratorRef = gen as unknown as typeof predictionGeneratorRef;
+    }
   }
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
     // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
