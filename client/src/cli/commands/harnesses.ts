@@ -29,6 +29,12 @@ import {
   verifyManifestSignature,
 } from '../../harnesses/manifest/index.js';
 import { verifyPackageHash } from '../../harnesses/external-impls/package-hash.js';
+import {
+  computeManifestHash,
+  computeTarballHash,
+  computeEntryPointHashes,
+} from '../../harnesses/manifest/content-hash.js';
+import { writeInstalledHarness } from '../../installed-records.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -145,6 +151,23 @@ async function runAdd(
     );
     return;
   }
+
+  // Record content-hash binding so the runtime loader can detect drift.
+  const manifestHash = computeManifestHash(manifest);
+  const tarballHash = computeTarballHash(absPkg);
+  const entryPointHashes = computeEntryPointHashes(absPkg, [manifest.entry]);
+  const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+    ? ctx.env['JINN_HOME']
+    : homedir();
+  writeInstalledHarness(home, manifest.name, {
+    version: manifest.version,
+    manifestHash,
+    tarballHash,
+    entryPointHashes,
+    tier: 1, // v0 default; tier-detection lands in a later phase
+    installedAt: new Date().toISOString(),
+    publishedAttestation: null,
+  });
 
   const list: ExternalImplEntry[] = [...(cfg.harnesses?.externalImpls ?? [])];
   if (list.some((e) => e.name === manifest.name)) {
