@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jinn.network/schemas/plug-in-attestation-v1.json",
+  "title": "PlugInAttestation",
+  "description": "Attestation for plug-in / harness installs and feedback per spec/2026-05-05-plug-in-and-harness-network-trust.md §8.1",
+  "type": "object",
+  "required": [
+    "subject", "subjectType", "version", "manifestHash", "tarballHash",
+    "tier", "kind", "score", "reason", "reviewCid", "attestedAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "subject": { "type": "string", "pattern": "^@?[a-z0-9][a-z0-9._-]*(/[a-z0-9._-]+)?$" },
+    "subjectType": { "enum": ["plug-in", "harness"] },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$" },
+    "manifestHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "tarballHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "tier": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "kind": { "enum": ["installed", "endorse", "warn", "block", "review"] },
+    "score": { "type": "integer", "minimum": -2, "maximum": 1 },
+    "reason": { "type": "string" },
+    "reviewCid": { "type": "string" },
+    "attestedAt": { "type": "integer", "minimum": 0 }
+  }
+}
