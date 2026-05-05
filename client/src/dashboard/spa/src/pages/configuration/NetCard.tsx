@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { SolverNetCatalogEntry } from '../../api/types.js';
 import { ConfigField } from '../../components/ConfigField.js';
 import { api } from '../../api/client.js';
+import { SolverNetSigil } from './solverNetSigils.js';
 
 /**
  * Per-SolverNet card inside the Configuration > SolverNets section. Shows
@@ -102,7 +103,7 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
           padding: '14px 18px',
         }}
       >
-        <span style={{ width: '26px', height: '26px', border: '1px solid var(--border)', borderRadius: '6px' }} />
+        <SolverNetSigil name={catalog.name} />
         <span>
           <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--fg)' }}>{catalog.name}</span>
           <span style={{ display: 'block', fontSize: '12px', color: 'var(--fg-muted)', marginTop: '2px' }}>

@@ -91,6 +91,36 @@ describe('NetCard', () => {
     }));
   });
 
+  it('renders the prediction orb sigil for catalog.name="prediction"', () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{ enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    const sigil = screen.getByTestId('solver-net-sigil');
+    expect(sigil).toBeTruthy();
+    expect(sigil.getAttribute('data-sigil-name')).toBe('prediction');
+    expect(screen.getByTestId('solver-net-sigil-prediction')).toBeTruthy();
+  });
+
+  it('renders the fallback sigil for unknown SolverNet names', () => {
+    render(
+      <NetCard
+        catalog={{ ...baseCatalog, name: 'mystery-net' }}
+        config={{ enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    const sigil = screen.getByTestId('solver-net-sigil');
+    expect(sigil).toBeTruthy();
+    expect(sigil.getAttribute('data-sigil-name')).toBe('mystery-net');
+    expect(screen.getByTestId('solver-net-sigil-fallback')).toBeTruthy();
+  });
+
   it('persists the model when the operator edits the fallback value', async () => {
     render(
       <NetCard
