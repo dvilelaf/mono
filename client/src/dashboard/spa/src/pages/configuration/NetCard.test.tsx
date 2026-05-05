@@ -138,14 +138,57 @@ describe('NetCard', () => {
       />,
     );
 
-    fireEvent.change(screen.getByDisplayValue('claude-haiku-4-5-20251001'), {
-      target: { value: 'claude-sonnet-4-5-20250929' },
+    fireEvent.change(screen.getByLabelText('Claude model'), {
+      target: { value: 'claude-sonnet-4-6' },
     });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
 
     await waitFor(() => expect(apiMock.updateSolverNet).toHaveBeenCalled());
     expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
+    }));
+  });
+
+  it('renders an unknown model as a Custom option alongside the canonical tiers, and switching to Sonnet stages a dirty save', async () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          role: 'solving',
+          harness: 'claude-code-learner',
+          model: 'claude-sonnet-4-5-20250929',
+          modelExplicit: true,
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    const select = screen.getByLabelText('Claude model') as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    const optionLabels = Array.from(select.options).map((o) => o.textContent);
+
+    expect(optionValues).toContain('claude-haiku-4-5-20251001');
+    expect(optionValues).toContain('claude-sonnet-4-6');
+    expect(optionValues).toContain('claude-opus-4-7');
+    expect(optionValues).toContain('claude-sonnet-4-5-20250929');
+    expect(optionLabels).toContain('Haiku');
+    expect(optionLabels).toContain('Sonnet');
+    expect(optionLabels).toContain('Opus');
+    expect(optionLabels).toContain('Custom (claude-sonnet-4-5-20250929)');
+
+    // No dirty banner yet — select reflects the stored value.
+    expect(screen.queryByRole('button', { name: /save changes/i })).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'claude-sonnet-4-6' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(apiMock.updateSolverNet).toHaveBeenCalled());
+    expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
+      model: 'claude-sonnet-4-6',
     }));
   });
 });
