@@ -51,6 +51,30 @@ interface EligibleMarket {
   orderbookAgeSeconds: number;
 }
 
+/**
+ * Persistent state observable via `getState()` (Task 5 of
+ * spec/2026-05-05-launcher-role-and-mode.md §5.3). The launcher status
+ * endpoint surfaces these fields verbatim. Stale-poll detection
+ * (lastPollAt + 2*cadence) is computed by the endpoint, not here.
+ */
+export interface PredictionV1GeneratorState {
+  lastPollAt?: string;
+  lastPollSummary?: {
+    evaluated: number;
+    posted: number;
+    skipped: number;
+  };
+  lastError?: { message: string; at: string };
+}
+
+export interface PredictionV1GeneratorStateSnapshot extends PredictionV1GeneratorState {
+  cadenceMs: number;
+}
+
+export type PredictionV1GeneratorTick = (() => Promise<Task[] | null>) & {
+  getState(): PredictionV1GeneratorStateSnapshot;
+};
+
 const DEFAULTS = {
   minTimeToResolutionHours: 24,
   maxTimeToResolutionHours: 168,
@@ -65,14 +89,18 @@ const DEFAULTS = {
   submissionWindowMs: 6 * 60 * 60 * 1000,
 } as const;
 
-export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
+export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): PredictionV1GeneratorTick {
   const postedAtByCondition = new Map<string, number>();
   const postedCountByDay = new Map<string, number>();
   const allowlist = conditionIdSet(config.allowlistConditionIds);
   const blocklist = conditionIdSet(config.blocklistConditionIds);
   let lastPollStartedAt = 0;
+  // Mutable state, observable via getState(). The role-gate early-return
+  // intentionally does not touch this — a closed gate is "no poll happened",
+  // which the launcher status endpoint reads as `lastPollAt: undefined`.
+  const state: PredictionV1GeneratorState = {};
 
-  return async (): Promise<Task[] | null> => {
+  const tick = async (): Promise<Task[] | null> => {
     // Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
     // Always-spawn loop, tick-time gate: if `getRoles` is supplied and the
     // operator's `solverNets.prediction.roles` does not include 'launching',
@@ -88,6 +116,8 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
       return null;
     }
     lastPollStartedAt = now;
+    // Record that a poll attempt happened, regardless of success.
+    state.lastPollAt = new Date(now).toISOString();
 
     pruneOpenRounds(postedAtByCondition, now);
     const dayKey = new Date(now).toISOString().slice(0, 10);
@@ -95,20 +125,33 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
     const dailyRemaining = Math.max(0, (config.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay) - todayCount);
     const openRemaining = Math.max(0, (config.maxOpenRounds ?? DEFAULTS.maxOpenRounds) - postedAtByCondition.size);
     const pollLimit = Math.min(config.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll, dailyRemaining, openRemaining);
-    if (pollLimit <= 0) return null;
+    if (pollLimit <= 0) {
+      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
+      state.lastError = undefined;
+      return null;
+    }
 
     let candidates: MarketCandidate[];
     try {
       candidates = await listMarketCandidates({ ...config, limit: 250 });
-    } catch {
+    } catch (err) {
+      // Preserve existing swallow-and-return-null contract; record the error
+      // for getState() so the launcher status endpoint can render it.
+      state.lastError = {
+        message: err instanceof Error ? err.message : String(err),
+        at: new Date().toISOString(),
+      };
+      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
       return null;
     }
 
     const eligible: EligibleMarket[] = [];
+    let evaluatedCount = 0;
     for (const market of prioritizeAllowlisted(candidates, allowlist)) {
       if (eligible.length >= pollLimit * 3) break;
       const conditionId = normalizeConditionId(market.conditionId);
       if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
+      evaluatedCount += 1;
       const checked = await checkMarketEligibility(market, config, now);
       if (checked) eligible.push(checked);
     }
@@ -135,8 +178,31 @@ export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}) {
     if (tasks.length > 0) {
       postedCountByDay.set(dayKey, todayCount + tasks.length);
     }
+    // evaluated = candidates that survived dedup/blocklist and entered checkMarketEligibility
+    // posted    = tasks built (final selection)
+    // skipped   = evaluated - posted (rejected by eligibility check or eligible-but-not-selected within pollLimit)
+    // Markets filtered out before eligibility check (dedup, blocklist, or exit at eligible*3 cap) are
+    // not counted here — they're not surprising to the launcher and a future skipReasons field can
+    // surface them by category if needed.
+    const evaluated = evaluatedCount;
+    const posted = tasks.length;
+    const skipped = Math.max(0, evaluated - posted);
+    state.lastPollSummary = { evaluated, posted, skipped };
+    state.lastError = undefined;
     return tasks.length > 0 ? tasks : null;
   };
+
+  return Object.assign(tick, {
+    getState(): PredictionV1GeneratorStateSnapshot {
+      // Return a defensive copy so callers can't mutate internal state.
+      return {
+        lastPollAt: state.lastPollAt,
+        lastPollSummary: state.lastPollSummary ? { ...state.lastPollSummary } : undefined,
+        lastError: state.lastError ? { ...state.lastError } : undefined,
+        cadenceMs: config.cadenceMs ?? DEFAULTS.cadenceMs,
+      };
+    },
+  });
 }
 
 async function checkMarketEligibility(
