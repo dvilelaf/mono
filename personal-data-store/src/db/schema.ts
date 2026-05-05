@@ -15,3 +15,4 @@ export * from "../domains/personality/personality.schema.js";
 export * from "../domains/goals/goals.schema.js";
 export * from "../domains/interventions/interventions.schema.js";
 export * from "../domains/checkin/checkin.schema.js";
+export * from "../domains/watchdog/watchdog.schema.js";
