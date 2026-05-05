@@ -22,6 +22,8 @@ import {
 } from '../../harnesses/manifest/content-hash.js';
 import { writeInstalledPlugIn } from '../../installed-records.js';
 import { formatRecommendations } from '../../recommendations/format.js';
+import { publishAttestation } from '../../network-trust/attestation.js';
+import type { PlugInAttestation } from '../../network-trust/schema.js';
 
 function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -104,6 +106,11 @@ async function validate(ctx: CommandContext, rest: string[]): Promise<void> {
 }
 
 async function add(ctx: CommandContext, rest: string[]): Promise<void> {
+  const wantPublish =
+    rest.includes('--publish') ||
+    (typeof ctx.env['JINN_PUBLISH_INSTALL_ATTESTATIONS'] === 'string' &&
+      ['1', 'true', 'yes'].includes(ctx.env['JINN_PUBLISH_INSTALL_ATTESTATIONS'].toLowerCase()));
+
   const target = rest.find((arg) => !arg.startsWith('--'));
   if (!target) {
     writeJson(ctx, {
@@ -130,6 +137,8 @@ async function add(ctx: CommandContext, rest: string[]): Promise<void> {
     const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
       ? ctx.env['JINN_HOME']
       : homedir();
+
+    // Record the install (publishedAttestation set after publish attempt).
     writeInstalledPlugIn(home, manifest.name, {
       version: manifest.version,
       manifestHash,
@@ -139,6 +148,57 @@ async function add(ctx: CommandContext, rest: string[]): Promise<void> {
       installedAt: new Date().toISOString(),
       publishedAttestation: null,
     });
+
+    // Best-effort attestation publish when --publish or JINN_PUBLISH_INSTALL_ATTESTATIONS.
+    if (wantPublish) {
+      const attestation: PlugInAttestation = {
+        subject: manifest.name,
+        subjectType: 'plug-in',
+        version: manifest.version,
+        manifestHash,
+        tarballHash,
+        tier: 1,
+        kind: 'installed',
+        score: 0,
+        reason: '',
+        reviewCid: '',
+        attestedAt: Math.floor(Date.now() / 1000),
+      };
+      // Stub clients — publishAttestation is mocked in tests. In production
+      // environments the bridge wires to IdentityPublisher (a later integration
+      // task). For now we supply null-impl clients that will produce an ok=false
+      // result with a clear error so the install still succeeds.
+      const ipfsStub = {
+        pinJson: async () => { throw new Error('no IPFS client configured for CLI publish'); },
+        fetchJson: async () => null,
+      };
+      const reputationStub = {
+        giveFeedback: async () => { throw new Error('no reputation client configured for CLI publish'); },
+      };
+      const result = await publishAttestation({
+        attestation,
+        targetAgentId: 0n,
+        ipfs: ipfsStub,
+        reputation: reputationStub,
+      });
+      if (result.ok && result.txHash) {
+        // Update the record with the attestation tx hash.
+        writeInstalledPlugIn(home, manifest.name, {
+          version: manifest.version,
+          manifestHash,
+          tarballHash,
+          entryPointHashes,
+          tier: 1,
+          installedAt: new Date().toISOString(),
+          publishedAttestation: result.txHash,
+        });
+      } else {
+        process.stderr.write(
+          `Warning: attestation publish failed: ${result.error ?? 'unknown error'}\n`,
+        );
+      }
+    }
+
     writeJson(ctx, {
       verb: 'solver-plugins add',
       added: {
@@ -257,15 +317,25 @@ const command: CommandModule = {
   name: 'solver-plugins',
   summary: 'Inspect, validate, pack, and register SolverPlugin packages',
   helpText: `Usage:
-  jinn solver-plugins add <path>
+  jinn solver-plugins add <path> [--publish]
   jinn solver-plugins show <source-or-path>
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
   jinn solver-plugins recommendations [--limit <N>] [--since <iso>]
+  jinn solver-plugins endorse <name> [--reason <text>]
+  jinn solver-plugins warn <name> --reason <text>
+  jinn solver-plugins block <name> --reason <text>
+  jinn solver-plugins review <name> --notes-file <path>
+  jinn solver-plugins feedback list <name> [--include-history] [--from <attestor>]
 
   add <path>         Record content-hash binding for a local SolverPlugin
                      package so the runtime loader can detect changes.
                      Respects JINN_HOME env var (default: ~/.jinn-client).
+  --publish          Also publish an install attestation on-chain (best-effort).
+                     Also triggered by JINN_PUBLISH_INSTALL_ATTESTATIONS=1.
+  endorse|warn|block Publish an attestation verdict for an installed plug-in.
+  review             Pin review notes to IPFS and publish a review attestation.
+  feedback list      List attestations from followed attestors for a plug-in.
   recommendations    Print SolverPlugin packages the learner has recommended
                      for operator review. Agents emit recommendations via the
                      recommend_plugin MCP tool; the operator decides to install.

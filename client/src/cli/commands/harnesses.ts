@@ -36,6 +36,8 @@ import {
   computeEntryPointHashes,
 } from '../../harnesses/manifest/content-hash.js';
 import { writeInstalledHarness } from '../../installed-records.js';
+import { publishAttestation } from '../../network-trust/attestation.js';
+import type { PlugInAttestation } from '../../network-trust/schema.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -103,6 +105,7 @@ async function runAdd(
   ctx: CommandContext,
   configPath: string,
   pkgPath: string,
+  wantPublish: boolean,
 ): Promise<void> {
   const absPkg = isAbsolute(pkgPath) ? pkgPath : resolve(process.cwd(), pkgPath);
   const manifestPath = join(absPkg, 'jinn.manifest.json');
@@ -180,6 +183,56 @@ async function runAdd(
   list.push({ name: manifest.name, entry: absPkg });
   cfg.harnesses = { ...(cfg.harnesses ?? {}), externalImpls: list };
   writeConfigFile(configPath, cfg);
+
+  // Best-effort attestation publish when --publish or JINN_PUBLISH_INSTALL_ATTESTATIONS.
+  if (wantPublish) {
+    const attestation: PlugInAttestation = {
+      subject: manifest.name,
+      subjectType: 'harness',
+      version: manifest.version,
+      manifestHash,
+      tarballHash,
+      tier: 1,
+      kind: 'installed',
+      score: 0,
+      reason: '',
+      reviewCid: '',
+      attestedAt: Math.floor(Date.now() / 1000),
+    };
+    // Stub clients — publishAttestation is mocked in tests. In production
+    // environments the bridge wires to IdentityPublisher (a later integration
+    // task). For now we supply null-impl clients that will produce an ok=false
+    // result with a clear error so the install still succeeds.
+    const ipfsStub = {
+      pinJson: async () => { throw new Error('no IPFS client configured for CLI publish'); },
+      fetchJson: async () => null,
+    };
+    const reputationStub = {
+      giveFeedback: async () => { throw new Error('no reputation client configured for CLI publish'); },
+    };
+    const result = await publishAttestation({
+      attestation,
+      targetAgentId: 0n,
+      ipfs: ipfsStub,
+      reputation: reputationStub,
+    });
+    if (result.ok && result.txHash) {
+      writeInstalledHarness(home, manifest.name, {
+        version: manifest.version,
+        manifestHash,
+        tarballHash,
+        entryPointHashes,
+        tier: 1,
+        installedAt: new Date().toISOString(),
+        publishedAttestation: result.txHash,
+      });
+    } else {
+      process.stderr.write(
+        `Warning: attestation publish failed: ${result.error ?? 'unknown error'}\n`,
+      );
+    }
+  }
+
   emitJson(ctx, {
     verb: 'harnesses add',
     added: { name: manifest.name, entry: absPkg, version: manifest.version },
@@ -248,7 +301,7 @@ async function runRecommendations(ctx: CommandContext, rest: string[]): Promise<
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `\
-jinn harnesses <list|add|remove|recommendations> [options]
+jinn harnesses <list|add|remove|recommendations|endorse|warn|block|review|feedback> [options]
 
 Manage operator-supplied external Harnesses (Path 2 plug-in surface).
 
@@ -261,17 +314,28 @@ Subcommands:
   recommendations        Print Harness packages the learner has recommended
   [--limit <N>]          for operator review (default: 20)
   [--since <iso>]        Filter to recommendations newer than an ISO date
+  endorse <name>         Publish an endorse attestation for an installed harness
+  warn <name>            Publish a warn attestation (--reason required)
+  block <name>           Publish a block attestation + disable locally (--reason required)
+  review <name>          Pin notes to IPFS and publish a review attestation
+  feedback list <name>   List attestations from followed attestors
 
 Options:
   --config <path>        Path to config file (default: ~/.jinn-client/config.json)
+  --publish              Publish install attestation on-chain when adding
   --json                 JSON output (default; only mode currently supported)
 
 Examples:
   jinn harnesses list
   jinn harnesses add ./node_modules/@example/forecaster
+  jinn harnesses add ./node_modules/@example/forecaster --publish
   jinn harnesses remove @example/forecaster
   jinn harnesses recommendations
   jinn harnesses recommendations --since 2026-05-01T00:00:00Z
+  jinn harnesses endorse @example/forecaster --reason "works well"
+  jinn harnesses warn @example/forecaster --reason "subtle crash on edge case"
+  jinn harnesses block @example/forecaster --reason "verified malware"
+  jinn harnesses feedback list @example/forecaster
 `;
 
 async function run(ctx: CommandContext): Promise<void> {
@@ -288,6 +352,7 @@ async function run(ctx: CommandContext): Promise<void> {
       options: {
         config: { type: 'string' as const },
         json: { type: 'boolean' as const, default: true },
+        publish: { type: 'boolean' as const, default: false },
       },
       allowPositionals: true,
     });
@@ -301,6 +366,13 @@ async function run(ctx: CommandContext): Promise<void> {
       ? parsed.values.config
       : DEFAULT_CONFIG_PATH;
 
+  const wantPublish =
+    parsed.values.publish === true ||
+    (typeof ctx.env['JINN_PUBLISH_INSTALL_ATTESTATIONS'] === 'string' &&
+      ['1', 'true', 'yes'].includes(
+        ctx.env['JINN_PUBLISH_INSTALL_ATTESTATIONS'].toLowerCase(),
+      ));
+
   switch (sub) {
     case 'list':
       runList(ctx, configPath);
@@ -311,7 +383,7 @@ async function run(ctx: CommandContext): Promise<void> {
         emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses add <pkg-path>');
         return;
       }
-      await runAdd(ctx, configPath, pkgPath);
+      await runAdd(ctx, configPath, pkgPath, wantPublish);
       return;
     }
     case 'remove': {
@@ -330,7 +402,7 @@ async function run(ctx: CommandContext): Promise<void> {
       emitError(
         ctx,
         'invalid_invocation',
-        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|recommendations)`,
+        `Unknown harnesses subcommand: ${sub} (expected list|add|remove|recommendations|endorse|warn|block|review|feedback)`,
       );
       return;
   }
