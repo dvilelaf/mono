@@ -1,12 +1,14 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { JINN_NETWORK_TOOLS_PLUGIN, loadSolverNets } from '../../src/solver-nets/registry.js';
 import { SOLVER_NET_CONTRACTS } from '../../src/solver-nets/contracts.js';
 import { makePredictionV1Task } from '../harnesses/impls/prediction-v1-test-helpers.js';
+import { writeInstalledPlugIn } from '../../src/installed-records.js';
+import { computeManifestHash, computeTarballHash, computeEntryPointHashes } from '../../src/harnesses/manifest/content-hash.js';
 
-function makeLocalPlugin(supports: string[]): string {
+function makeLocalPlugin(supports: string[]): { source: string; root: string } {
   const root = mkdtempSync(join(tmpdir(), 'jinn-runtime-plugin-'));
   mkdirSync(root, { recursive: true });
   writeFileSync(join(root, 'jinn.plugin.json'), JSON.stringify({
@@ -14,7 +16,10 @@ function makeLocalPlugin(supports: string[]): string {
     version: '0.1.0',
     jinn: { supports },
   }, null, 2));
-  return `path:${root}`;
+  return {
+    source: `path:${root}`,
+    root,
+  };
 }
 
 describe('SolverNet contracts', () => {
@@ -127,18 +132,36 @@ describe('SolverNet contracts', () => {
   });
 
   it('loads operator configured runtime plugins after defaults', async () => {
-    const localPlugin = makeLocalPlugin(['prediction.v1']);
+    const { source: localPluginSource, root: localPluginRoot } = makeLocalPlugin(['prediction.v1']);
+
+    // Seed the install record so loadSolverNets's content-hash check passes.
+    const HOME = mkdtempSync(join(tmpdir(), 'jinn-test-home-'));
+    const manifest = JSON.parse(readFileSync(join(localPluginRoot, 'jinn.plugin.json'), 'utf-8')) as object;
+    const manifestHash = computeManifestHash(manifest);
+    const tarballHash = computeTarballHash(localPluginRoot);
+    const entryPointHashes = computeEntryPointHashes(localPluginRoot, []);
+
+    writeInstalledPlugIn(HOME, '@example/runtime-plugin', {
+      version: '0.1.0',
+      manifestHash,
+      tarballHash,
+      entryPointHashes,
+      tier: 1,
+      installedAt: new Date().toISOString(),
+      publishedAttestation: null,
+    });
+
     const registry = await loadSolverNets({
       solverNets: {
         prediction: {
           enabled: true,
           solverType: 'prediction.v1',
           harness: 'prediction-v1-baseline',
-          plugins: [localPlugin],
+          plugins: [localPluginSource],
           taskGenerator: { enabled: true },
         },
       },
-    });
+    }, { home: HOME });
     const net = registry.forSolverType('prediction.v1');
     expect(net?.runtimePlugins.map((plugin) => plugin.name)).toEqual([
       '@jinn-network/network-tools',
@@ -170,6 +193,7 @@ describe('SolverNet contracts', () => {
   });
 
   it('rejects runtime plugins whose supports list does not include the SolverNet solverType', async () => {
+    const { source: localPluginSource } = makeLocalPlugin(['portfolio.v0']);
     await expect(
       loadSolverNets({
         solverNets: {
@@ -177,7 +201,7 @@ describe('SolverNet contracts', () => {
             enabled: true,
             solverType: 'prediction.v1',
             harness: 'prediction-v1-baseline',
-            plugins: [makeLocalPlugin(['portfolio.v0'])],
+            plugins: [localPluginSource],
             taskGenerator: { enabled: true },
           },
         },
