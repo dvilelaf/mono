@@ -839,6 +839,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
+        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+        // Hot-apply for the PATCH endpoint (Task 8): mirror the operator-mode
+        // setup hook so subsequent /v1/launcher/status reads see the post-edit
+        // roles snapshot without a daemon restart. Mutates `config.solverNets`
+        // in place so the per-tick `roles.includes('launching')` gate flips on
+        // the very next launcher tick.
+        onSolverNetsUpdated: (solverNets) => {
+          config.solverNets = solverNets as typeof config.solverNets;
+          invalidatePredictionOperatorStatusCache(config);
+        },
         getGeneratorState: (netName) => {
           if (netName !== 'prediction') return undefined;
           return predictionGeneratorRef?.getState();
