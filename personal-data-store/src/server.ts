@@ -8,6 +8,7 @@ import { myfitnesspalConnector } from "./connectors/myfitnesspal.connector.js";
 import { revolutConnector } from "./connectors/revolut.connector.js";
 import { coinbaseConnector } from "./connectors/coinbase.connector.js";
 import { subscriptionsConnector } from "./connectors/subscriptions.connector.js";
+import { goalsConnector } from "./connectors/goals.connector.js";
 
 registerConnector(auraConnector);
 registerConnector(cryptoConnector);
@@ -16,6 +17,7 @@ registerConnector(myfitnesspalConnector);
 registerConnector(revolutConnector);
 registerConnector(coinbaseConnector);
 registerConnector(subscriptionsConnector);
+registerConnector(goalsConnector);
 
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(`Personal Data Store running at http://0.0.0.0:${config.port}`);

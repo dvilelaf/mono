@@ -16,5 +16,6 @@ export const config = {
     gmail: { enabled: true, schedule: "0 * * * *" },
     csv_import: { enabled: true, schedule: null as string | null },
     subscriptions: { enabled: true, schedule: "0 3 * * *" },
+    goals: { enabled: true, schedule: "0 2 * * *" },
   },
 } as const;
