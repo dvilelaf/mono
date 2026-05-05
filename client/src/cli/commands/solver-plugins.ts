@@ -1,16 +1,26 @@
 /**
- * `jinn solver-plugins show|validate|pack` — author/curator tooling.
+ * `jinn solver-plugins show|validate|pack|add` — author/curator tooling.
  *
  * These commands inspect SolverPlugin packages. They do not activate plugins;
  * operators attach plugins to SolverNets with `jinn solver-nets add-plugin`.
+ *
+ * `add <path>` records content-hash binding at install time so the runtime
+ * loader can refuse a package whose on-disk content has changed since approval.
  */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { digestDirectory, loadSolverPluginManifest, resolveSolverPlugin } from '../../plugins/index.js';
+import {
+  computeManifestHash,
+  computeTarballHash,
+  computeEntryPointHashes,
+} from '../../harnesses/manifest/content-hash.js';
+import { writeInstalledPlugIn } from '../../installed-records.js';
 
 function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -92,6 +102,63 @@ async function validate(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 }
 
+async function add(ctx: CommandContext, rest: string[]): Promise<void> {
+  const target = rest.find((arg) => !arg.startsWith('--'));
+  if (!target) {
+    writeJson(ctx, {
+      error: { code: 'invalid_invocation', message: 'solver-plugins add requires <path>' },
+    });
+    ctx.exit(1);
+    return;
+  }
+  const root = localRoot(target);
+  if (!existsSync(root)) {
+    writeJson(ctx, {
+      error: { code: 'not_found', message: `SolverPlugin path not found: ${root}` },
+    });
+    ctx.exit(1);
+    return;
+  }
+  try {
+    const { manifest } = loadSolverPluginManifest(root);
+    const manifestHash = computeManifestHash(manifest);
+    const tarballHash = computeTarballHash(root);
+    // Use jinn.skills as the declared entry-point files; fall back to empty.
+    const skills: string[] = manifest.jinn.skills ?? [];
+    const entryPointHashes = computeEntryPointHashes(root, skills);
+    const home = typeof ctx.env['JINN_HOME'] === 'string' && ctx.env['JINN_HOME'].length > 0
+      ? ctx.env['JINN_HOME']
+      : homedir();
+    writeInstalledPlugIn(home, manifest.name, {
+      version: manifest.version,
+      manifestHash,
+      tarballHash,
+      entryPointHashes,
+      tier: 1, // v0 default; tier-detection lands in a later phase
+      installedAt: new Date().toISOString(),
+      publishedAttestation: null,
+    });
+    writeJson(ctx, {
+      verb: 'solver-plugins add',
+      added: {
+        name: manifest.name,
+        version: manifest.version,
+        manifestHash,
+        tarballHash,
+        entryPointCount: skills.length,
+      },
+    });
+  } catch (err) {
+    writeJson(ctx, {
+      error: {
+        code: 'invalid_solver_plugin',
+        message: err instanceof Error ? err.message : String(err),
+      },
+    });
+    ctx.exit(1);
+  }
+}
+
 async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
   try {
@@ -154,11 +221,16 @@ async function pack(ctx: CommandContext, rest: string[]): Promise<void> {
 
 const command: CommandModule = {
   name: 'solver-plugins',
-  summary: 'Inspect, validate, and pack SolverPlugin packages',
+  summary: 'Inspect, validate, pack, and register SolverPlugin packages',
   helpText: `Usage:
+  jinn solver-plugins add <path>
   jinn solver-plugins show <source-or-path>
   jinn solver-plugins validate <source-or-path>
   jinn solver-plugins pack <path> [--out <file.tgz>]
+
+  add <path>         Record content-hash binding for a local SolverPlugin
+                     package so the runtime loader can detect changes.
+                     Respects JINN_HOME env var (default: ~/.jinn-client).
 
 SolverPlugin commands are author and curator tooling. They do not activate a
 plugin for runtime use. Attach runtime plugins with:
@@ -170,6 +242,7 @@ plugin for runtime use. Attach runtime plugins with:
       ctx.writer.write(command.helpText + '\n');
       return;
     }
+    if (subverb === 'add') return add(ctx, rest);
     if (subverb === 'show') return show(ctx, rest);
     if (subverb === 'validate') return validate(ctx, rest);
     if (subverb === 'pack') return pack(ctx, rest);
@@ -177,7 +250,7 @@ plugin for runtime use. Attach runtime plugins with:
       error: {
         code: 'invalid_invocation',
         message: `Unknown solver-plugins subverb: ${subverb}`,
-        expected: 'show|validate|pack',
+        expected: 'add|show|validate|pack',
       },
     });
     ctx.exit(1);
