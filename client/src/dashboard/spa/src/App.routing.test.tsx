@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,8 +8,8 @@ import { ConfigurationPage } from './pages/Configuration.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
 
-// Configuration + Overview pages both useQuery for the daemon API; mock so
-// the routing tests don't depend on a live server.
+// Configuration + Overview + Launcher pages all useQuery for the daemon API;
+// mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
   api: {
     getBootstrap: async () => ({}),
@@ -17,6 +17,9 @@ vi.mock('./api/client.js', () => ({
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
+    fetchLauncherStatus: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
+    fetchLauncherTasks: async () => ({ schemaVersion: 1, generatedAt: '', tasks: [] }),
+    patchLauncherSolverNet: async () => ({ ok: true, name: 'prediction', roles: [], generator: {} }),
   },
 }));
 
@@ -61,7 +64,7 @@ describe('App routes', () => {
     expect(screen.getByText(/solvernets/i)).toBeTruthy();
   });
 
-  it('renders LauncherPage on /launcher', () => {
+  it('renders LauncherPage on /launcher', async () => {
     render(
       withProviders(
         <Switch>
@@ -71,7 +74,10 @@ describe('App routes', () => {
         '/launcher',
       ),
     );
-    expect(screen.getByRole('heading', { name: /launch a solvernet/i })).toBeTruthy();
+    // No SolverNet has 'launching' role yet -> empty state surfaces.
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /you haven't launched a solvernet yet/i })).toBeTruthy(),
+    );
   });
 
   it('renders LauncherConfigurationPage on /launcher/configuration', () => {
