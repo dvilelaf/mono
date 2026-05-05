@@ -25,6 +25,11 @@ export interface IpfsAttestationClient {
   pinJson(value: unknown): Promise<string>;
   /** Fetch a JSON value from IPFS by CID. */
   fetchJson(cid: string): Promise<unknown>;
+  /**
+   * Pin raw text (e.g. Markdown review notes) to IPFS and return the CID.
+   * Optional — when absent, callers wrap the text as `{ text }` and use pinJson.
+   */
+  pinText?(text: string): Promise<string>;
 }
 
 // ── Reputation client interface ──────────────────────────────────────────────

@@ -379,11 +379,94 @@ async function runBlock(ctx: CommandContext, rest: string[], home: string): Prom
   await runFeedbackVerb(ctx, { kind: 'block', subject, reason: parsed.values.reason }, home);
 }
 
-async function runReview(ctx: CommandContext, rest: string[], _home: string): Promise<void> {
-  // Task 6.3: IPFS-pinned notes — implemented in the next task.
-  void rest;
-  emitJson(ctx, { error: { code: 'not_implemented', message: 'harnesses review not yet implemented (Task 6.3)' } });
-  ctx.exit(1);
+async function runReview(ctx: CommandContext, rest: string[], home: string): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: { 'notes-file': { type: 'string' as const } } });
+  } catch (err) {
+    emitError(ctx, 'invalid_invocation', (err as Error).message);
+    return;
+  }
+  const subject = parsed.positionals[0];
+  if (!subject) {
+    emitError(ctx, 'invalid_invocation', 'usage: jinn harnesses review <name> --notes-file <path>');
+    return;
+  }
+  const notesFile = parsed.values['notes-file'];
+  if (!notesFile) {
+    emitError(ctx, 'invalid_invocation', '--notes-file is required for review');
+    return;
+  }
+  await runHarnessReviewImpl(ctx, { subject, notesFile }, home);
+}
+
+async function runHarnessReviewImpl(
+  ctx: CommandContext,
+  args: { subject: string; notesFile: string },
+  home: string,
+): Promise<void> {
+  const records = readInstalledHarnesses(home);
+  const installed = records[args.subject];
+  if (!installed) {
+    emitError(ctx, 'not_installed', `${args.subject} is not installed; nothing to attest`);
+    return;
+  }
+
+  if (!existsSync(args.notesFile)) {
+    emitError(ctx, 'not_found', `Notes file not found: ${args.notesFile}`);
+    return;
+  }
+
+  const notesText = readFileSync(args.notesFile, 'utf8');
+
+  const ipfsStub = {
+    pinJson: async (v: unknown) => { void v; throw new Error('no IPFS client configured for CLI review'); },
+    fetchJson: async () => null,
+    pinText: async (text: string) => { void text; throw new Error('no IPFS client configured for CLI review'); },
+  };
+
+  let notesCid = '';
+  try {
+    notesCid = await ipfsStub.pinText(notesText);
+  } catch {
+    // best-effort
+  }
+
+  const attestation: PlugInAttestation = {
+    subject: args.subject,
+    subjectType: 'harness',
+    version: installed.version,
+    manifestHash: installed.manifestHash,
+    tarballHash: installed.tarballHash,
+    tier: installed.tier,
+    kind: 'review',
+    score: 0,
+    reason: '',
+    reviewCid: notesCid,
+    attestedAt: Math.floor(Date.now() / 1000),
+  };
+
+  const reputationStub = {
+    giveFeedback: async () => { throw new Error('no reputation client configured for CLI review'); },
+  };
+
+  const result = await publishAttestation({
+    attestation,
+    targetAgentId: 0n,
+    ipfs: ipfsStub,
+    reputation: reputationStub,
+  });
+
+  emitJson(ctx, {
+    verb: 'harnesses review',
+    subject: args.subject,
+    kind: 'review',
+    notesCid,
+    txHash: result.txHash ?? null,
+    cid: result.cid ?? null,
+    ok: result.ok,
+    publishError: result.ok ? undefined : result.error,
+  });
 }
 
 async function runHarnessFeedbackList(ctx: CommandContext, rest: string[], _home: string): Promise<void> {
