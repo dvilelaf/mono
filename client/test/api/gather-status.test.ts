@@ -266,4 +266,41 @@ describe('gatherStatusForApi', () => {
       expect(apiStatus.predictionV1?.operator?.solverNet?.roles).toEqual([]);
     });
   });
+
+  it("omits 'launching' from operator.solverNet.roles on the unavailable path", async () => {
+    mockStatusRpc();
+    const buildPredictionOperatorStatus = vi.fn(async () => {
+      throw new Error('plugin hash failed');
+    });
+    vi.doMock('../../src/solver-nets/prediction-operator-ux.js', () => ({
+      buildPredictionOperatorStatus,
+    }));
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const config = {
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          harness: 'prediction-v1-baseline',
+          taskGenerator: { enabled: true },
+          roles: ['solving', 'launching'],
+        },
+      },
+    } as unknown as JinnConfig;
+
+    await withTempStore(async (store) => {
+      const apiStatus = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        config,
+        configPath: '/tmp/config.json',
+      });
+
+      expect(apiStatus.predictionV1?.operator?.ok).toBe(false);
+      expect(apiStatus.predictionV1?.operator?.solverNet?.roles).toEqual(['solving']);
+    });
+  });
 });
