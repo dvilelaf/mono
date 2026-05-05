@@ -48,6 +48,19 @@ Return to the coordinator: a one-paragraph summary of what changed (or didn't) a
 - Do not commit yourself — the promoter commits as it goes
 - Do not modify anything outside `workingDir/.improve/` from this skill
 
+## Recommending plug-ins and harnesses
+
+If the promoter's analysis reveals that a plug-in or harness from the corpus
+performed materially better in prior successful attempts, **do not install it**.
+Instead, call `recommend_plugin` (for SolverPlugins) or `recommend_harness` (for
+Harnesses) with the package name, version, reason, and the envelope refs that
+informed the observation. The operator reviews pending recommendations via
+`jinn solver-plugins recommendations` / `jinn harnesses recommendations` and
+decides whether to install.
+
+Never call `yarn add`, `jinn solver-plugins add`, or `jinn harnesses add` from
+within a learner session. The recommendation queue is the only sanctioned channel.
+
 ## Cross-reference
 
 Spec: §4.6, §6.2, §6.4, §7.

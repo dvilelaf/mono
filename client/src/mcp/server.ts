@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import { createCorpus, type Corpus } from '../corpus/index.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 import { executeBashWithFilter } from '../runner/bash-executor.js';
+import { handleRecommend } from './recommend-tool.js';
 
 const server = new McpServer({
   name: 'jinn-client',
@@ -48,6 +50,21 @@ const daemonApiUrl = process.env['DAEMON_API_URL'] ?? '';
 // Bearer token for daemon API cost-mutating routes. Empty string when
 // unset (e.g. legacy harness wiring) — the daemon will respond 401.
 const daemonApiToken = process.env['DAEMON_API_TOKEN'] ?? '';
+
+// ── Recommendations config ───────────────────────────────────────────────────
+// Home directory for writing recommendations.jsonl.
+const jinnHome = (process.env['JINN_HOME'] ?? '').length > 0
+  ? process.env['JINN_HOME']!
+  : homedir();
+// Session id stamped into each recommendation for traceability.
+const jinnSessionId = process.env['JINN_SESSION_ID'] ?? '';
+// Dedupe window from operator config (JINN_RECOMMENDATIONS_DEDUPE_WINDOW_DAYS).
+const recommendationsDedupeWindowDays = (() => {
+  const raw = process.env['JINN_RECOMMENDATIONS_DEDUPE_WINDOW_DAYS'];
+  if (!raw) return 7;
+  const n = Number(raw.trim());
+  return Number.isFinite(n) && n >= 1 && n <= 365 ? n : 7;
+})();
 
 // ── Corpus ──────────────────────────────────────────────────────────────────
 // Build a read-only corpus capability when the daemon supplied the keyless
@@ -402,6 +419,46 @@ server.tool(
         }),
       }],
       ...(result.exitCode !== 0 ? { isError: true as const } : {}),
+    };
+  },
+);
+
+// ── Recommendations ──────────────────────────────────────────────────────────
+
+const recommendInputSchema = {
+  pkg: z.string().min(1).describe('NPM package name, e.g. @acme/forecaster'),
+  version: z.string().min(1).describe('Semver version string, e.g. 1.2.3'),
+  reason: z.string().min(1).describe('Why this package looks useful — what you observed in the corpus'),
+  sourceCorpusEntries: z.array(z.string()).describe('Envelope refs (e.g. "envelope:bafy…") that informed this recommendation'),
+  phase: z.enum(['orient', 'strategize', 'plan', 'execute', 'debrief', 'improve', 'memory']).describe('Learner phase emitting this recommendation'),
+};
+
+server.tool(
+  'recommend_plugin',
+  'Recommend a SolverPlugin package for the operator to review and install. Does NOT install it — use this instead of running yarn add or jinn solver-plugins add. The operator reviews recommendations via `jinn solver-plugins recommendations`.',
+  recommendInputSchema,
+  async ({ pkg, version, reason, sourceCorpusEntries, phase }) => {
+    const result = handleRecommend(
+      { kind: 'plug-in', pkg, version, reason, sourceCorpusEntries, phase },
+      { home: jinnHome, sessionId: jinnSessionId, dedupeWindowDays: recommendationsDedupeWindowDays },
+    );
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+    };
+  },
+);
+
+server.tool(
+  'recommend_harness',
+  'Recommend a Harness package for the operator to review and install. Does NOT install it — use this instead of running yarn add or jinn harnesses add. The operator reviews recommendations via `jinn harnesses recommendations`.',
+  recommendInputSchema,
+  async ({ pkg, version, reason, sourceCorpusEntries, phase }) => {
+    const result = handleRecommend(
+      { kind: 'harness', pkg, version, reason, sourceCorpusEntries, phase },
+      { home: jinnHome, sessionId: jinnSessionId, dedupeWindowDays: recommendationsDedupeWindowDays },
+    );
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result) }],
     };
   },
 );

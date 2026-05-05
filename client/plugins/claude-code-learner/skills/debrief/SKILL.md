@@ -58,6 +58,19 @@ Return to the coordinator: a one-paragraph plain-English summary plus the path t
 - Do not modify `implStateDir` — Improve does that
 - Do not invent recommendations — every recommendation must be grounded in the evidence
 
+## Recommending plug-ins and harnesses
+
+If the analyst's cross-operator comparison or outcome-probe reveals a plug-in or
+harness that consistently performed well in successful peer attempts, **do not
+install it**. Call `recommend_plugin` (for SolverPlugins) or `recommend_harness`
+(for Harnesses) with the package name, version, reason, and the envelope refs that
+evidence the observation. The operator reviews pending recommendations via
+`jinn solver-plugins recommendations` / `jinn harnesses recommendations` and
+decides whether to install.
+
+Never call `yarn add`, `jinn solver-plugins add`, or `jinn harnesses add` from
+within a learner session. The recommendation queue is the only sanctioned channel.
+
 ## Cross-reference
 
 Spec: §4.5.
