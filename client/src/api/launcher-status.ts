@@ -27,7 +27,6 @@ export interface LauncherStatusGeneratorView {
     evaluated: number;
     posted: number;
     skipped: number;
-    skipReasons?: Record<string, number>;
   };
   lastError?: { message: string; at: string };
   cadenceMs: number;
@@ -65,7 +64,6 @@ export interface LauncherGeneratorStateSnapshot {
     evaluated: number;
     posted: number;
     skipped: number;
-    skipReasons?: Record<string, number>;
   };
   lastError?: { message: string; at: string };
   cadenceMs: number;
@@ -96,6 +94,18 @@ export interface GatherLauncherStatusDeps {
  * because the operator wants to see the failure first; `paused` only fires
  * when no generator state is exposed at all (closed role gate before the very
  * first tick, or a SolverNet without a launcher implementation).
+ *
+ * NOTE (v1 edge case, jinn-mono-l2zl carry-over from Task 6 review): a
+ * generator with a `cadenceMs > 0` and no `lastError` reports `active` even
+ * before its first poll has completed. If the daemon has been running long
+ * enough that the first poll *should* have completed but `lastPollAt` is
+ * still undefined, the operator UI will show "active, not stale" — which is
+ * misleading. The fix requires tracking a `genStartedAt` timestamp on the
+ * generator so the gather function can compare `now - genStartedAt`
+ * against `2 * cadenceMs`. Deferred to a follow-up: in v1 the prediction.v1
+ * cadence is 6h, so the window between "started" and "first tick" is short
+ * enough that the misclassification is rare in practice. Tracked under
+ * the launcher-mode plan (spec/2026-05-05-launcher-role-and-mode.md §5.3).
  */
 function deriveGeneratorState(
   snapshot: LauncherGeneratorStateSnapshot | undefined,
