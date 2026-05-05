@@ -82,7 +82,7 @@ Validation rules from `.15.4.8` carry forward unchanged:
 - Zod `preprocess` auto-migrates legacy `role: 'X'` config to `roles: ['X']`. (Only relevant for `solving` / `evaluating` — `launching` was never expressed as a single-value `role`.)
 - Setup endpoint accepts both wire shapes for backwards-compat; persists canonical `roles`.
 
-### 5.2 Generator gating — replace the boolean
+### 5.2 Generator gating — replace the boolean, hot-spawn the loop
 
 Today the Polymarket generator is gated behind `predictionV1LauncherEnabled: boolean` (`client/src/config.ts:318`). That flag is **removed**. Gating moves to:
 
@@ -90,9 +90,16 @@ Today the Polymarket generator is gated behind `predictionV1LauncherEnabled: boo
 solverNets.prediction.roles.includes('launching')
 ```
 
-The generator's internals (`client/src/solver-types/prediction-v1-auto.ts`) do not change. The wiring in `main.ts` that reads `predictionV1LauncherEnabled` becomes a `roles.includes('launching')` check on the prediction SolverNet's config block.
+The generator's internals (`client/src/solver-types/prediction-v1-auto.ts`) do not change. What does change is **how the gate is evaluated**: today the boolean is read at startup and decides whether the generator loop ever spawns; this spec requires the role gate to be evaluated at runtime so toggling `'launching'` in or out of `roles` takes effect **without restarting the daemon**.
 
-The other generator config keys (`predictionV1CadenceMs`, `predictionV1MaxNewRoundsPerPoll`, `predictionV1MaxNewRoundsPerDay`, `predictionV1MaxOpenRounds`, `predictionV1AllowlistConditionIds`, `predictionV1BlocklistConditionIds`, `predictionV1WindowMs`, `predictionV1ResolveGapMs`) stay where they are. They are launcher-tunable; Launcher mode's Configuration page edits them.
+Two acceptable implementations (the implementation plan picks one):
+
+- **Always-spawn, tick-time gate.** The generator loop is started at daemon boot regardless of role; each tick checks `roles.includes('launching')` for the SolverNet — if false, sleep + continue (no Polymarket call, no posting); if true, run the poll. Cost: a near-zero idle loop. Simplest.
+- **Spawn-on-demand.** The daemon watches the per-SolverNet config; on transition to `launching` it spawns the generator loop, on transition off it tears it down cleanly. Cleaner separation; slightly more plumbing around lifecycle and in-flight poll-cycle drains.
+
+Either way, **adding or removing `'launching'` from `roles` does not require a daemon restart**. The change takes effect within one cadence tick. Restart-required signaling on the Launcher mode setup flow is therefore not necessary.
+
+The other generator config keys (`predictionV1CadenceMs`, `predictionV1MaxNewRoundsPerPoll`, `predictionV1MaxNewRoundsPerDay`, `predictionV1MaxOpenRounds`, `predictionV1AllowlistConditionIds`, `predictionV1BlocklistConditionIds`, `predictionV1WindowMs`, `predictionV1ResolveGapMs`) stay where they are. They are launcher-tunable; Launcher mode's Configuration page edits them. These keys are read each tick, so edits to them also hot-apply.
 
 ### 5.3 Read endpoints
 
@@ -119,6 +126,7 @@ interface LauncherStatusResponse {
       };
       lastError?: { message: string; at: string };
       cadenceMs: number;
+      stale?: boolean;                    // true if (now - lastPollAt) > 2 × cadenceMs
     };
     openTasks: number;
     budget: {
@@ -176,9 +184,9 @@ A persistent control at the top of the app shell (`client/src/dashboard/spa/src/
 - `Operator`
 - `Launcher`
 
-A third state placeholder shows `Builder · coming soon` (disabled, surfaces the future trajectory; matches the Airbnb-style information design where the role taxonomy is visible even when not all roles are usable).
-
 State persists in `localStorage` under a stable key (e.g. `jinn.app.mode`). Default = `Operator`. Switching is an instant route change; no daemon write.
+
+Builder mode is a future possibility but **not** in this spec or the day-1 UI. The mode switch is two-state only.
 
 ### 6.2 Route layout
 
@@ -195,7 +203,9 @@ Mode-specific routes are gated only by the localStorage mode preference for navi
 
 No changes from today. Existing pages, existing role checkboxes (`solving` / `evaluating`) on per-SolverNet cards continue to work as shipped in `.15.4.*`.
 
-The `OperatorCard` on Overview already reads `operator.solverNet.roles` and renders pills (`.15.4.8`); the only change is that the pills now reflect three possible values when the operator is also launching, but Operator mode's Overview does *not* display launcher state — that lives in Launcher mode. (The operator-status payload may include `'launching'` in the `roles` array purely for type consistency; Operator mode UI ignores it.)
+**Strict mode separation.** Operator mode displays *zero* launcher state. The OperatorCard pills only render `solving` and `evaluating`; `launching` never appears in Operator mode anywhere — no pill, no banner, no "you are also launching" hint. This matches the Airbnb framing: when you're in guest mode you don't see hosting state, and vice versa.
+
+To enforce this at the type level, `operator.solverNet.roles` in the operator-status payload narrows to `Array<'solving' | 'evaluating'>`. The daemon's gather-status filters `'launching'` out of the operator-status payload at the boundary; launcher state lives exclusively in `/v1/launcher/status` (§5.3).
 
 ### 6.4 Launcher mode
 
@@ -214,7 +224,7 @@ The CTA opens a setup flow:
 1. **Confirm SolverNet.** Day-1 only Prediction is launchable. Show the SolverNet's intent ("Calibrated probabilistic forecasts of Polymarket-listed events") + the canonical scoreboard ("Brier spread vs. Polymarket consensus over a rolling window").
 2. **Confirm generator defaults.** Cadence, market filters, caps from `prediction-v1-auto.ts`. Operator can edit; defaults are sensible.
 3. **Show informational budget plan.** Read Safe balance via the existing balance API; display "this funds approximately N Tasks at the current per-attempt payment, ~M days at current cadence". No funding action — Safe is funded out-of-band like operator earning Safe.
-4. **Save.** Patch sets `roles: [...currentRoles, 'launching']` for the prediction SolverNet via the existing `api.updateSolverNet` endpoint. Restart-required signaling reuses the `RestartPill` + banner shipped earlier.
+4. **Save.** Patch sets `roles: [...currentRoles, 'launching']` for the prediction SolverNet via the existing `api.updateSolverNet` endpoint. Per §5.2 the generator hot-spawns within one cadence tick — **no daemon restart**. The setup flow shows a "starting up — first poll within Xs" indicator instead of a restart banner.
 
 After save, Launcher mode lands on the configured-state overview (§6.5).
 
@@ -235,7 +245,7 @@ Per-SolverNet card actions:
 
 #### 6.6 Launcher configuration page
 
-Per-SolverNet form for the generator config keys listed in §5.2. Layout mirrors the Operator-mode Configuration page (`SectionCard` + `ConfigField` components from `client/src/dashboard/spa/src/components/`). Restart-required signaling on edit. Save = `api.updateSolverNet` with the generator config block.
+Per-SolverNet form for the generator config keys listed in §5.2. Layout mirrors the Operator-mode Configuration page (`SectionCard` + `ConfigField` components from `client/src/dashboard/spa/src/components/`). Edits hot-apply per §5.2 — no restart-required signaling needed for these fields. Save = `api.updateSolverNet` with the generator config block.
 
 For day-1 Prediction, the editable fields are:
 
@@ -250,9 +260,6 @@ For day-1 Prediction, the editable fields are:
 
 Filters that are not safely operator-tunable (e.g. liquidity floor, spread max) stay in `prediction-v1-auto.ts` defaults for day-1; if external launchers later need them tunable, they graduate to config keys then.
 
-### 6.7 Builder mode
-
-Reserved as the third Airbnb-style mode in the header. Day-1 it's disabled with a "coming soon" tooltip pointing at the SolverNet/harness/plugin building flow that doesn't exist yet. **Out of scope** for this spec; mentioned for design completeness so the mode switch is visibly tri-state from day-1.
 
 ## 7. Wallet / bootstrap
 
@@ -271,22 +278,21 @@ Same Safe pays for OLAS staking collateral *and* for posted Task budgets. The la
 
 **In scope (this spec → implementation plan):**
 
-1. Daemon: extend `roles` to include `'launching'`; remove `predictionV1LauncherEnabled`; gate the Polymarket generator on `roles.includes('launching')`.
-2. Daemon: `GET /v1/launcher/status` endpoint.
-3. Daemon: `GET /v1/launcher/tasks` endpoint.
-4. App: header mode switch with Operator / Launcher / disabled-Builder.
-5. App: `/launcher` overview empty state + setup flow.
-6. App: `/launcher` configured-state overview with the four-tier information hierarchy from §6.5.
-7. App: `/launcher/configuration` per-SolverNet generator config page.
-8. App: `OperatorCard` carries the new role pill for `launching` in operator-status's `roles` array (no UI change on Operator mode; data plumbing only).
-9. Tests at the corresponding levels (config schema migration, role gating, endpoint shape, SPA route + component coverage, setup-flow happy path).
-10. Spec for the data shapes added to `client/src/dashboard/spa/src/api/types.ts`.
+1. Daemon: extend `roles` to include `'launching'`; remove `predictionV1LauncherEnabled`; gate the Polymarket generator on `roles.includes('launching')` evaluated at runtime (hot-spawn — no daemon restart needed to toggle launching role; §5.2).
+2. Daemon: filter `'launching'` out of operator-status payload (`operator.solverNet.roles` narrows to `'solving' | 'evaluating'`) so Operator mode UI never sees launcher state.
+3. Daemon: `GET /v1/launcher/status` endpoint with stale-poll detection (§5.3).
+4. Daemon: `GET /v1/launcher/tasks` endpoint.
+5. App: header mode switch with Operator / Launcher (two-state).
+6. App: `/launcher` overview empty state + setup flow.
+7. App: `/launcher` configured-state overview with the four-tier information hierarchy from §6.5, including a stale-generator warning banner when `status.stale === true`.
+8. App: `/launcher/configuration` per-SolverNet generator config page (no restart-required signaling — all edits hot-apply).
+9. Tests at the corresponding levels (config schema migration, role hot-spawn, endpoint shape, SPA route + component coverage, setup-flow happy path, stale-warning rendering, Operator mode strictly hides launcher state).
+10. Type updates in `client/src/dashboard/spa/src/api/types.ts` for the new launcher payload shapes and the narrowed operator-status `roles` type.
 
 **Deferred (filed as bd issues post-spec, not addressed by this implementation plan):**
 
 - Manual one-off Task posting (`POST /v1/launcher/tasks` + UI form).
-- Generator runtime pause/resume (intersects `jinn-mono-t62s` hot-reload).
-- Builder mode UI surface and config (depends on Builder persona spec, which doesn't exist yet).
+- Builder mode and the Builder persona spec.
 - Launcher economics — staking rewards, ve-JINN gauges, fee capture (Phase B+).
 - Launcher Safe / Operator Safe separation (only revisit if an external use case demands it; today they share by design per invariant 2).
 
@@ -296,10 +302,14 @@ Same Safe pays for OLAS staking collateral *and* for posted Task budgets. The la
 
 ## 9. Open questions
 
-1. **Builder mode placement.** Does the disabled "Builder · coming soon" placeholder land in this spec or wait for the Builder spec to ship together? Default: keep the placeholder here so the tri-state mode switch is visible day-1, but make it explicit in copy that the Builder persona is not yet defined.
-2. **Launcher status freshness.** `GET /v1/launcher/status` reads in-memory generator state. Do we surface a "last polled X minutes ago — generator may be stuck if longer than 2× cadence" warning? Lightweight; recommend yes.
-3. **Operator Overview display when `roles` includes `'launching'`.** §6.3 says Operator mode's Overview ignores the `'launching'` value. Is that the right call, or should the OperatorCard show a "Launcher: yes" pill so an operator-mode user knows their daemon is also doing launcher work? Recommend deferring — Operator mode is the operator's view; their cross-role visibility lives in mode-switching, not in pill clutter.
-4. **Setup flow restart requirement.** Adding `'launching'` to `roles` triggers a restart-required pill (the generator loop spawns at startup today). Is that acceptable for v1, or should the generator loop be hot-spawnable? Recommend acceptable for v1 — `t62s` will pull this together for all SolverNet config later.
+All four open questions raised during the brainstorm have been resolved into the spec body:
+
+- **Builder mode placement** → not in this spec; mode switch is two-state (§6.1, §8 deferred).
+- **Launcher status freshness** → `stale` flag on the status payload, banner in Launcher overview when stale (§5.3, §6.5, §8 in-scope #7).
+- **Operator Overview vs launcher state** → strict mode separation; Operator mode never displays launcher state; operator-status payload narrows to exclude `'launching'` (§6.3, §8 in-scope #2).
+- **Restart-required vs hot-spawn** → hot-spawn within one cadence tick; no daemon restart for role flip or generator-config edits (§5.2, §6.4, §6.6, §8 in-scope #1).
+
+No remaining blockers for the implementation plan.
 
 ## 10. References
 
