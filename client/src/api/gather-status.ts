@@ -46,6 +46,21 @@ const ERC20_BALANCE_OF_ABI = [
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
 
+/**
+ * Drop any cached prediction operator status for `config`.
+ *
+ * The cache key is the live `JinnConfig` object reference. When the SPA
+ * mutates `config.solverNets` in place via `onSolverNetsUpdated`
+ * (see `main.ts`), the WeakMap still resolves to the previously-built
+ * status — leaving Overview reading a stale `solverNet.enabled = false`
+ * even though the operator just toggled it on. Invalidating here keeps
+ * the Overview gating in sync with the latest config without a daemon
+ * restart. (jinn-mono-l2zl.15.4.12)
+ */
+export function invalidatePredictionOperatorStatusCache(config: JinnConfig): void {
+  predictionOperatorStatusCache.delete(config);
+}
+
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
