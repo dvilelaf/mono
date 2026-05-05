@@ -7,16 +7,24 @@ import { sha512 } from '@noble/hashes/sha2.js';
 import { canonicaliseManifest } from '../../../src/harnesses/manifest/index.js';
 import { loadExternalImpl } from '../../../src/harnesses/external-impls/loader.js';
 import { computePackageHash } from '../../../src/harnesses/external-impls/package-hash.js';
+import {
+  computeManifestHash,
+  computeEntryPointHashes,
+} from '../../../src/harnesses/manifest/content-hash.js';
+import { writeInstalledHarness } from '../../../src/installed-records.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
 let TMP: string;
+let HOME: string;
 let PKG_ROOT: string;
 let PUBKEY_B64: string;
 let SECRET_KEY: Uint8Array;
 
 beforeAll(async () => {
   TMP = mkdtempSync(join(tmpdir(), 'jinn-loader-'));
+  HOME = join(TMP, 'home');
+  mkdirSync(HOME, { recursive: true });
   PKG_ROOT = join(TMP, 'fake-impl');
   mkdirSync(join(PKG_ROOT, 'dist'), { recursive: true });
   writeFileSync(
@@ -56,6 +64,17 @@ beforeAll(async () => {
     join(PKG_ROOT, 'jinn.manifest.json'),
     JSON.stringify(manifest, null, 2),
   );
+
+  // Write content-hash install record so the loader's Phase 3 check passes.
+  writeInstalledHarness(HOME, '@fake/harness', {
+    version: '0.1.0',
+    manifestHash: computeManifestHash(manifest),
+    tarballHash: 'sha256:' + '0'.repeat(64), // tarball hash not checked by loader
+    entryPointHashes: computeEntryPointHashes(PKG_ROOT, ['./dist/index.js']),
+    tier: 1,
+    installedAt: new Date().toISOString(),
+    publishedAttestation: null,
+  });
 });
 
 afterAll(() => {
@@ -80,6 +99,7 @@ describe('loadExternalImpl', () => {
       entry: { name: '@fake/harness', entry: PKG_ROOT },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
       env: envFor('@fake/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
@@ -99,6 +119,7 @@ describe('loadExternalImpl', () => {
         },
       ],
       env: envFor('@fake/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -111,6 +132,7 @@ describe('loadExternalImpl', () => {
       entry: { name: '@fake/wrong-name', entry: PKG_ROOT },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
       env: envFor('@fake/wrong-name'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -123,6 +145,7 @@ describe('loadExternalImpl', () => {
       entry: { name: '@nope/x', entry: join(TMP, 'does-not-exist') },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
       env: envFor('@nope/x'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -172,6 +195,7 @@ describe('loadExternalImpl — package-hash verification', () => {
       entry: { name: '@tampered/harness', entry: root },
       trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
       env: envFor('@tampered/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -223,6 +247,7 @@ describe('loadExternalImpl — manifest.entry path traversal', () => {
       entry: { name: '@escape/harness', entry: root },
       trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
       env: envFor('@escape/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -263,10 +288,22 @@ describe('loadExternalImpl — manifest.entry path traversal', () => {
       JSON.stringify(manifest, null, 2),
     );
 
+    // Write an install record so the Phase 3 content-hash check passes.
+    writeInstalledHarness(HOME, '@dots/harness', {
+      version: '0.1.0',
+      manifestHash: computeManifestHash(manifest),
+      tarballHash: 'sha256:' + '0'.repeat(64),
+      entryPointHashes: computeEntryPointHashes(root, ['./dist/foo..bar.js']),
+      tier: 1,
+      installedAt: new Date().toISOString(),
+      publishedAttestation: null,
+    });
+
     const result = await loadExternalImpl({
       entry: { name: '@dots/harness', entry: root },
       trustedSigners: [{ alg: 'ed25519', publicKey: pkB64 }],
       env: envFor('@dots/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('ok');
   });
@@ -282,6 +319,7 @@ describe('loadExternalImpl — pinned version', () => {
       entry: { name: '@fake/harness', entry: PKG_ROOT, version: '0.0.1' },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
       env: envFor('@fake/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
@@ -294,6 +332,7 @@ describe('loadExternalImpl — pinned version', () => {
       entry: { name: '@fake/harness', entry: PKG_ROOT, version: '0.1.0' },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
       env: envFor('@fake/harness'),
+      home: HOME,
     });
     expect(result.kind).toBe('ok');
   });

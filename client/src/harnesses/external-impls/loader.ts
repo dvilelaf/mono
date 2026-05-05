@@ -10,6 +10,7 @@
  */
 
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import {
   loadManifest,
@@ -21,6 +22,11 @@ import type { Harness } from '../types.js';
 import type { ExternalImplEntry, SignerTrust } from './types.js';
 import { verifyPackageHash } from './package-hash.js';
 import { isInsidePackageDir } from '../../util/path-safety.js';
+import { readInstalledHarnesses } from '../../installed-records.js';
+import {
+  computeManifestHash,
+  computeEntryPointHashes,
+} from '../manifest/content-hash.js';
 
 /**
  * Daemon-side mirror of the SDK's `ExternalHarnessEnv`. Kept local
@@ -54,7 +60,9 @@ export type LoadFailureReason =
   | 'impl-supports-mismatch'
   | 'impl-package-hash-mismatch'
   | 'impl-entry-escape'
-  | 'impl-version-mismatch';
+  | 'impl-version-mismatch'
+  | 'impl-content-hash-mismatch'
+  | 'impl-content-hash-missing';
 
 export type LoadResult =
   | { kind: 'ok'; impl: Harness; manifest: JinnManifest }
@@ -64,6 +72,8 @@ export interface LoadExternalImplArgs {
   entry: ExternalImplEntry;
   trustedSigners: readonly SignerTrust[];
   env: ExternalHarnessEnv;
+  /** Override $HOME for install-record lookup; defaults to os.homedir(). */
+  home?: string;
 }
 
 const SOLVER_TYPE_PATTERN = /^([a-z][a-z0-9-]*\.v[0-9]+)/;
@@ -72,6 +82,7 @@ export async function loadExternalImpl({
   entry,
   trustedSigners,
   env,
+  home,
 }: LoadExternalImplArgs): Promise<LoadResult> {
   const manifestPath = join(entry.entry, 'jinn.manifest.json');
 
@@ -103,6 +114,44 @@ export async function loadExternalImpl({
       reason: 'impl-package-hash-mismatch',
       detail: `recomputed package hash does not match manifest.package.hash (${manifest.package.hash})`,
     };
+  }
+
+  // Content-hash binding: verify the install record written at `jinn harnesses add`
+  // time so the daemon refuses a harness whose on-disk content has changed since
+  // operator approval. Catches the MCPoison / CVE-2025-54136 pattern.
+  const effectiveHome = home ?? homedir();
+  const records = readInstalledHarnesses(effectiveHome);
+  const expected = records[manifest.name];
+  if (!expected) {
+    return {
+      kind: 'error',
+      reason: 'impl-content-hash-missing',
+      detail:
+        `Harness ${manifest.name} has no install record. ` +
+        `Run \`jinn harnesses add ${entry.entry}\` to register it.`,
+    };
+  }
+  const actualManifestHash = computeManifestHash(manifest);
+  if (actualManifestHash !== expected.manifestHash) {
+    return {
+      kind: 'error',
+      reason: 'impl-content-hash-mismatch',
+      detail:
+        `content-hash-mismatch for ${manifest.name}: manifest changed since install. ` +
+        `Run \`jinn harnesses add ${entry.entry}\` to re-approve.`,
+    };
+  }
+  const actualEntryHashes = computeEntryPointHashes(entry.entry, [manifest.entry]);
+  for (const [ep, hash] of Object.entries(actualEntryHashes)) {
+    if (expected.entryPointHashes[ep] !== hash) {
+      return {
+        kind: 'error',
+        reason: 'impl-content-hash-mismatch',
+        detail:
+          `content-hash-mismatch for ${manifest.name}: ${ep} changed since install. ` +
+          `Run \`jinn harnesses add ${entry.entry}\` to re-approve.`,
+      };
+    }
   }
 
   if (manifest.name !== entry.name) {
