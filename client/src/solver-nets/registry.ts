@@ -1,7 +1,26 @@
+import { homedir } from 'node:os';
 import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
+import { readInstalledPlugIns } from '../installed-records.js';
+import {
+  computeManifestHash,
+  computeEntryPointHashes,
+} from '../harnesses/manifest/content-hash.js';
+
+/**
+ * Thrown when a plug-in's on-disk content has changed since its install-time
+ * approval. The message includes a re-approval prompt so operators know what
+ * to run to unblock.
+ */
+export class ContentHashError extends Error {
+  readonly code = 'content-hash-mismatch' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContentHashError';
+  }
+}
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
 
@@ -106,7 +125,9 @@ export class SolverNetRegistry {
 
 export async function loadSolverNets(
   config: { solverNets: Record<string, SolverNetConfig> },
+  opts: { home?: string } = {},
 ): Promise<SolverNetRegistry> {
+  const home = opts.home ?? homedir();
   const registry = new SolverNetRegistry();
   for (const [name, net] of Object.entries(config.solverNets)) {
     if (!net.enabled) continue;
@@ -129,6 +150,38 @@ export async function loadSolverNets(
           `SolverNet ${name} runtime plugin ${plugin.name} solverType mismatch: config=${net.solverType} plugin supports=${plugin.supports.join(',')}`,
         );
       }
+
+      // Content-hash verification for operator-configured (non-bundled) plug-ins.
+      // Bundled plug-ins (provenance === 'default') are part of the daemon
+      // distribution and are not operator-installed, so they are exempt.
+      if (provenance === 'configured' && plugin.sourceKind !== 'bundled') {
+        const records = readInstalledPlugIns(home);
+        const expected = records[plugin.name];
+        if (!expected) {
+          throw new ContentHashError(
+            `Plug-in ${plugin.name} has no install record. ` +
+            `Run \`jinn solver-plugins add ${plugin.root}\` to register it.`,
+          );
+        }
+        const actualManifestHash = computeManifestHash(plugin.manifest);
+        if (actualManifestHash !== expected.manifestHash) {
+          throw new ContentHashError(
+            `content-hash-mismatch for ${plugin.name}: manifest changed since install. ` +
+            `Run \`jinn solver-plugins add ${plugin.root}\` to re-approve.`,
+          );
+        }
+        const skills: string[] = plugin.manifest.jinn.skills ?? [];
+        const actualEntryHashes = computeEntryPointHashes(plugin.root, skills);
+        for (const [entry, hash] of Object.entries(actualEntryHashes)) {
+          if (expected.entryPointHashes[entry] !== hash) {
+            throw new ContentHashError(
+              `content-hash-mismatch for ${plugin.name}: ${entry} changed since install. ` +
+              `Run \`jinn solver-plugins add ${plugin.root}\` to re-approve.`,
+            );
+          }
+        }
+      }
+
       runtimePlugins.push(runtimePluginFrom(plugin, provenance));
       seenSources.add(plugin.source);
       seenNames.add(plugin.name);
