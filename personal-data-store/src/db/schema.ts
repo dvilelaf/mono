@@ -12,3 +12,4 @@ export * from "../domains/media/film-reviews.schema.js";
 export * from "../domains/finance/subscriptions.schema.js";
 export * from "../domains/messages/messages.schema.js";
 export * from "../domains/personality/personality.schema.js";
+export * from "../domains/goals/goals.schema.js";
