@@ -592,6 +592,16 @@ describe('config — network-trust fields', () => {
       rpcUrl: 'http://localhost:8545',
       followedAttestors: ['not-an-address'],
     });
-    expect(() => loadConfig(configPath)).toThrow();
+    let caught: any;
+    try {
+      loadConfig(configPath);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.code).toBe('config_invalid');
+    const issues: Array<{ path: string; message: string }> = caught.details?.issues ?? [];
+    const hit = issues.find((i) => i.path.startsWith('followedAttestors'));
+    expect(hit).toBeDefined();
   });
 });
