@@ -841,25 +841,71 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       },
-      // Launcher mode (Task 6). Deps are resolved lazily because the
+      // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
       // generator and Safe address are constructed after bootstrap, after
       // this `startApiServer` call. By the time the SPA hits the route,
       // bootstrap has completed and both refs are populated.
       //
-      // TODO(jinn-mono launcher Task 7): replace the open-task-count and
-      // reserved-budget stubs with real accessors once the
-      // `/v1/launcher/tasks` query lands.
+      // Open-task-count is now real: it counts posted Tasks recorded against
+      // the creator Safe with the SolverNet's solver_type. The result is a
+      // strict superset of the in-flight count (we don't yet drop settled or
+      // failed Tasks; that lifecycle tracking lands with the router-watcher
+      // hardening lane, jinn-mono-l2zl.12). Reserved-budget and Safe-balance
+      // remain stubbed and are tracked for Task 8+.
+      //
+      // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
+      // narrow `getOpenTaskCount` to states in
+      // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
+      // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
+      // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
+      // (sum of unconsumed claim payments across open Tasks) and
+      // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
         getGeneratorState: (netName) => {
           if (netName !== 'prediction') return undefined;
           return predictionGeneratorRef?.getState();
         },
-        getOpenTaskCount: () => 0,
+        getOpenTaskCount: (netName) => {
+          const net = config.solverNets?.[netName];
+          const solverType = net?.solverType;
+          if (!solverType || !safeAddressForLauncher) return 0;
+          return sharedStore.countPostedTasksByCreatorAndSolverType({
+            creatorSafeAddress: safeAddressForLauncher,
+            solverType,
+          });
+        },
         getReservedBudgetWei: () => '0',
         getSafeBalanceWei: () => '0',
         safeAddress: () =>
           safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
+        tasksDeps: {
+          // Resolved per-request for the same reason `safeAddress` is a
+          // closure — `safeAddressForLauncher` is undefined until bootstrap
+          // finishes. Before that, the response is an empty list, which is
+          // accurate (no posts can have happened pre-bootstrap).
+          get creatorAddress() {
+            return safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000';
+          },
+          fetchPostedTasks: ({ creatorAddress, limit, before }) => {
+            // No-op when bootstrap hasn't resolved a Safe yet.
+            if (creatorAddress === '0x0000000000000000000000000000000000000000') {
+              return [];
+            }
+            const opts: { creatorSafeAddress: string; limit: number; before?: string } = {
+              creatorSafeAddress: creatorAddress,
+              limit,
+            };
+            if (before) opts.before = before;
+            const rows = sharedStore.listPostedTasksByCreator(opts);
+            return rows.map((r) => ({
+              taskId: r.taskId,
+              taskCid: r.taskCid,
+              solverType: r.solverType ?? undefined,
+              postedAt: r.postedAt,
+            }));
+          },
+        },
       },
     });
   } catch (error) {

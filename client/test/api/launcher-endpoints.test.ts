@@ -13,6 +13,10 @@ import { addLauncherRoutes } from '../../src/api/launcher-endpoints.js';
 import { requireUiToken } from '../../src/api/handshake.js';
 import type { JinnConfig } from '../../src/config.js';
 import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
+import type {
+  PostedTaskRecord,
+  FetchPostedTasksOptions,
+} from '../../src/api/launcher-tasks.js';
 
 const UI_TOKEN = 'ui-token-test';
 const SAFE_ADDRESS = '0x0000000000000000000000000000000000000abc';
@@ -26,14 +30,49 @@ interface BuildArgs {
   now?: number;
   /** Mount the UI-token gate (mirrors server.ts wiring). */
   withAuth?: boolean;
+  /**
+   * Posted-Task fixtures for the `GET /v1/launcher/tasks` endpoint. Either a
+   * static list (the test harness applies the `before`/`limit` filter), or a
+   * function that receives the gather options and returns a tailored list.
+   */
+  postedTasks?:
+    | PostedTaskRecord[]
+    | ((opts: FetchPostedTasksOptions) => PostedTaskRecord[]);
 }
 
-function buildTestApp(args: BuildArgs): { app: Hono; token: string } {
+function defaultFetchPostedTasks(
+  fixtures: PostedTaskRecord[] | undefined,
+  spy?: { lastOpts?: FetchPostedTasksOptions },
+): (opts: FetchPostedTasksOptions) => PostedTaskRecord[] {
+  return (opts) => {
+    if (spy) spy.lastOpts = opts;
+    if (!fixtures) return [];
+    const sorted = [...fixtures].sort((a, b) => Date.parse(b.postedAt) - Date.parse(a.postedAt));
+    const filtered = opts.before
+      ? sorted.filter((r) => Date.parse(r.postedAt) < Date.parse(opts.before!))
+      : sorted;
+    return filtered.slice(0, opts.limit);
+  };
+}
+
+function buildTestApp(args: BuildArgs): {
+  app: Hono;
+  token: string;
+  fetchSpy: { lastOpts?: FetchPostedTasksOptions };
+} {
   const app = new Hono();
   if (args.withAuth ?? true) {
     app.use('/v1/launcher', requireUiToken(UI_TOKEN));
     app.use('/v1/launcher/*', requireUiToken(UI_TOKEN));
   }
+  const fetchSpy: { lastOpts?: FetchPostedTasksOptions } = {};
+  const fetchPostedTasks =
+    typeof args.postedTasks === 'function'
+      ? (opts: FetchPostedTasksOptions) => {
+          fetchSpy.lastOpts = opts;
+          return (args.postedTasks as (o: FetchPostedTasksOptions) => PostedTaskRecord[])(opts);
+        }
+      : defaultFetchPostedTasks(args.postedTasks, fetchSpy);
   addLauncherRoutes(app, {
     getConfig: () => ({ solverNets: args.solverNets ?? {} } as Pick<JinnConfig, 'solverNets'>),
     getGeneratorState: (name) => args.generatorStates?.[name],
@@ -42,8 +81,13 @@ function buildTestApp(args: BuildArgs): { app: Hono; token: string } {
     getSafeBalanceWei: () => args.safeBalanceWei ?? '0',
     safeAddress: SAFE_ADDRESS,
     now: args.now !== undefined ? () => args.now! : undefined,
+    tasksDeps: {
+      creatorAddress: SAFE_ADDRESS,
+      fetchPostedTasks,
+      now: args.now !== undefined ? () => args.now! : undefined,
+    },
   });
-  return { app, token: UI_TOKEN };
+  return { app, token: UI_TOKEN, fetchSpy };
 }
 
 const launchingNet = {
@@ -193,6 +237,146 @@ describe('GET /v1/launcher/status', () => {
       solverNets: { prediction: launchingNet },
     });
     const res = await app.request('/v1/launcher/status');
+    expect(res.status).toBe(401);
+  });
+});
+
+interface TasksResponseBody {
+  schemaVersion: number;
+  generatedAt: string;
+  cursor?: { before: string };
+  tasks: Array<{
+    taskId: string;
+    taskCid: string;
+    solverNet: string;
+    postedAt: string;
+    state: string;
+    claims: { current: number; max: number };
+    budget: { totalWei: string; remainingWei: string; reclaimableAt?: string };
+    summary?: { title?: string; resolutionTime?: string };
+  }>;
+}
+
+describe('GET /v1/launcher/tasks', () => {
+  it('returns tasks posted by this daemon creator, most recent first', async () => {
+    const { app, token } = buildTestApp({
+      solverNets: { prediction: launchingNet },
+      postedTasks: [
+        {
+          taskId: '0xa',
+          taskCid: 'Qma',
+          solverType: 'prediction.v1',
+          postedAt: '2026-05-05T10:00:00.000Z',
+        },
+        {
+          taskId: '0xb',
+          taskCid: 'Qmb',
+          solverType: 'prediction.v1',
+          postedAt: '2026-05-05T11:00:00.000Z',
+        },
+      ],
+    });
+    const res = await app.request('/v1/launcher/tasks', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TasksResponseBody;
+    expect(body.schemaVersion).toBe(1);
+    expect(body.tasks).toHaveLength(2);
+    expect(body.tasks[0]?.taskId).toBe('0xb');
+    expect(body.tasks[1]?.taskId).toBe('0xa');
+    expect(body.tasks[0]?.solverNet).toBe('prediction');
+    // Default state/claims/budget when the daemon doesn't yet track lifecycle.
+    expect(body.tasks[0]?.state).toBe('open');
+    expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 25 });
+    expect(body.tasks[0]?.budget).toEqual({ totalWei: '0', remainingWei: '0' });
+    // No cursor because page is not full.
+    expect(body.cursor).toBeUndefined();
+  });
+
+  it('respects ?cursor=before:<iso>&limit=N pagination', async () => {
+    const fixtures: PostedTaskRecord[] = [
+      { taskId: '0xa', taskCid: 'Qma', solverType: 'prediction.v1', postedAt: '2026-05-05T08:00:00.000Z' },
+      { taskId: '0xb', taskCid: 'Qmb', solverType: 'prediction.v1', postedAt: '2026-05-05T09:00:00.000Z' },
+      { taskId: '0xc', taskCid: 'Qmc', solverType: 'prediction.v1', postedAt: '2026-05-05T10:00:00.000Z' },
+      { taskId: '0xd', taskCid: 'Qmd', solverType: 'prediction.v1', postedAt: '2026-05-05T11:00:00.000Z' },
+    ];
+    const { app, token, fetchSpy } = buildTestApp({
+      solverNets: { prediction: launchingNet },
+      postedTasks: fixtures,
+    });
+
+    // Page 1: limit=2, no cursor → newest two (0xd, 0xc), cursor = postedAt of 0xc.
+    const page1Res = await app.request('/v1/launcher/tasks?limit=2', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(page1Res.status).toBe(200);
+    const page1 = (await page1Res.json()) as TasksResponseBody;
+    expect(page1.tasks.map((t) => t.taskId)).toEqual(['0xd', '0xc']);
+    expect(page1.cursor).toBeDefined();
+    expect(page1.cursor?.before).toBe('2026-05-05T10:00:00.000Z');
+
+    // Page 2: pass the cursor back (with the `before:` prefix). Use a
+    // larger limit so the response is partial and the gather function
+    // signals "no further page" by omitting the cursor.
+    const cursorParam = `before:${page1.cursor!.before}`;
+    const page2Res = await app.request(
+      `/v1/launcher/tasks?limit=10&cursor=${encodeURIComponent(cursorParam)}`,
+      { headers: { 'x-jinn-ui-token': token } },
+    );
+    expect(page2Res.status).toBe(200);
+    const page2 = (await page2Res.json()) as TasksResponseBody;
+    expect(page2.tasks.map((t) => t.taskId)).toEqual(['0xb', '0xa']);
+    // Partial page → no cursor.
+    expect(page2.cursor).toBeUndefined();
+    // The fetch dep saw the parsed before timestamp.
+    expect(fetchSpy.lastOpts?.before).toBe('2026-05-05T10:00:00.000Z');
+    expect(fetchSpy.lastOpts?.limit).toBe(10);
+  });
+
+  it('maps unknown solverType to solverNet="unknown" without dropping the row', async () => {
+    const { app, token } = buildTestApp({
+      solverNets: { prediction: launchingNet },
+      postedTasks: [
+        {
+          taskId: '0xa',
+          taskCid: 'Qma',
+          solverType: 'mystery.v1',
+          postedAt: '2026-05-05T10:00:00.000Z',
+        },
+      ],
+    });
+    const res = await app.request('/v1/launcher/tasks', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TasksResponseBody;
+    expect(body.tasks).toHaveLength(1);
+    expect(body.tasks[0]?.solverNet).toBe('unknown');
+  });
+
+  it('clamps limit to [1, 100]', async () => {
+    const { app, token, fetchSpy } = buildTestApp({
+      solverNets: { prediction: launchingNet },
+      postedTasks: [],
+    });
+    await app.request('/v1/launcher/tasks?limit=999', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(fetchSpy.lastOpts?.limit).toBe(100);
+
+    await app.request('/v1/launcher/tasks?limit=0', {
+      headers: { 'x-jinn-ui-token': token },
+    });
+    expect(fetchSpy.lastOpts?.limit).toBe(1);
+  });
+
+  it('requires auth', async () => {
+    const { app } = buildTestApp({
+      solverNets: { prediction: launchingNet },
+      postedTasks: [],
+    });
+    const res = await app.request('/v1/launcher/tasks');
     expect(res.status).toBe(401);
   });
 });
