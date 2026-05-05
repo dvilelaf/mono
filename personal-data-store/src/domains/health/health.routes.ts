@@ -8,8 +8,11 @@ import {
   queryNutrition,
   queryWorkouts,
 } from "./health.service.js";
+import { checkinRouter } from "../checkin/checkin.routes.js";
 
 export const healthRouter = Router();
+
+healthRouter.use("/checkin", checkinRouter);
 
 healthRouter.get("/metrics", async (req, res, next) => {
   try {

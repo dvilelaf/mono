@@ -17,5 +17,7 @@ export const config = {
     csv_import: { enabled: true, schedule: null as string | null },
     subscriptions: { enabled: true, schedule: "0 3 * * *" },
     goals: { enabled: true, schedule: "0 2 * * *" },
+    checkin_morning: { enabled: true, schedule: process.env.CHECKIN_MORNING_SCHEDULE ?? "0 7 * * *" },
+    checkin_evening: { enabled: true, schedule: process.env.CHECKIN_EVENING_SCHEDULE ?? "0 21 * * *" },
   },
 } as const;
