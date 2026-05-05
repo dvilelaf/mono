@@ -40,6 +40,26 @@ interface BuildArgs {
     | ((opts: FetchPostedTasksOptions) => PostedTaskRecord[]);
 }
 
+/**
+ * In-memory persistence shim for the PATCH endpoint. Mirrors the on-disk
+ * shape that {@link import('../../src/config.js').persistTopLevelConfigValue}
+ * would produce so tests can assert against the full post-write snapshot
+ * without touching the filesystem.
+ */
+function buildPersistShim(): {
+  persistConfigValue: (key: string, value: unknown, configPath?: string) => string;
+  read: () => Record<string, unknown>;
+} {
+  const store: Record<string, unknown> = {};
+  return {
+    persistConfigValue: (key, value) => {
+      store[key] = value;
+      return '/tmp/test-config.json';
+    },
+    read: () => ({ ...store }),
+  };
+}
+
 function defaultFetchPostedTasks(
   fixtures: PostedTaskRecord[] | undefined,
   spy?: { lastOpts?: FetchPostedTasksOptions },
@@ -59,6 +79,10 @@ function buildTestApp(args: BuildArgs): {
   app: Hono;
   token: string;
   fetchSpy: { lastOpts?: FetchPostedTasksOptions };
+  /** Returns the in-memory persisted snapshot (mirrors config.json on disk). */
+  readPersistedConfig: () => Record<string, unknown>;
+  /** Returns the most recent solverNets payload passed to onSolverNetsUpdated. */
+  readNotifiedSolverNets: () => Record<string, Record<string, unknown>> | undefined;
 } {
   const app = new Hono();
   if (args.withAuth ?? true) {
@@ -73,8 +97,14 @@ function buildTestApp(args: BuildArgs): {
           return (args.postedTasks as (o: FetchPostedTasksOptions) => PostedTaskRecord[])(opts);
         }
       : defaultFetchPostedTasks(args.postedTasks, fetchSpy);
+  // Live, mutable solverNets so PATCH can read the latest snapshot via
+  // getConfig() (the production wiring does the same thing — main.ts mutates
+  // `config.solverNets` in place from the onSolverNetsUpdated hook).
+  let liveSolverNets: JinnConfig['solverNets'] | undefined = args.solverNets ?? {};
+  const persistShim = buildPersistShim();
+  let lastNotified: Record<string, Record<string, unknown>> | undefined;
   addLauncherRoutes(app, {
-    getConfig: () => ({ solverNets: args.solverNets ?? {} } as Pick<JinnConfig, 'solverNets'>),
+    getConfig: () => ({ solverNets: liveSolverNets } as Pick<JinnConfig, 'solverNets'>),
     getGeneratorState: (name) => args.generatorStates?.[name],
     getOpenTaskCount: (name) => args.openTaskCount?.(name) ?? 0,
     getReservedBudgetWei: (name) => args.reservedBudgetWei?.(name) ?? '0',
@@ -86,8 +116,22 @@ function buildTestApp(args: BuildArgs): {
       fetchPostedTasks,
       now: args.now !== undefined ? () => args.now! : undefined,
     },
+    persistConfigValue: persistShim.persistConfigValue,
+    onSolverNetsUpdated: (solverNets) => {
+      lastNotified = solverNets;
+      // Mirror main.ts: keep the live config snapshot pointed at the
+      // post-edit object so subsequent reads (status, follow-up patches)
+      // see the fresh state.
+      liveSolverNets = solverNets as JinnConfig['solverNets'];
+    },
   });
-  return { app, token: UI_TOKEN, fetchSpy };
+  return {
+    app,
+    token: UI_TOKEN,
+    fetchSpy,
+    readPersistedConfig: persistShim.read,
+    readNotifiedSolverNets: () => lastNotified,
+  };
 }
 
 const launchingNet = {
@@ -377,6 +421,154 @@ describe('GET /v1/launcher/tasks', () => {
       postedTasks: [],
     });
     const res = await app.request('/v1/launcher/tasks');
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('PATCH /v1/launcher/solvernets/:name', () => {
+  const solvingPredictionNet = {
+    enabled: true,
+    solverType: 'prediction.v1',
+    roles: ['solving'],
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: true },
+  } as never;
+
+  const launchingAndSolvingNet = {
+    enabled: true,
+    solverType: 'prediction.v1',
+    roles: ['solving', 'launching'],
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: true },
+  } as never;
+
+  const launchingOnlyNet = {
+    enabled: true,
+    solverType: 'prediction.v1',
+    roles: ['launching'],
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: true },
+  } as never;
+
+  it('adds launching to roles and persists generator config', async () => {
+    const { app, token, readPersistedConfig, readNotifiedSolverNets } = buildTestApp({
+      solverNets: { prediction: solvingPredictionNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/prediction', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-jinn-ui-token': token },
+      body: JSON.stringify({
+        launching: true,
+        generator: { cadenceMs: 30_000, maxNewRoundsPerPoll: 10 },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; roles: string[] };
+    expect(body.ok).toBe(true);
+    expect(body.roles.sort()).toEqual(['launching', 'solving']);
+
+    const persisted = readPersistedConfig();
+    const persistedSolverNets = persisted['solverNets'] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect((persistedSolverNets.prediction!['roles'] as string[]).sort()).toEqual([
+      'launching',
+      'solving',
+    ]);
+    expect(persisted['predictionV1CadenceMs']).toBe(30_000);
+    expect(persisted['predictionV1MaxNewRoundsPerPoll']).toBe(10);
+
+    // Cache invalidation hook fired with the post-edit solverNets snapshot.
+    const notified = readNotifiedSolverNets();
+    expect(notified).toBeDefined();
+    expect((notified!.prediction!['roles'] as string[]).sort()).toEqual([
+      'launching',
+      'solving',
+    ]);
+  });
+
+  it('removes launching from roles when launching: false', async () => {
+    const { app, token, readPersistedConfig } = buildTestApp({
+      solverNets: { prediction: launchingAndSolvingNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/prediction', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-jinn-ui-token': token },
+      body: JSON.stringify({ launching: false }),
+    });
+    expect(res.status).toBe(200);
+    const persisted = readPersistedConfig();
+    const persistedSolverNets = persisted['solverNets'] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(persistedSolverNets.prediction!['roles']).toEqual(['solving']);
+  });
+
+  it('rejects launching: false when it would leave roles empty', async () => {
+    const { app, token, readPersistedConfig } = buildTestApp({
+      solverNets: { prediction: launchingOnlyNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/prediction', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-jinn-ui-token': token },
+      body: JSON.stringify({ launching: false }),
+    });
+    expect(res.status).toBe(400);
+    const err = (await res.json()) as { message?: string };
+    expect(err.message).toMatch(/at least one role/i);
+    // Refusal must not write anything.
+    expect(readPersistedConfig()).toEqual({});
+  });
+
+  it('persists only generator-config keys when launching is omitted', async () => {
+    const { app, token, readPersistedConfig, readNotifiedSolverNets } = buildTestApp({
+      solverNets: { prediction: launchingAndSolvingNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/prediction', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-jinn-ui-token': token },
+      body: JSON.stringify({
+        generator: { allowlistConditionIds: ['0xabc', '0xdef'], windowMs: 90_000 },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const persisted = readPersistedConfig();
+    expect(persisted['predictionV1AllowlistConditionIds']).toEqual(['0xabc', '0xdef']);
+    expect(persisted['predictionV1WindowMs']).toBe(90_000);
+    // Roles weren't touched → no solverNets write, no cache invalidation.
+    expect(persisted['solverNets']).toBeUndefined();
+    expect(readNotifiedSolverNets()).toBeUndefined();
+  });
+
+  it('returns 404 for unknown SolverNet', async () => {
+    const { app, token } = buildTestApp({
+      solverNets: { prediction: solvingPredictionNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/portfolio', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-jinn-ui-token': token },
+      body: JSON.stringify({ launching: true }),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string; available: string[] };
+    expect(body.error).toBe('solvernet_not_found');
+    expect(body.available).toEqual(['prediction']);
+  });
+
+  it('requires auth', async () => {
+    const { app } = buildTestApp({
+      solverNets: { prediction: solvingPredictionNet },
+    });
+    const res = await app.request('/v1/launcher/solvernets/prediction', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ launching: true }),
+    });
     expect(res.status).toBe(401);
   });
 });
