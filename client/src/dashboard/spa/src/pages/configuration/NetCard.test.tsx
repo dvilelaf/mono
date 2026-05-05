@@ -191,4 +191,93 @@ describe('NetCard', () => {
       model: 'claude-sonnet-4-6',
     }));
   });
+
+  it('adds a plugin from the picker, becomes dirty, and persists on save', async () => {
+    const multiPluginCatalog = {
+      ...baseCatalog,
+      compatiblePlugins: [
+        { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
+        { name: 'network-tools', version: '0.2.0', source: 'bundled' },
+      ],
+    };
+    render(
+      <NetCard
+        catalog={multiPluginCatalog}
+        config={{
+          enabled: true,
+          role: 'solving',
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: ['jinn-prediction-plugin'],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    // No save button visible while clean.
+    expect(screen.queryByRole('button', { name: /save changes/i })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Add plugin'), {
+      target: { value: 'network-tools' },
+    });
+
+    // Dirty: save button appears.
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => expect(apiMock.updateSolverNet).toHaveBeenCalled());
+    expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
+      plugins: ['jinn-prediction-plugin', 'network-tools'],
+    }));
+  });
+
+  it('removes a plugin from the row, becomes dirty, and persists on save', async () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          role: 'solving',
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: ['jinn-prediction-plugin'],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /save changes/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /remove jinn-prediction-plugin/i }));
+
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => expect(apiMock.updateSolverNet).toHaveBeenCalled());
+    expect(apiMock.updateSolverNet).toHaveBeenCalledWith('prediction', expect.objectContaining({
+      plugins: [],
+    }));
+  });
+
+  it('renders the empty-catalog hint when no plugins are compatible', () => {
+    const emptyCatalog = { ...baseCatalog, compatiblePlugins: [] };
+    render(
+      <NetCard
+        catalog={emptyCatalog}
+        config={{
+          enabled: true,
+          role: 'solving',
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/no plugins available for this solvernet/i)).toBeTruthy();
+    expect(screen.queryByLabelText('Add plugin')).toBeNull();
+  });
 });
