@@ -3,6 +3,10 @@ import type {
   ClaudeAuthState,
   StructuredEvent,
   SolverNetsCatalogResponse,
+  LauncherStatusResponse,
+  LauncherTasksResponse,
+  LauncherSolverNetPatch,
+  LauncherSolverNetPatchResponse,
 } from './types.js';
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -123,6 +127,30 @@ export const api = {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode }),
+      },
+    ),
+
+  // ---- Launcher mode (spec/2026-05-05-launcher-role-and-mode.md §5.3) ----
+  // Operator mode never calls these — Operator-mode UI shows zero launcher
+  // state per §6.3 strict separation.
+  fetchLauncherStatus: () =>
+    jfetch<LauncherStatusResponse>('/v1/launcher/status'),
+  fetchLauncherTasks: (opts: { cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.cursor) q.set('cursor', opts.cursor);
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return jfetch<LauncherTasksResponse>(
+      `/v1/launcher/tasks${qs ? `?${qs}` : ''}`,
+    );
+  },
+  patchLauncherSolverNet: (name: string, patch: LauncherSolverNetPatch) =>
+    jfetch<LauncherSolverNetPatchResponse>(
+      `/v1/launcher/solvernets/${encodeURIComponent(name)}`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
       },
     ),
 };
