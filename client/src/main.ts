@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, type ApiServer } from './api/server.js';
+import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
@@ -808,6 +809,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onClaudePathSelected: selectClaudePath,
         onSolverNetsUpdated: (solverNets) => {
           config.solverNets = solverNets as typeof config.solverNets;
+          // The prediction operator status is memoised per-`JinnConfig`
+          // reference; mutating in place leaves the cache pointing at the
+          // pre-edit snapshot. Drop the entry so the next /v1/status read
+          // (and thus Overview's `solverNet.enabled` gating) reflects the
+          // toggle immediately. (jinn-mono-l2zl.15.4.12)
+          invalidatePredictionOperatorStatusCache(config);
         },
       },
       status: {

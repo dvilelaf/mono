@@ -28,10 +28,16 @@ interface OverviewStatusV1 {
     runwayDaysExcess?: string | number | null;
   };
   predictionV1?: {
+    /**
+     * Mirror of the daemon-side `PredictionOperatorStatus`. Only a subset
+     * of fields is consumed here, but the field names must match the
+     * actual server payload — earlier copies of this interface invented
+     * a top-level `enabled` and `role` that don't exist, which silently
+     * left Overview's gating reading a non-existent field.
+     * See `client/src/solver-nets/prediction-operator-ux.ts`.
+     */
     operator?: {
       ok?: boolean;
-      enabled?: boolean;
-      role?: 'solving' | 'evaluating';
       nextAction?: { description?: string };
       diagnostics?: Array<{ code: string; severity: string; message: string; configField?: string }>;
       solverNet?: { name?: string; enabled?: boolean };
@@ -60,7 +66,12 @@ export function OverviewPage(): JSX.Element {
   });
 
   const operator = status?.predictionV1?.operator;
-  const operatorEnabled = operator?.enabled === true || operator?.solverNet?.enabled === true;
+  // `solverNet.enabled` is the canonical opt-in signal coming from
+  // `PredictionOperatorStatus.solverNet.enabled`, which mirrors
+  // `config.solverNets.<name>.enabled`. Treat any enabled SolverNet as
+  // opted-in regardless of role (solving / evaluating); the future
+  // multi-role surface (jinn-mono-l2zl.15.4.8) keeps the same predicate.
+  const operatorEnabled = operator?.solverNet?.enabled === true;
   const totals = {
     tasks: status?.predictionV1?.totals?.observedTasks ?? 0,
     active: status?.predictionV1?.totals?.activeTaskRuns ?? 0,
@@ -105,11 +116,19 @@ export function OverviewPage(): JSX.Element {
       {/* Public counters — always shown when the catalog has prediction. */}
       <NetworkCard name="prediction" totals={totals} />
 
-      {/* Operator-side state — only when the operator has opted in. */}
+      {/*
+       * Operator-side state vs. empty-state — strictly mutually exclusive.
+       * Show OperatorCard whenever the operator has toggled the SolverNet
+       * on, regardless of role; show the "Pick a SolverNet" prompt only
+       * when no SolverNet is enabled. The operator-status payload does
+       * not currently expose role (see jinn-mono-l2zl.15.4.8 for the
+       * upcoming multi-role surface), so we render the default 'solving'
+       * label until that lands.
+       */}
       {operatorEnabled ? (
         <OperatorCard
           name="prediction"
-          role={operator?.role ?? 'solving'}
+          role="solving"
           state="live"
           waitingMessage={operator?.nextAction?.description}
         />
