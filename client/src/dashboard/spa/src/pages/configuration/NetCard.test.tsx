@@ -169,7 +169,7 @@ describe('NetCard', () => {
     render(
       <NetCard
         catalog={baseCatalog}
-        config={{ enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
+        config={{ enabled: false, roles: ['solving'], harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
         onSaved={vi.fn()}
         onRestartPending={vi.fn()}
       />,
@@ -184,7 +184,7 @@ describe('NetCard', () => {
     render(
       <NetCard
         catalog={{ ...baseCatalog, name: 'mystery-net' }}
-        config={{ enabled: false, role: 'solving', harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
+        config={{ enabled: false, roles: ['solving'], harness: 'claude-code-learner', model: 'claude-haiku-4-5-20251001', plugins: [] }}
         onSaved={vi.fn()}
         onRestartPending={vi.fn()}
       />,
@@ -229,7 +229,7 @@ describe('NetCard', () => {
         catalog={baseCatalog}
         config={{
           enabled: true,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-sonnet-4-5-20250929',
           modelExplicit: true,
@@ -279,7 +279,7 @@ describe('NetCard', () => {
         catalog={multiPluginCatalog}
         config={{
           enabled: true,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-haiku-4-5-20251001',
           plugins: ['jinn-prediction-plugin'],
@@ -312,7 +312,7 @@ describe('NetCard', () => {
         catalog={baseCatalog}
         config={{
           enabled: true,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-haiku-4-5-20251001',
           plugins: ['jinn-prediction-plugin'],
@@ -342,7 +342,7 @@ describe('NetCard', () => {
         catalog={emptyCatalog}
         config={{
           enabled: true,
-          role: 'solving',
+          roles: ['solving'],
           harness: 'claude-code-learner',
           model: 'claude-haiku-4-5-20251001',
           plugins: [],
