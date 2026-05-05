@@ -64,7 +64,7 @@ We do not optimise for follower counts, vanity reach, or any metric that does no
 
 ## 7. Where the long-form lives
 
-[`growth/`](growth/) is this doc's working appendix. Strategy notes, channel experiments, copy drafts, campaign tracking, and tooling all live there. When growth/ contradicts this doc, this doc wins; when growth/ extends it, the extension stays in growth/ unless it is load-bearing enough to be promoted via a spec proposal.
+[`growth/`](growth/) is this doc's working appendix. Strategy notes, channel experiments, copy drafts, campaign tracking, and tooling all live there. When growth/ contradicts this doc, this doc wins; when growth/ extends it, the extension stays in growth/ unless it is load-bearing enough to be promoted into this doc via a canonical-doc PR.
 
 Bootstrap reference points inside `growth/`:
 
@@ -79,4 +79,4 @@ Two skills under [`.claude/skills/`](.claude/skills/) implement the techniques b
 
 Both skills are deliberately scoped to one job each. Discovery does not draft replies; broadcast does not generate content. Composing them — discovery surfaces a candidate, the user drafts a reply, the grader scores it — is left to the operator, not folded into a single workflow.
 
-Changes to this document require a linked spec proposal under `spec/YYYY-MM-DD-<topic>.md` and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
+Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md).
