@@ -13,7 +13,10 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "seed:goals": "tsx scripts/seed-goals.ts",
+    "seed:interventions": "tsx scripts/seed-interventions.ts",
+    "interventions:evaluate": "tsx scripts/run-interventions-eval.ts"
   },
   "keywords": [],
   "author": "",

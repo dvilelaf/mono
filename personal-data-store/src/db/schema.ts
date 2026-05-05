@@ -13,3 +13,4 @@ export * from "../domains/finance/subscriptions.schema.js";
 export * from "../domains/messages/messages.schema.js";
 export * from "../domains/personality/personality.schema.js";
 export * from "../domains/goals/goals.schema.js";
+export * from "../domains/interventions/interventions.schema.js";
