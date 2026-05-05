@@ -26,7 +26,11 @@ import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
 } from './portfolio-v0-build.js';
-import { gatherPredictionV1Status, type PredictionV1Status } from './prediction-v1-build.js';
+import {
+  gatherPredictionV1Status,
+  type PredictionOperatorStatusForApi,
+  type PredictionV1Status,
+} from './prediction-v1-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -130,9 +134,16 @@ function predictionOperatorUnavailable(
 
   // Roles are best-effort: an unavailable status path means the daemon
   // could not load the SolverNet, so we surface whatever the operator has
-  // configured (post-migration) without trying to default further.
-  const netRoles = Array.isArray((net as { roles?: unknown } | undefined)?.roles)
-    ? ((net as { roles?: ('solving' | 'evaluating')[] }).roles ?? [])
+  // configured (post-migration) without trying to default further. Note that
+  // launcher filtering happens at the gather-status API boundary below
+  // (see narrowOperatorStatusForApi), so we keep the full role array here
+  // to match the source `PredictionOperatorStatus` shape.
+  const rawRoles = (net as { roles?: unknown } | undefined)?.roles;
+  const netRoles = Array.isArray(rawRoles)
+    ? rawRoles.filter(
+        (r): r is 'solving' | 'evaluating' | 'launching' =>
+          r === 'solving' || r === 'evaluating' || r === 'launching',
+      )
     : [];
 
   return {
@@ -153,8 +164,29 @@ function predictionOperatorUnavailable(
   };
 }
 
+/**
+ * Strict mode separation per spec §6.3: Operator mode never displays
+ * launcher state. Filter `'launching'` out of `solverNet.roles` before
+ * exposing to the operator-mode UI. Done here at the gather-status
+ * boundary (not at the prediction-operator-ux source) so the CLI doctor
+ * still sees the full role array. See plan task 3.
+ */
+function narrowOperatorStatusForApi(
+  status: PredictionOperatorStatus,
+): PredictionOperatorStatusForApi {
+  return {
+    ...status,
+    solverNet: {
+      ...status.solverNet,
+      roles: status.solverNet.roles.filter(
+        (r): r is 'solving' | 'evaluating' => r === 'solving' || r === 'evaluating',
+      ),
+    },
+  };
+}
+
 function predictionV1Unavailable(
-  operator: PredictionOperatorStatus | null,
+  operator: PredictionOperatorStatusForApi | null,
   operatorError: string,
 ): PredictionV1Status {
   return {
@@ -399,15 +431,16 @@ export async function gatherGatheredStatusRaw(
     portfolioV0 = undefined;
   }
 
-  let predictionOperator: PredictionOperatorStatus | null = null;
+  let predictionOperator: PredictionOperatorStatusForApi | null = null;
   let predictionOperatorError: string | undefined;
   if (status?.config) {
     try {
-      predictionOperator = await getCachedPredictionOperatorStatus(
+      const raw = await getCachedPredictionOperatorStatus(
         status.config,
         status.configPath ?? '<default>',
         'prediction',
       );
+      predictionOperator = narrowOperatorStatusForApi(raw);
     } catch (error) {
       predictionOperatorError = errorMessage(error);
     }
