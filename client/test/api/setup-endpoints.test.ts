@@ -710,6 +710,41 @@ describe('POST /v1/setup/solvernets/:name', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('preserves launching role when operator-mode patch only includes solving/evaluating', async () => {
+    // Operator-mode UI only knows 'solving' | 'evaluating'. Launcher mode
+    // may have set roles to ['solving', 'launching']. When the operator
+    // patches roles to ['evaluating'], the launching role must survive
+    // (strict mode separation per spec/2026-05-05-launcher-role-and-mode.md §3).
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v0',
+          roles: ['solving', 'launching'],
+          harness: 'claude-code-learner',
+          plugins: [],
+        },
+      },
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/solvernets/prediction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, roles: ['evaluating'] }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect([...persisted.solverNets.prediction.roles].sort()).toEqual(['evaluating', 'launching']);
+  });
 });
 
 describe('POST /v1/setup/network', () => {
