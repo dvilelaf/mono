@@ -2,6 +2,8 @@
  * Best-effort status collection for GET /v1/status (RPC + earning store + SQLite).
  */
 
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { createPublicClient, http, type PublicClient } from 'viem';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
@@ -32,6 +34,7 @@ import {
   buildPredictionOperatorStatus,
   type PredictionOperatorStatus,
 } from '../solver-nets/prediction-operator-ux.js';
+import { countRefusedCommands } from '../runner/bash-executor.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -157,6 +160,27 @@ function predictionV1Unavailable(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Scan all session working dirs under workingDirRoot and sum the number of
+ * package-install commands refused by the bash-filter (lines in
+ * <workingDir>/.bash/refused.jsonl). Returns 0 when the root doesn't exist.
+ * Best-effort: never throws.
+ */
+export function gatherBashRefusalCount(workingDirRoot: string): number {
+  try {
+    const entries = readdirSync(workingDirRoot, { withFileTypes: true });
+    let total = 0;
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        total += countRefusedCommands(join(workingDirRoot, entry.name));
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
 }
 
 async function sumPendingStakingRewards(
@@ -406,6 +430,15 @@ export async function gatherGatheredStatusRaw(
     );
   }
 
+  // Bash refusal scan — best-effort, never throws
+  let bashRefusalCount: number | undefined;
+  const workingDirRoot = status?.engine?.workingDirRoot ?? DEFAULT_ENGINE_WORKING_DIR_ROOT;
+  try {
+    bashRefusalCount = gatherBashRefusalCount(workingDirRoot);
+  } catch {
+    /* ignore — non-critical */
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     daemonStartedAt,
@@ -425,6 +458,7 @@ export async function gatherGatheredStatusRaw(
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),
+    ...(bashRefusalCount !== undefined && bashRefusalCount > 0 ? { bashRefusalCount } : {}),
   };
 
   if (!status) {

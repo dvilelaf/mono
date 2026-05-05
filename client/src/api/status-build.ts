@@ -69,6 +69,14 @@ export interface GatheredStatusRaw {
   pendingByService?: Record<number, string>;
   claimedByService?: Record<number, { total: string; lastAt: string; lastTxHash: string }>;
   migrationArchive?: EarningMigrationArchive;
+  /**
+   * Total number of package-install commands refused by the bash-filter across
+   * all active session working dirs this daemon run. Non-zero means an autonomous
+   * agent attempted a package install; operator attention is required.
+   * Populated by gather-status from workingDirRoot scans; absent when engine
+   * paths are not configured.
+   */
+  bashRefusalCount?: number;
 }
 
 export interface StatusV1Response {

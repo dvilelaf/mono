@@ -293,3 +293,65 @@ describe('assembleStatusRollupV1', () => {
     expect(detail.fleetUpdatedAt).toBe('2026-04-14T12:00:00.000Z');
   });
 });
+
+// ── bash-refusal surfacing in fleet.needsAttention ────────────────────────
+
+describe('assembleStatusRollupV1 — bash-refusal needsAttention', () => {
+  it('increments needsAttention by 1 when bashRefusalCount > 0', () => {
+    const raw = makeRaw();
+    // Both services are at operational steps — fleet attention = 0 (service_staked is operational)
+    raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
+    raw.minMasterEthWei = '1';
+    raw.master.balanceWei = '100';
+
+    // Without refusals: no attention needed
+    const withoutRefusals = assembleStatusRollupV1(raw);
+    expect(withoutRefusals.fleet.needsAttention).toBe(0);
+    expect(withoutRefusals.exit.blocking).toBe(false);
+
+    // With refusals: needsAttention becomes 1, exit becomes blocking
+    raw.bashRefusalCount = 3;
+    const withRefusals = assembleStatusRollupV1(raw);
+    expect(withRefusals.fleet.needsAttention).toBe(1);
+    expect(withRefusals.exit.blocking).toBe(true);
+  });
+
+  it('does not increment needsAttention when bashRefusalCount is 0', () => {
+    const raw = makeRaw();
+    raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
+    raw.minMasterEthWei = '1';
+    raw.master.balanceWei = '100';
+    raw.bashRefusalCount = 0;
+
+    const parsed = assembleStatusRollupV1(raw);
+    expect(parsed.fleet.needsAttention).toBe(0);
+  });
+
+  it('does not increment needsAttention when bashRefusalCount is absent', () => {
+    const raw = makeRaw();
+    raw.fleet!.services = raw.fleet!.services.map(s => ({ ...s, step: 'complete' as const }));
+    raw.minMasterEthWei = '1';
+    raw.master.balanceWei = '100';
+    // bashRefusalCount absent (undefined)
+    delete raw.bashRefusalCount;
+
+    const parsed = assembleStatusRollupV1(raw);
+    expect(parsed.fleet.needsAttention).toBe(0);
+  });
+
+  it('additively combines fleet attention and bash-refusal attention', () => {
+    const raw = makeRaw();
+    // service_staked is not 'complete' so fleet attention = 1
+    // (makeRaw has service_staked step for index 2, which is not operational)
+    // Wait, service_staked IS operational per isOperationalServiceStep.
+    // Let's use a clearly non-operational step to get fleet attention = 1
+    raw.fleet!.services = raw.fleet!.services.map((s, i) =>
+      i === 0 ? { ...s, step: 'service_deployed' as const } : { ...s, step: 'complete' as const },
+    );
+    raw.bashRefusalCount = 5;
+
+    const parsed = assembleStatusRollupV1(raw);
+    // fleet attention (1 non-operational) + bash refusal attention (1) = 2
+    expect(parsed.fleet.needsAttention).toBe(2);
+  });
+});

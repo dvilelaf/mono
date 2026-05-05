@@ -292,7 +292,12 @@ export function assembleStatusRollupV1(
   const { version, commit } = readVersionCommit();
   const services = raw.fleet?.services ?? [];
   const complete = services.filter(s => isOperationalServiceStep(s.step)).length;
-  const needsAttention = services.filter(s => !isOperationalServiceStep(s.step) || s.error).length;
+  const fleetAttention = services.filter(s => !isOperationalServiceStep(s.step) || s.error).length;
+  // Surface bash-refusal events as operator attention items. Each refused session
+  // signals that an autonomous agent attempted a package install — the operator
+  // must review and decide whether to act on the recommendation (N4 defence).
+  const bashRefusalAttention = (raw.bashRefusalCount ?? 0) > 0 ? 1 : 0;
+  const needsAttention = fleetAttention + bashRefusalAttention;
   const network: 'testnet' | 'mainnet' =
     raw.fleet?.chain === 'base' ? 'mainnet' : 'testnet';
   const phase = network === 'testnet' ? 'phase-1b' : 'phase-2';
