@@ -5,3 +5,4 @@ build/
 .pnp.*
 *.log
 tests/.latest.json
+tests/.bin/
