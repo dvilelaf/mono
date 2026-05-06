@@ -121,3 +121,37 @@ export interface Harness {
  * External-impl factory: default-export shape for external Harness packages.
  */
 export type ExternalHarnessFactory = (env: ExternalHarnessEnv) => Harness;
+
+/**
+ * Error thrown by SDK helpers when a harness violates an invariant.
+ * Path 2 harness implementations may catch this to surface a typed error
+ * to the daemon's task handler.
+ */
+export class HarnessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HarnessError';
+  }
+}
+
+/**
+ * Throws if the harness is in frozen mode. Use at write call sites in
+ * Path 2 harness implementations to assert that a write to implStateDir
+ * is only happening in train mode.
+ *
+ * @example
+ *   requireTrain(ctx, 'update constitutional state');
+ *   await fs.writeFile(constitutionPath, serialized);
+ *
+ * The daemon's hash-fence catches violations regardless of whether
+ * `requireTrain` is used; this helper is purely for defensive ergonomics
+ * at the harness implementation layer (fail fast at the call site rather
+ * than after the Task completes).
+ */
+export function requireTrain(ctx: HarnessContext, action: string): void {
+  if (ctx.mode === 'frozen') {
+    throw new HarnessError(
+      `Cannot ${action} in frozen mode. Gate this write on ctx.mode === 'train'.`,
+    );
+  }
+}
