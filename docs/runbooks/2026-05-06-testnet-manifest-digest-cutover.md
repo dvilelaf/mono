@@ -66,6 +66,86 @@ Defer until:
 - The plan's Phase 7 daemon-side work is fully merged (currently on `opus/solvernet-creation-and-launch`)
 - jinn-mono-qwdc.36 (subgraph V3 indexing) is in flight or complete, so post-deploy operators can actually see launched SolverNets
 - Coordinated with anyone who has been dogfooding the testnet (currently: Jinn team only)
+- All pre-deploy gates are green (see "Pre-deploy gates" below)
+
+## Pre-deploy gates
+
+Before running the upgrade for real, confirm these all pass:
+
+```bash
+# 1. Contracts regression (storage pins + ABI invariance + unit tests)
+cd contracts && yarn test
+# Expected: ~486 passing, fork tests pending (default-skipped)
+
+# 2. Live fork test (gated)
+cd contracts && \
+  RUN_FORK_TESTS=1 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
+  yarn test --grep "Base Sepolia fork"
+# Expected: 11+ pending → 11+ passing. Storage compat, bytecode-diff,
+# activity-checker snapshot, full lifecycle (claim/submit/verdict/finalize)
+# all green. Optional FORK_BLOCK_NUMBER=<n> for reproducibility.
+
+# 3. Subgraph matchstick
+cd subgraph && yarn test
+# Expected: 17 passing across task-coordinator + jinn-router-v3.
+```
+
+If step 2 fails: the upgrade is NOT safe against actual deployed state. Do not proceed.
+
+If step 1 or 3 fails: a structural bug has slipped past the unit-level gates. Do not proceed.
+
+## Cutover ordering — contracts first, subgraph second
+
+The contract upgrade and the subgraph redeploy must land in this order:
+
+1. **Run the contract upgrade first** (the script above). The new `manifestDigest`-bearing impl is now live behind the existing proxy addresses. Existing tasks orphan; new tasks emit `TaskCreated` with the new digest semantic.
+2. **Wait ≤ ~15 min** for the daemon-side and operator-facing dust to settle. During this window, the legacy V1/V2 subgraph indexer is still running and continues to NOT index the V3 events (which is correct — it never did).
+3. **Redeploy the subgraph** with the new V3 datasources (`yarn deploy:base-sepolia`). The new datasources start indexing from a `startBlock` chosen per `subgraph/networks.json`; pick a block ≥ the contract-upgrade block so the indexer doesn't pick up pre-upgrade events under the new schema.
+
+**Do NOT redeploy the subgraph first.** If the subgraph picks up V3 events before the contract upgrade:
+- It indexes pre-upgrade events with the new schema
+- `Task.manifestDigest` rows decode but contain the old `keccak256(solverType)` semantics
+- Operators get confusing `manifestDigest` values that don't resolve to any launched manifest
+
+**Do NOT skip the subgraph redeploy.** If the contracts upgrade but the subgraph doesn't:
+- The legacy indexer keeps indexing V1/V2 events with the old ABI
+- New V3 `TaskCreated` events go un-indexed
+- Operators see empty `api.solvernets.listRegistry()` responses indefinitely
+
+The runbook order — contract first → ~15 min → subgraph — is the only safe sequence.
+
+### Studio dry-run (recommended before subgraph redeploy)
+
+The new schema adds `Task`, `TaskAttempt`, `Verdict`, `SolverNetManifestEvent` entities. If Studio's existing deployed subgraph version has conflicting names, the publish fails. Test first:
+
+```bash
+cd subgraph
+yarn build:base-sepolia                    # substitutes addresses + start blocks
+graph deploy <studio-slug> \
+  --version-label v3-pre-cutover-dry-run \
+  --node https://api.studio.thegraph.com/deploy/ \
+  --ipfs https://api.thegraph.com/ipfs/
+# Inspect the Studio UI for schema/datasource/handler validation errors.
+# Do NOT publish (don't promote the version to active).
+```
+
+If Studio rejects the publish, fix the schema/handler issue before the live cutover. Once the dry-run version uploads cleanly, you can promote on cutover day.
+
+## Post-deploy operator dogfood
+
+After both contract upgrade and subgraph redeploy are live, walk the operator dashboard manually to confirm the loop works end-to-end. The existing `testing-jinn-app` skill has a recipe; the launcher-specific path is:
+
+1. **Spawn the daemon** against your bootstrapped fleet (`node dist/bin/jinn.js run --no-ui`) — see `client/CLAUDE.md` for the contributor flow.
+2. **Switch to Launcher mode** in the dashboard. The list page should be empty if you've never launched.
+3. **Walk Create flow** (`/launcher/create`) for the Prediction template. Steps 1–5: define → review contract → configure generator → configure pricing → review and launch. The launch action progresses pinning → recording → broadcasting → confirming → spawning → launched.
+4. **Confirm the post-launch dashboard** at `/launcher/launched/:solverNetId` shows: status badge `launched`, manifest summary (name, contract id/version, prices), generator status, recent tasks (likely empty until first poll), spend panel.
+5. **Switch to Operator mode**. The Configuration page's SolverNet catalog should show the just-launched SolverNet via the registry. Click Join, walk the join flow, confirm `solverNets[<manifestCid>]` lands in `~/.jinn-client/config.json`.
+6. **Wait for the first generator tick** (default cadence is 6h; for a smoke walk, edit `generatorConfig.cadenceMs` to ~60000 from the launcher dashboard). Confirm a task lands on chain (`TaskCreated` event), the operator's daemon sees it (claim eligibility filtered by `joinedSolverNets[<cid>].roles`), and the lifecycle completes (claim → submit → verdict → finalize).
+7. **Pause / Resume / Retire** from the launcher dashboard. Each emits a `setMetadata` write; subgraph picks it up; operator catalog reflects the new status.
+
+If any step diverges from expected, capture the failure (logs, screenshots, daemon state) and decide whether to roll back via the section below or fix forward.
+
+The Playwright e2e at `client/test/dashboard/solvernet-flow.e2e.test.ts` covers scenario 1 (happy-path Launch) automatically; the lifecycle / operator catalog / empty states / crash-recovery scenarios are filed as `jinn-mono-qwdc.37` and would automate this walk further when complete.
 
 ## Rollback
 
