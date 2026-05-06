@@ -319,3 +319,60 @@ const command: CommandModule = {
 };
 
 export default command;
+
+// ---------------------------------------------------------------------------
+// Named exports for direct consumption by tests + other modules
+// ---------------------------------------------------------------------------
+
+/**
+ * Named export for direct consumption by tests + other modules.
+ * Wraps the internal runMode dispatcher with a focused signature.
+ *
+ * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+ */
+export async function harnessModeCommand(opts: {
+  mode: 'train' | 'frozen';
+  configPath: string;
+}): Promise<void> {
+  // Create a minimal mock CommandContext to pass to runMode
+  const mockCtx: CommandContext = {
+    argv: [],
+    stdoutIsTty: false,
+    writer: {
+      write: () => true, // Return true to indicate successful write
+    },
+    exit: () => {
+      // silent in library mode
+    },
+    env: process.env,
+  };
+  runMode(mockCtx, opts.configPath, opts.mode);
+}
+
+/**
+ * Named export for direct consumption by tests + other modules.
+ * Wraps the internal runStatus dispatcher with a focused signature.
+ *
+ * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+ */
+export async function harnessStatusCommand(opts: {
+  configPath: string;
+  log?: (s: string) => void;
+}): Promise<void> {
+  // Create a minimal mock CommandContext to pass to runStatus
+  const mockCtx: CommandContext = {
+    argv: [],
+    stdoutIsTty: false,
+    writer: {
+      write: (s: string) => {
+        if (opts.log) opts.log(s);
+        return true; // Return true to indicate successful write
+      },
+    },
+    exit: () => {
+      // silent in library mode
+    },
+    env: process.env,
+  };
+  runStatus(mockCtx, opts.configPath);
+}

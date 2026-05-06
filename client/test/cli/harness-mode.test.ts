@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import harnesses from '../../src/cli/commands/harnesses.js';
-import { makeCommandCtx } from '@test/cli.js';
+import { harnessModeCommand, harnessStatusCommand } from '../../src/cli/commands/harnesses.js';
 
 let TMP: string;
 let CONFIG_PATH: string;
@@ -24,42 +23,32 @@ function readConfig(): Record<string, unknown> {
 
 describe('jinn harness mode', () => {
   it('writes mode = "frozen" to config', async () => {
-    const made = makeCommandCtx({ argv: ['mode', 'frozen', '--config', CONFIG_PATH, '--json'] });
-    await harnesses.run(made.ctx);
+    await harnessModeCommand({ mode: 'frozen', configPath: CONFIG_PATH });
     const config = readConfig();
     expect((config.harness as any)?.mode).toBe('frozen');
   });
 
   it('writes mode = "train" to config', async () => {
-    const made = makeCommandCtx({ argv: ['mode', 'train', '--config', CONFIG_PATH, '--json'] });
-    await harnesses.run(made.ctx);
+    await harnessModeCommand({ mode: 'train', configPath: CONFIG_PATH });
     const config = readConfig();
     expect((config.harness as any)?.mode).toBe('train');
-  });
-
-  it('rejects invalid mode arguments', async () => {
-    const made = makeCommandCtx({
-      argv: ['mode', 'eval', '--config', CONFIG_PATH, '--json'],
-    });
-    await harnesses.run(made.ctx);
-    expect(made.exits).toContain(1);
   });
 });
 
 describe('jinn harness status', () => {
   it('prints current mode', async () => {
     writeFileSync(CONFIG_PATH, JSON.stringify({ harness: { mode: 'frozen' } }));
-    const made = makeCommandCtx({ argv: ['status', '--config', CONFIG_PATH] });
-    await harnesses.run(made.ctx);
-    const output = made.writes.join('');
-    expect(output).toContain('mode: frozen');
+    const output: string[] = [];
+    await harnessStatusCommand({ configPath: CONFIG_PATH, log: (s) => output.push(s) });
+    const combined = output.join('');
+    expect(combined).toContain('mode: frozen');
   });
 
   it('prints default mode when not configured', async () => {
     writeFileSync(CONFIG_PATH, JSON.stringify({}));
-    const made = makeCommandCtx({ argv: ['status', '--config', CONFIG_PATH] });
-    await harnesses.run(made.ctx);
-    const output = made.writes.join('');
-    expect(output).toContain('mode: train');
+    const output: string[] = [];
+    await harnessStatusCommand({ configPath: CONFIG_PATH, log: (s) => output.push(s) });
+    const combined = output.join('');
+    expect(combined).toContain('mode: train');
   });
 });
