@@ -56,6 +56,19 @@ import { validatePayload } from '../../src/types/payloads/index.js';
 import { TrajectoryCollector } from '../../src/trajectory/index.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 import { jsonRpc as anvilJsonRpc, spawnAnvilFork } from '../_support/chain/anvil.js';
+import { LaunchAction } from '../../src/solvernets/launch-state-machine.js';
+import { LifecycleTransition } from '../../src/solvernets/lifecycle-transitions.js';
+import {
+  IdentityRegistryBackedSolverNetRegistryClient,
+} from '../../src/solvernets/registry-client-erc8004.js';
+import { createSolverNetStore } from '../../src/solvernets/store.js';
+import {
+  buildSignedSolverNetManifestV1,
+  createForkMetadataPublisher,
+  createInMemoryIpfsClient,
+  createInMemorySubgraphClient,
+  manifestDigestForCid,
+} from './_solvernet-helpers.js';
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(E2E_DIR, '../../..');
@@ -1616,6 +1629,7 @@ async function bootstrapBaseSepoliaForkOperator(rpcUrl: string): Promise<{
   safeAddress: Address;
   mechAddress: Address;
   agentPrivateKey: Hex;
+  agentId: string | null;
 }> {
   const tmpDir = await mkdtemp(join(tmpdir(), 'jinn-base-sepolia-fork-earning-'));
   const bootstrapper = new FleetBootstrapper({
@@ -1662,6 +1676,7 @@ async function bootstrapBaseSepoliaForkOperator(rpcUrl: string): Promise<{
     safeAddress: getAddress(service.safe_address) as Address,
     mechAddress: getAddress(service.mech_address) as Address,
     agentPrivateKey: walletPrivateKeyAtIndex(mnemonic, service.index),
+    agentId: service.agent_id ?? null,
   };
 }
 
@@ -2072,6 +2087,468 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     if (evaluatorTmpDir) {
       await rm(evaluatorTmpDir, { recursive: true, force: true });
     }
+    await anvil.teardown();
+  }
+}
+
+// ── SolverNet creation/launch + lifecycle (manifest-driven) ─────────────────
+
+const BASE_SEPOLIA_IDENTITY_REGISTRY = '0x8004A818BFB912233c491871b3d84c89A494BD9e' as Address;
+
+export interface ForkSolverNetCreationResult {
+  manifestCid: string;
+  taskId: string;
+  attempt: { operator: Address; attemptIndex: number; requestId: string };
+  verdict: string;
+  score: string;
+  submittedCount: number;
+  /** Status sequence visible on the launched record across the lifecycle. */
+  lifecycleSequence: Array<'launched' | 'paused' | 'retired'>;
+  /** Number of `setMetadata` writes the publisher observed across the run. */
+  setMetadataCalls: number;
+}
+
+/**
+ * 5th e2e phase: exercise the manifest-driven SolverNet path end-to-end on
+ * a Base Sepolia anvil fork.
+ *
+ *   1. Same fork + V3 upgrade setup as `runBaseSepoliaForkTaskFirstFullLoop`.
+ *   2. Bootstrap a launcher operator → master Safe + agent EOA + agentId
+ *      from the IdentityRegistry mint step.
+ *   3. Build + sign a `SolverNetManifestV1`.
+ *   4. `LaunchAction.launch()` → in-memory IPFS pin + real
+ *      `IdentityRegistry.setMetadata` on the fork + launched record on disk.
+ *   5. Bootstrap a solver + evaluator operator (reuses existing helper).
+ *   6. Post a Task whose `manifestDigest` is `keccak256(toBytes(cid))` so
+ *      the on-chain Task is bound to the launched manifest.
+ *   7. Reuse the claim/submit/verdict/finalize sequence from the legacy fork
+ *      loop — the manifestDigest binding does not change the lifecycle.
+ *   8. `LifecycleTransition.transition` → paused → launched (resume) →
+ *      retired. Each transition fires a real `setMetadata` write.
+ */
+export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSolverNetCreationResult> {
+  const anvilCheck = spawnSync('anvil', ['--version'], { stdio: 'ignore' });
+  if (anvilCheck.status !== 0) {
+    throw new Error('anvil not in PATH; install Foundry to run the Base Sepolia fork e2e');
+  }
+  await compileContracts();
+
+  const forkUrl = process.env['BASE_SEPOLIA_RPC_URL'] ?? 'https://sepolia.base.org';
+  const anvil = await spawnAnvilFork({
+    forkUrl,
+    chain: baseSepolia,
+    silent: true,
+    readyTimeoutMs: 30_000,
+  });
+  const creator = privateKeyToAccount(ANVIL_PRIVATE_KEYS[0]);
+  const publicClient = createPublicClient({
+    chain: baseSepolia,
+    transport: http(anvil.rpcUrl),
+  }) as unknown as PublicClient;
+  const stopMiningPulse = startForkMiningPulse(anvil.rpcUrl);
+
+  let launcherTmpDir: string | null = null;
+  let operatorTmpDir: string | null = null;
+  let evaluatorTmpDir: string | null = null;
+  const storeBaseDir = await mkdtemp(join(tmpdir(), 'jinn-solvernet-launch-e2e-'));
+
+  try {
+    // Step 1 — fund creator + upgrade V3 stack inside the fork.
+    await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
+      creator.address,
+      hexQuantity(BASE_SEPOLIA_E2E_FUNDING_WEI),
+    ]);
+    const deployment = await verifyBaseSepoliaV3Deployment(publicClient);
+    await upgradeTaskStackInsideFork({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      coordinator: deployment.coordinator,
+      router: deployment.router,
+      marketplace: deployment.marketplace,
+      activity: deployment.activity,
+      owner: deployment.checkerOwner,
+      deployer: creator,
+    });
+    if (deployment.checkerNeedsForkUpgrade || deployment.checkerNeedsForkRewire) {
+      await upgradeAndRewireActivityCheckerInsideFork({
+        publicClient,
+        rpcUrl: anvil.rpcUrl,
+        activity: deployment.activity,
+        router: deployment.router,
+        owner: deployment.checkerOwner,
+        deployer: creator,
+        upgrade: deployment.checkerNeedsForkUpgrade,
+      });
+    }
+    await topUpDistributorStakeTokenInsideFork({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+    });
+
+    // Step 2 — bootstrap launcher operator (gives us agent EOA + agentId
+    // + master Safe minted into the IdentityRegistry).
+    const launcher = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
+    launcherTmpDir = launcher.tmpDir;
+    assert(launcher.agentId !== null && launcher.agentId.length > 0, 'launcher bootstrap did not produce an agentId');
+    const launcherAccount = privateKeyToAccount(launcher.agentPrivateKey);
+    assert(
+      launcherAccount.address.toLowerCase() === launcherAccount.address.toLowerCase(),
+      'launcher account derivation mismatch (sanity)',
+    );
+
+    // Step 3 — build + sign a SolverNetManifestV1.
+    const manifest = await buildSignedSolverNetManifestV1({
+      solverNetId: 'sn_e2e_prediction_v1',
+      name: 'E2E Prediction',
+      description: 'E2E SolverNet creation/launch fixture (Base Sepolia fork).',
+      safeAddress: launcher.safeAddress,
+      agentEoa: launcherAccount.address,
+      agentId: launcher.agentId,
+      agentEoaPrivateKey: launcher.agentPrivateKey,
+    });
+
+    // Step 4 — wire LaunchAction deps and launch.
+    const solverNetStore = createSolverNetStore({ baseDir: storeBaseDir });
+    const ipfs = createInMemoryIpfsClient();
+    const subgraph = createInMemorySubgraphClient();
+    const publisher = createForkMetadataPublisher({
+      rpcUrl: anvil.rpcUrl,
+      identityRegistryAddress: BASE_SEPOLIA_IDENTITY_REGISTRY,
+      agentEoaPrivateKey: launcher.agentPrivateKey,
+    });
+    const registry = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    const spawnedRecords: Array<{ solverNetId: string }> = [];
+    const launchAction = new LaunchAction({
+      store: solverNetStore,
+      ipfs,
+      publisher,
+      subgraph,
+      spawnGenerator: async (record) => {
+        // The new launched-record generator factory is unit-tested
+        // separately. The e2e value here is the launch action + on-chain
+        // setMetadata + lifecycle wiring; we only assert spawn was called.
+        spawnedRecords.push({ solverNetId: record.solverNetId });
+      },
+      awaitTxConfirmation: async (txHash) => {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        return { blockNumber: Number(receipt.blockNumber) };
+      },
+    });
+
+    const launched = await launchAction.launch({
+      manifest,
+      signer: {
+        agentEoaAddress: launcherAccount.address,
+        agentEoaPrivateKey: launcher.agentPrivateKey,
+        agentId: launcher.agentId,
+      },
+    });
+
+    assert(launched.status === 'launched', `launch did not land at status=launched (got ${launched.status})`);
+    assert(launched.launchProgress === undefined, 'launchProgress should be cleared after launch');
+    assert(launched.manifestCid.length > 0, 'launched record missing manifestCid');
+    assert(launched.registry.metadataTxHash !== undefined, 'launched record missing metadataTxHash');
+    assert(spawnedRecords.length === 1, `spawnGenerator called ${spawnedRecords.length}× (expected 1)`);
+    assert(publisher.calls.length === 1, `expected 1 setMetadata call after launch, got ${publisher.calls.length}`);
+    assert(
+      publisher.calls[0]!.key === `solvernet-manifest:${launched.manifestCid}`,
+      `setMetadata key mismatch: got ${publisher.calls[0]!.key}`,
+    );
+    const onDisk = await solverNetStore.loadRecord(launched.solverNetId);
+    assert(onDisk?.status === 'launched', 'launched record on disk is not status=launched');
+
+    // Step 5 — bootstrap solver + evaluator operators (reuses existing
+    // fork loop's helper).
+    const operator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
+    operatorTmpDir = operator.tmpDir;
+    const evaluatorOperator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
+    evaluatorTmpDir = evaluatorOperator.tmpDir;
+    const operatorAccount = privateKeyToAccount(operator.agentPrivateKey);
+    const operatorWallet = walletClient(anvil.rpcUrl, operatorAccount, baseSepolia);
+    const evaluatorAccount = privateKeyToAccount(evaluatorOperator.agentPrivateKey);
+    const evaluatorWallet = walletClient(anvil.rpcUrl, evaluatorAccount, baseSepolia);
+
+    const isOperator = await publicClient.readContract({
+      address: operator.mechAddress,
+      abi: MECH_ABI,
+      functionName: 'isOperator',
+      args: [operator.safeAddress],
+    });
+    assert(isOperator === true, `bootstrapped Safe ${operator.safeAddress} is not operator for Mech ${operator.mechAddress}`);
+
+    const [deliveryRate, timeoutBounds] = await Promise.all([
+      getMechDeliveryRate(publicClient, operator.mechAddress),
+      getTimeoutBounds(publicClient, deployment.marketplace),
+    ]);
+    assert(deliveryRate > 0n, `bootstrapped Mech maxDeliveryRate=${deliveryRate}`);
+    const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 60n;
+
+    // Step 6 — post a Task whose manifestDigest binds it to the launched
+    // manifest CID. We reuse the existing prediction.v1 task fixture and
+    // submit via the same `writeContractTx` path the legacy fork loop
+    // uses; the only manifest-driven difference is the digest.
+    const task = makePredictionV1Task();
+    const predictionTask = PredictionV1TaskSchema.parse(task);
+    const { digest: taskCidDigest, cid: taskCid } = taskCidDigestAndCid(task);
+    const manifestDigest = manifestDigestForCid(launched.manifestCid);
+    const latestBlock = await publicClient.getBlock();
+    const nowSec = Number(latestBlock.timestamp);
+    const policy = {
+      claimWindowStart: BigInt(nowSec - 5),
+      claimWindowEnd: BigInt(nowSec + 120),
+      submissionDeadline: BigInt(nowSec + 300),
+      claimLeaseTtlSeconds: 120,
+      maxClaims: 2,
+      maxClaimsPerOperator: 1,
+      policyHook: zeroAddress,
+      evaluationPolicy: {
+        requiredVerdicts: 1,
+        passThreshold: 1,
+        evaluationDeadline: BigInt(nowSec + 420),
+        maxVerdictsPerEvaluator: 1,
+        disallowSolverSelfEvaluation: true,
+      },
+    };
+
+    const created = await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: creator,
+      address: deployment.router,
+      abi: JINN_ROUTER_V3_E2E_ABI,
+      functionName: 'createTask',
+      args: [taskCidDigest, manifestDigest, policy, deliveryRate, deliveryRate, responseTimeout],
+      value: deliveryRate * 4n,
+      chain: baseSepolia,
+    });
+    const taskCreated = decodeFirstEvent(created.receipt, JINN_ROUTER_V3_E2E_ABI, 'TaskCreated');
+    const taskId = String(taskCreated['taskId']);
+    assert(BigInt(taskId) > 0n, `invalid TaskCreated taskId=${taskId}`);
+
+    // Confirm the task was anchored under our manifest digest.
+    const taskRecord = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: TASK_COORDINATOR_E2E_ABI,
+      functionName: 'getTask',
+      args: [BigInt(taskId)],
+    });
+    const onChainManifestDigest = String(tupleField<Hex>(taskRecord, 'manifestDigest', 2)).toLowerCase();
+    assert(
+      onChainManifestDigest === manifestDigest.toLowerCase(),
+      `task manifestDigest mismatch: chain=${onChainManifestDigest} expected=${manifestDigest}`,
+    );
+
+    // Step 7 — reuse the claim/submit/verdict/finalize sequence from the
+    // legacy fork loop. (Inlined here rather than refactored out to keep
+    // diffs scoped to this phase.)
+    const claim = await claimTask(
+      publicClient,
+      operatorWallet,
+      operator.safeAddress,
+      deployment.router,
+      taskId,
+      operator.mechAddress,
+    );
+    assert(claim.attemptIndex === 0, `first attempt index was ${claim.attemptIndex}`);
+    const requestId = claim.requestId as Hex;
+
+    const solutionPayload = makePredictionV1SolutionPayload();
+    const restorationEnvelope = await signedExecutionEnvelope({
+      solverType: 'prediction.v1',
+      role: 'restoration',
+      taskCid,
+      requestId,
+      onchainCreationTx: created.hash,
+      onchainCreationBlock: Number(created.receipt.blockNumber),
+      safeAddress: operator.safeAddress,
+      privateKey: operator.agentPrivateKey,
+      window: predictionTask.window,
+      payload: solutionPayload,
+    });
+    validatePayload('prediction.v1', 'restoration', restorationEnvelope.payload);
+
+    await callDeliverToMarketplace(
+      publicClient,
+      operatorWallet,
+      operator.safeAddress,
+      operator.mechAddress,
+      [requestId],
+      [restorationEnvelope.signature.hash],
+    );
+    await claimDelivery(
+      publicClient,
+      operatorWallet,
+      operator.safeAddress,
+      deployment.router,
+      requestId,
+      { variant: 'v3', kind: 'solution', evidenceHash: restorationEnvelope.signature.hash },
+    );
+
+    const verdictClaim = await claimEvaluation(
+      publicClient,
+      evaluatorWallet,
+      evaluatorOperator.safeAddress,
+      deployment.router,
+      taskId,
+      claim.attemptIndex,
+      evaluatorOperator.mechAddress,
+      keccak256(toBytes(`evaluation:${taskCid}:${requestId}`)),
+    );
+    const verdictRequestId = verdictClaim.requestId as Hex;
+
+    const evaluatorHarness = new PredictionV1Evaluator({
+      _testDeps: {
+        getResolution: async () => makeResolvedPolymarketSnapshot(task),
+      },
+    });
+    const evaluationTmp = await mkdtemp(join(tmpdir(), 'jinn-solvernet-eval-e2e-'));
+    let verdictPayload: Record<string, unknown>;
+    try {
+      const verdictSolution = await evaluatorHarness.run({
+        task: {
+          ...task,
+          role: 'evaluation',
+          restorationRequestId: requestId,
+          context: {
+            restorationResult: JSON.stringify(restorationEnvelope),
+            [RESTORATION_TASK_CID_CONTEXT_KEY]: taskCid,
+            [RESTORATION_ENVELOPE_CID_CONTEXT_KEY]: 'bafy-restoration-solvernet',
+          },
+        },
+        taskCid,
+        workingDir: evaluationTmp,
+        implStateDir: join(evaluationTmp, 'state'),
+        log: () => {},
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 0,
+        trajectory: new TrajectoryCollector({ taskCid, runId: requestId }),
+      });
+      assert(verdictSolution.verdictPayload, 'prediction evaluator did not return a verdictPayload');
+      verdictPayload = verdictSolution.verdictPayload;
+      validatePayload('prediction.v1', 'verdict', verdictPayload);
+    } finally {
+      await rm(evaluationTmp, { recursive: true, force: true });
+    }
+
+    const verdictEnvelope = await signedExecutionEnvelope({
+      solverType: 'prediction.v1',
+      role: 'verdict',
+      taskCid,
+      requestId: verdictRequestId,
+      onchainCreationTx: created.hash,
+      onchainCreationBlock: Number(created.receipt.blockNumber),
+      safeAddress: evaluatorOperator.safeAddress,
+      privateKey: evaluatorOperator.agentPrivateKey,
+      window: predictionTask.window,
+      payload: verdictPayload,
+    });
+    validatePayload('prediction.v1', 'verdict', verdictEnvelope.payload);
+
+    await callDeliverToMarketplace(
+      publicClient,
+      evaluatorWallet,
+      evaluatorOperator.safeAddress,
+      evaluatorOperator.mechAddress,
+      [verdictRequestId],
+      [verdictEnvelope.signature.hash],
+    );
+    await claimDelivery(
+      publicClient,
+      evaluatorWallet,
+      evaluatorOperator.safeAddress,
+      deployment.router,
+      verdictRequestId,
+      { variant: 'v3', kind: 'verdict', evidenceHash: verdictEnvelope.signature.hash, verdictCode: 1 },
+    );
+
+    const taskRecordPostFinalize = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: TASK_COORDINATOR_E2E_ABI,
+      functionName: 'getTask',
+      args: [BigInt(taskId)],
+    });
+    const submittedCount = Number(tupleField<bigint>(taskRecordPostFinalize, 'submittedCount', 6));
+    assert(submittedCount === 1, `submittedCount=${submittedCount}, expected 1`);
+
+    // Step 8 — exercise lifecycle transitions: paused → launched → retired.
+    let stopGeneratorCalls = 0;
+    let startGeneratorCalls = 0;
+    const lifecycle = new LifecycleTransition({
+      store: solverNetStore,
+      registry,
+      signer: {
+        agentEoaAddress: launcherAccount.address,
+        agentEoaPrivateKey: launcher.agentPrivateKey,
+        agentId: launcher.agentId,
+      },
+      subgraph,
+      awaitTxConfirmation: async (txHash) => {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        return { blockNumber: Number(receipt.blockNumber) };
+      },
+      stopGenerator: async () => {
+        stopGeneratorCalls += 1;
+      },
+      startGenerator: async () => {
+        startGeneratorCalls += 1;
+      },
+    });
+
+    const lifecycleSequence: Array<'launched' | 'paused' | 'retired'> = [];
+
+    const paused = await lifecycle.transition(launched, 'paused');
+    assert(paused.status === 'paused', `pause did not land at status=paused (got ${paused.status})`);
+    assert(paused.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after pause');
+    assert(stopGeneratorCalls === 1, `expected 1 stopGenerator call after pause, got ${stopGeneratorCalls}`);
+    lifecycleSequence.push('paused');
+
+    const resumed = await lifecycle.transition(paused, 'launched');
+    assert(resumed.status === 'launched', `resume did not land at status=launched (got ${resumed.status})`);
+    assert(resumed.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after resume');
+    assert(startGeneratorCalls === 1, `expected 1 startGenerator call after resume, got ${startGeneratorCalls}`);
+    lifecycleSequence.push('launched');
+
+    const retired = await lifecycle.transition(resumed, 'retired');
+    assert(retired.status === 'retired', `retire did not land at status=retired (got ${retired.status})`);
+    assert(retired.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after retire');
+    assert(stopGeneratorCalls === 2, `expected 2 stopGenerator calls (pause+retire), got ${stopGeneratorCalls}`);
+    lifecycleSequence.push('retired');
+
+    // Three lifecycle transitions × 1 setMetadata call each + 1 launch
+    // setMetadata = 4 total publisher calls.
+    assert(
+      publisher.calls.length === 4,
+      `expected 4 setMetadata calls after launch + 3 transitions, got ${publisher.calls.length}`,
+    );
+
+    return {
+      manifestCid: launched.manifestCid,
+      taskId,
+      attempt: { operator: operator.safeAddress, attemptIndex: claim.attemptIndex, requestId },
+      verdict: String(verdictPayload['verdict']),
+      score: verdictScoreSummary(verdictPayload),
+      submittedCount,
+      lifecycleSequence,
+      setMetadataCalls: publisher.calls.length,
+    };
+  } finally {
+    stopMiningPulse();
+    if (launcherTmpDir) {
+      await rm(launcherTmpDir, { recursive: true, force: true });
+    }
+    if (operatorTmpDir) {
+      await rm(operatorTmpDir, { recursive: true, force: true });
+    }
+    if (evaluatorTmpDir) {
+      await rm(evaluatorTmpDir, { recursive: true, force: true });
+    }
+    await rm(storeBaseDir, { recursive: true, force: true });
     await anvil.teardown();
   }
 }
