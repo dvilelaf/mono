@@ -3,6 +3,7 @@ import { apiKeyAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { systemRouter } from "./system/system.routes.js";
 import { aboutRouter } from "./system/about.routes.js";
+import { decideRouter } from "./system/decide.routes.js";
 import { healthRouter } from "./domains/health/health.routes.js";
 import { genomicsRouter } from "./domains/genomics/genomics.routes.js";
 import { financeRouter } from "./domains/finance/finance.routes.js";
@@ -56,5 +57,6 @@ app.use("/api/interventions", interventionsRouter);
 app.use("/api/briefings", briefingsRouter);
 app.use("/api/watchdog", watchdogRouter);
 app.use("/api/about", aboutRouter);
+app.use("/api/decide", decideRouter);
 
 app.use(errorHandler);
