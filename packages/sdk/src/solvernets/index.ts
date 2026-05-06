@@ -23,6 +23,7 @@ export type {
   SolverNetClaimPolicyDefaults,
   SolverNetContract,
   SolverNetContractMap,
+  SolverNetContractSchema,
   PayloadValidationIssue,
   PayloadValidationFailure,
   PayloadValidationSuccess,
