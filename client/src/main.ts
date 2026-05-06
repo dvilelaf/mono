@@ -1429,6 +1429,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // through the receipt-confirmation path; only the mempool-drop fallback
   // depends on subgraph reads.
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
+  // Hoisted so the engine wiring below can pick the registry client up as
+  // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
+  // spec — task validation goes manifest → contract → schemas).
+  let solverNetRegistryClientForEngine:
+    | import('./solvernets/registry-client.js').SolverNetRegistryClient
+    | undefined;
   if (agentId && identityRegistryAddress && config.network === 'testnet') {
     const {
       initSolverNetSubsystem,
@@ -1456,6 +1462,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       subgraph: solverNetSubgraph,
       network: 'base-sepolia',
     });
+    solverNetRegistryClientForEngine = solverNetRegistryClient;
 
     const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
       agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
@@ -1668,6 +1675,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // Spec §14: task validation resolves manifest → contract → schemas.
+      // Threaded only when the SolverNet registry client was constructed
+      // (testnet branch above). The engine treats absence as "schema
+      // validation skipped" — production callers always have it.
+      ...(solverNetRegistryClientForEngine
+        ? { manifestResolver: solverNetRegistryClientForEngine }
+        : {}),
       identityPublisher,
       reputationFeedback,
       operatorConfig,
