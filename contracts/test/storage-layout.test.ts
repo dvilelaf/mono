@@ -68,6 +68,42 @@ const PINNED_SLOTS: PinnedSlot[] = [
     downstream:
       'JinnRouterV2 is deployed behind an upgradeable proxy. Proxy upgrades skip the constructor, so there is NO assembly guard — only this CI check enforces layout stability for the V2 → V2.1 upgrade path used by the `pwg` ops phase.',
   },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: 'nextTaskId',
+    // NOTE: declaration order suggested slot 3, but Solidity packs the
+    // address `authorizedRouter` and `bool initialized` into slot 1, shifting
+    // nextTaskId up to slot 2.
+    expectedSlot: '2',
+    downstream:
+      'TaskCoordinator is deployed behind JinnUpgradeableProxy. Drift on nextTaskId silently corrupts task ID assignment across upgrades — pre-cutover tasks become unreachable. The 217cb804 manifestDigest rename was cosmetic; this pin is the regression guard for any future PR that reorders state.',
+  },
+  {
+    contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
+    variable: '_tasks',
+    // NOTE: declaration order suggested slot 4; actual is slot 3 because of
+    // the authorizedRouter/initialized packing in slot 1 (see nextTaskId pin).
+    expectedSlot: '3',
+    downstream:
+      'TaskCoordinator._tasks holds every persisted TaskRecord (creator, taskCidDigest, manifestDigest, status, policy, claimCount). Drift makes ALL pre-upgrade tasks unreadable via getTask/claimTask.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'taskCoordinator',
+    expectedSlot: '3',
+    downstream:
+      'JinnRouterV3.taskCoordinator address is read from storage on every createTask/claimTask. Drift unwires the router from the coordinator proxy.',
+  },
+  {
+    contractPath: 'src/staking/JinnRouterV3.sol:JinnRouterV3',
+    variable: 'taskPayments',
+    // NOTE: declaration order suggested slot 9, but slot 3 packs
+    // `taskCoordinator` (address) + `initialized` (bool), shifting all
+    // subsequent mapping slots down by one. Actual slot is 8.
+    expectedSlot: '8',
+    downstream:
+      'JinnRouterV3.taskPayments holds creator, manifestDigest, and JINN budget remaining for every task. Drift makes pre-upgrade tasks unrefundable and unverifiable.',
+  },
 ];
 
 /**
