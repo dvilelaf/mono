@@ -20,19 +20,26 @@ import type { JsonSchema } from '../json-schema.js';
 // JSON Schema is opaque to this validator — manifests carry user-authored
 // schemas whose internal shape we do not constrain here. Manifest readers
 // validate payloads against these schemas at task/solution/verdict handling
-// time.
-const JsonSchemaZ: z.ZodType<JsonSchema> = z
-  .record(z.string(), z.unknown())
-  .refine((v) => v !== null && typeof v === 'object', { message: 'JSON Schema must be an object' });
+// time. `z.record(z.string(), z.unknown())` already rejects non-object input,
+// so no further refinement is needed.
+const JsonSchemaZ: z.ZodType<JsonSchema> = z.record(z.string(), z.unknown());
 
 const HexStringZ = z
   .string()
-  .regex(/^0x[0-9a-fA-F]*$/u, { message: 'must be 0x-prefixed hex' }) as z.ZodType<`0x${string}`>;
+  .regex(/^0x[0-9a-fA-F]+$/u, {
+    message: 'must be 0x-prefixed hex with at least one hex digit',
+  }) as z.ZodType<`0x${string}`>;
 
 const NumericStringZ = z
   .string()
   .regex(/^\d+$/u, { message: 'must be a non-negative integer string (wei)' });
 
+// `creator` is the launcher role and is always implicit — it never appears in
+// `openRoles` because the launcher is the SolverNet's authority document
+// signer, not a participant target advertised for join. `openRoles` is
+// constrained inline to ['solver', 'evaluator']; this enum is exposed for
+// callers that reason about all three roles (e.g., credentialRequirements
+// keying).
 const ContractRoleZ = z.enum(['creator', 'solver', 'evaluator']);
 
 const CredentialRequirementZ = z.object({
