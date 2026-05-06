@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
@@ -92,29 +92,25 @@ function taskContextJson(inputs: TaskSessionInputs): string {
 }
 
 /**
- * Construct the initial prompt that invokes the coordinator skill with
+ * Construct the initial prompt that invokes the learn skill with
  * the task context.
  */
 function buildInitialPrompt(inputs: TaskSessionInputs): string {
   return [
-    'You are running a Jinn restoration task. Invoke the `claude-code-learner:coordinator` skill via the Skill tool to begin.',
+    'You are running a task through the claude-code-learner harness.',
+    'Use the `claude-code-learner:learn` skill end-to-end. The skill defines the seven-phase learning loop; follow it.',
     '',
-    'Session inputs (refer to these when the coordinator skill or any phase asks for them):',
-    `- task.id = ${inputs.taskId}`,
-    inputs.taskCid ? `- task.cid = ${inputs.taskCid}` : '',
-    inputs.solverType ? `- solverType = ${inputs.solverType}` : '',
-    inputs.claudeModel ? `- claudeModel = ${inputs.claudeModel}` : '',
+    'Session inputs:',
+    `- goal.id = ${inputs.taskId}`,
+    inputs.taskCid ? `- goal.cid = ${inputs.taskCid}` : '',
     `- workingDir = ${inputs.workingDir}`,
     `- implStateDir = ${inputs.implStateDir}`,
-    `- window.startTs = ${inputs.windowStartTs} (ms since epoch)`,
-    `- window.endTs = ${inputs.windowEndTs} (ms since epoch)`,
-    `- msUntilEndTs = ${inputs.msUntilEndTs}`,
+    `- deadline = ${inputs.windowEndTs} (ms since epoch)`,
+    `- msUntilDeadline = ${inputs.msUntilEndTs}`,
     `- mode = ${inputs.mode}`,
     inputs.taskBody
-      ? `\ntask (full body):\n${JSON.stringify(inputs.taskBody, null, 2)}`
+      ? `\ngoal (full body):\n${JSON.stringify(inputs.taskBody, null, 2)}`
       : '',
-    '',
-    'Run the phases specified by JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE (defaults to all seven if unset) and return when complete.',
   ]
     .filter((line) => line !== '')
     .join('\n');
@@ -123,7 +119,7 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
 /**
  * Real Claude Code adapter. Spawns the `claude` CLI with the plugin
  * loaded via Claude Code's plugin install directory, sets IMPL_STATE_DIR
- * so the session-start hook fires correctly, and hands the coordinator
+ * so the session-start hook fires correctly, and hands the learn skill
  * an initial prompt with task context.
  *
  * Output collection is delegated to the shim's harvester — this adapter
@@ -157,11 +153,22 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     // Ensure the plugin install directory exists. The adapter does NOT
     // copy the plugin — that's the operator's responsibility per the
     // README. If the operator has not installed it, Claude Code will
-    // not find the coordinator skill and will fail; check for it here.
+    // not find the learner skill and will fail; check for it here.
     mkdirSync(this.pluginInstallDir, { recursive: true });
 
     const prompt = buildInitialPrompt(inputs);
-    const args: string[] = ['-p', prompt];
+    const args: string[] = [
+      '--setting-sources',
+      'project',
+      '--permission-mode',
+      'bypassPermissions',
+      '--verbose',
+      '--output-format',
+      'stream-json',
+      '--include-hook-events',
+      '-p',
+      prompt,
+    ];
     const claudeModel = inputs.claudeModel ?? this.claudeModel;
     if (claudeModel) args.push('--model', claudeModel);
 
@@ -195,6 +202,10 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     };
 
     return new Promise<void>((resolve, reject) => {
+      const logDir = join(inputs.workingDir, '.claude-code');
+      mkdirSync(logDir, { recursive: true });
+      const stdoutLog = createWriteStream(join(logDir, 'stdout.jsonl'), { flags: 'a' });
+      const stderrLog = createWriteStream(join(logDir, 'stderr.log'), { flags: 'a' });
       const child: ChildProcess = this.spawnFn(this.claudePath, args, spawnOpts);
 
       // If the abort signal already fired before we got here (race), kill
@@ -212,12 +223,18 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       inputs.abort.addEventListener('abort', onAbort);
 
       let stderr = '';
+      child.stdout?.on('data', (d: Buffer) => {
+        stdoutLog.write(d);
+      });
       child.stderr?.on('data', (d: Buffer) => {
+        stderrLog.write(d);
         stderr += d.toString();
       });
 
       child.on('exit', (code, signal) => {
         inputs.abort.removeEventListener('abort', onAbort);
+        stdoutLog.end();
+        stderrLog.end();
         if (code === 0) {
           resolve();
         } else if (inputs.abort.aborted) {
@@ -236,6 +253,8 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
       child.on('error', (err) => {
         inputs.abort.removeEventListener('abort', onAbort);
+        stdoutLog.end();
+        stderrLog.end();
         reject(err);
       });
     });
