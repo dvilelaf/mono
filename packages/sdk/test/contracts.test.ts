@@ -76,6 +76,45 @@ describe('SolverNetContract surface (Task 6)', () => {
   });
 });
 
+// Task 7: getSolverNetContract({id, version}) overload + internal solverTypeAlias.
+//
+// The legacy string-keyed signature is preserved (deprecated) to let the
+// daemon migrate incrementally in Task 8. Both shapes resolve the same
+// template; Task 30 deletes the string-keyed signature alongside the legacy
+// `solverType` field.
+describe('getSolverNetContract — Task 7 overload', () => {
+  it('string-keyed signature still resolves PREDICTION_V1', () => {
+    expect(getSolverNetContract('prediction.v1')).toBe(PREDICTION_V1_SOLVER_NET_CONTRACT);
+  });
+
+  it('object-keyed signature ({id, version}) resolves the same template', () => {
+    expect(getSolverNetContract({ id: 'prediction', version: 'v1' })).toBe(
+      PREDICTION_V1_SOLVER_NET_CONTRACT,
+    );
+  });
+
+  it('both signatures return undefined for unknown identifiers', () => {
+    expect(getSolverNetContract('does.not.exist')).toBeUndefined();
+    expect(getSolverNetContract({ id: 'does', version: 'not-exist' })).toBeUndefined();
+    // Ensure id/version round-trip is just a dot-join: a valid id with a
+    // bogus version still misses the lookup.
+    expect(getSolverNetContract({ id: 'prediction', version: 'v999' })).toBeUndefined();
+  });
+});
+
+describe('solverTypeAlias — internal helper for Task 8 migration', () => {
+  it("returns `${id}.${version}` for v1", async () => {
+    const { solverTypeAlias } = await import('../src/contracts.js');
+    expect(solverTypeAlias({ id: 'prediction', version: 'v1' })).toBe('prediction.v1');
+  });
+
+  it('round-trips for arbitrary version strings (just string concatenation)', async () => {
+    const { solverTypeAlias } = await import('../src/contracts.js');
+    expect(solverTypeAlias({ id: 'prediction', version: 'v2' })).toBe('prediction.v2');
+    expect(solverTypeAlias({ id: 'forecasting', version: 'v0' })).toBe('forecasting.v0');
+  });
+});
+
 describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 (Phase 1 dependency)', () => {
   it('round-trips through manifestSchema with all derived fields populated', () => {
     const c = PREDICTION_V1_SOLVER_NET_CONTRACT;
