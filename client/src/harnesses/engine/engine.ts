@@ -49,7 +49,8 @@ import type { Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { buildInfo } from '../../build-info.js';
-import { getSolverNetContract, validateTask } from '@jinn-network/sdk/solvernets';
+import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
+import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
@@ -92,6 +93,27 @@ export interface SolverNetRegistryLike {
   } | undefined;
 }
 
+/**
+ * Resolves a launched SolverNet manifest by IPFS CID.
+ *
+ * Engine-internal contract; the production wiring passes
+ * `IdentityRegistryBackedSolverNetRegistryClient` (Task 4 of
+ * `spec/2026-05-05-solvernet-creation-and-launch.md`), which fetches the
+ * manifest from IPFS and verifies the canonical hash before returning.
+ *
+ * Per spec §14, task validation goes manifest → contract → schemas:
+ * the engine resolves the task's `solverNetManifestCid`, reads
+ * `manifest.contract.{id, version}`, and validates the task body against
+ * that contract's schema. The legacy `solverType`-keyed schema lookup
+ * is retired here.
+ *
+ * Optional — when absent, engines without a registry wired (e.g. unit
+ * tests for non-validation paths) skip task-body schema validation.
+ */
+export interface ManifestResolver {
+  getManifest(args: { manifestCid: string }): Promise<SolverNetManifestV1>;
+}
+
 // ── Engine options ────────────────────────────────────────────────────────────
 
 export interface TaskEngineOptions {
@@ -128,6 +150,14 @@ export interface TaskEngineOptions {
    */
   implRegistry?: ImplRegistry;
   solverNetRegistry?: SolverNetRegistryLike;
+  /**
+   * Resolves a launched SolverNet manifest by `solverNetManifestCid`.
+   * Required for production wiring; tests that don't exercise schema
+   * validation can omit it.
+   *
+   * See `ManifestResolver` and `spec/2026-05-05-solvernet-creation-and-launch.md` §14.
+   */
+  manifestResolver?: ManifestResolver;
   /**
    * ERC-8004 Identity Registry per-execution publisher (jinn-mono-3zk).
    * When provided, the engine calls
@@ -215,6 +245,7 @@ export class TaskEngine {
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
+  protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
   protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
@@ -265,6 +296,7 @@ export class TaskEngine {
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
+    this.manifestResolver = opts.manifestResolver;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
@@ -514,42 +546,128 @@ export class TaskEngine {
     return [];
   }
 
+  /**
+   * Internal routing key alias for the legacy `solverType`-keyed harness
+   * map (Task 8 of `spec/2026-05-05-solvernet-creation-and-launch.md`,
+   * removed in Task 30). Prefers the canonical
+   * `${contractId}.${contractVersion}` when the task carries them, and
+   * falls back to the legacy `task.solverType` field for pre-Task-24
+   * shapes / health-check tasks. Mirrors the SDK's internal
+   * `solverTypeAlias` helper but operates on a `Task`.
+   */
+  private routingKeyForTask(task: Task | undefined, fallback?: string): string | undefined {
+    if (task?.contractId && task?.contractVersion) {
+      return `${task.contractId}.${task.contractVersion}`;
+    }
+    return task?.solverType ?? fallback;
+  }
+
+  /**
+   * Resolve the task's `solverNetManifestCid` via the registry, fetch the
+   * manifest, and validate the task body against `manifest.contract.schemas.task`.
+   *
+   * Returns `null` when validation passes (or is skipped because no
+   * `manifestResolver` is wired and the task carries no `solverNetManifestCid`),
+   * or a human-readable failure reason otherwise.
+   *
+   * Day-1 compatibility note: this validates via the SDK template's Zod schema
+   * looked up by `{contract.id, contract.version}`. The manifest's embedded
+   * JSON Schema is the canonical wire format; once external launchers can
+   * publish manifests with arbitrary task schemas, this will switch to a JSON
+   * Schema validator (or `jsonSchemaToZod`) over the manifest's own schema.
+   * See `spec/2026-05-05-solvernet-creation-and-launch.md` §14.
+   */
+  private async manifestBackedValidation(task: Task): Promise<string | null> {
+    const cid = task.solverNetManifestCid;
+    if (!cid) {
+      // Without a manifest CID, schema validation can't run via the §14
+      // pipeline. Production callers (mech adapter) require CIDs at task
+      // post-time — this branch is hit only by tests / health-check tasks
+      // that don't exercise schema validation. The legacy
+      // `solverType`-keyed validation path was retired here.
+      return null;
+    }
+    if (!this.manifestResolver) {
+      // Engine wasn't constructed with a registry. Tests that don't exercise
+      // manifest resolution leave this unwired; treat schema validation as
+      // a no-op rather than failing — the daemon's production wiring always
+      // supplies a resolver.
+      return null;
+    }
+
+    let manifest: SolverNetManifestV1;
+    try {
+      manifest = await this.manifestResolver.getManifest({ manifestCid: cid });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return `manifest resolution failed for cid '${cid}': ${message}`;
+    }
+
+    const ref = { id: manifest.contract.id, version: manifest.contract.version };
+
+    // Defense against malformed task documents: if the task carries explicit
+    // `contractId`/`contractVersion`, they MUST agree with the manifest.
+    if (task.contractId !== undefined && task.contractId !== ref.id) {
+      return `task.contractId '${task.contractId}' does not match manifest contract.id '${ref.id}'`;
+    }
+    if (task.contractVersion !== undefined && task.contractVersion !== ref.version) {
+      return `task.contractVersion '${task.contractVersion}' does not match manifest contract.version '${ref.version}'`;
+    }
+
+    // Day-1 compatibility: validate via the SDK template's Zod for the
+    // resolved contract. Day-N (external launchers) will validate against
+    // `manifest.contract.schemas.task` directly via JSON Schema.
+    const sdkContract = getSolverNetContract(ref);
+    if (!sdkContract) {
+      return `unsupported contract '${ref.id}.${ref.version}' from manifest '${cid}'`;
+    }
+    const parsed = sdkContract.schemas.task.zod.safeParse(task);
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
+        .join('; ');
+      return `${ref.id}.${ref.version} task failed validation: ${issues}`;
+    }
+    return null;
+  }
+
   private async runnableFailureReason(
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
   ): Promise<string | null> {
-    const solverNet = this.solverNetRegistry && solverType
-      ? this.solverNetRegistry.forSolverType(solverType, role)
+    // Prefer the contract-derived routing alias when the task carries
+    // `contractId`/`contractVersion` (Task 24); fall back to the explicit
+    // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
+    // rows that pre-date `contractId`. See `routingKeyForTask`.
+    const routingKey = this.routingKeyForTask(task, solverType);
+    const solverNet = this.solverNetRegistry && routingKey
+      ? this.solverNetRegistry.forSolverType(routingKey, role)
       : undefined;
-    if (this.solverNetRegistry && solverType && !solverNet) {
-      return `no enabled SolverNet for solverType '${solverType}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
+    if (this.solverNetRegistry && routingKey && !solverNet) {
+      return `no enabled SolverNet for solverType '${routingKey}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
-    if (solverType && task) {
-      // Migrated from `getSolverNetContract(solverType)` (deprecated string-
-      // keyed overload, removed in Task 30) to the `{id,version}` form.
-      // `solverType` here is the legacy routing alias (`'<id>.<version>'`)
-      // — internal dispatch keeps it as a string per Task 8 of
-      // `spec/2026-05-05-solvernet-creation-and-launch.md`.
-      const dot = solverType.lastIndexOf('.');
-      const ref = dot > 0 && dot < solverType.length - 1
-        ? { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) }
-        : undefined;
-      if (ref && getSolverNetContract(ref)) {
-        const validation = validateTask(solverType, task);
-        if (!validation.ok) {
-          return validation.error.message;
-        }
-      }
+    if (task) {
+      // Per spec §14 of `spec/2026-05-05-solvernet-creation-and-launch.md`,
+      // task validation resolves manifest → contract → schemas:
+      //   manifest = registry.getManifest({ manifestCid: task.solverNetManifestCid })
+      //   contract = manifest.contract
+      //   validateAgainstSchema(task, contract.schemas.task)
+      // The legacy `solverType`-keyed `validateTask(solverType, task)` path
+      // is retired here; the routing alias is recovered from
+      // `manifest.contract.{id, version}` for the harness map lookup
+      // (which still keys on the `<id>.<version>` string until Task 30).
+      const validationFailure = await this.manifestBackedValidation(task);
+      if (validationFailure) return validationFailure;
     }
-    if (!this.implRegistry || !solverType) return null;
+    if (!this.implRegistry || !routingKey) return null;
 
-    const impl = this.implRegistry.findFor({ solverType, role });
+    const impl = this.implRegistry.findFor({ solverType: routingKey, role });
     if (!impl) {
       const setHarnessHint = solverNet
         ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
         : 'jinn solver-nets set-harness <name> <harness>';
-      return `no Harness registered or enabled for solverType '${solverType}'; run \`${setHarnessHint}\``;
+      return `no Harness registered or enabled for solverType '${routingKey}'; run \`${setHarnessHint}\``;
     }
     if (task) {
       if (impl.canAttempt) {
@@ -560,7 +678,7 @@ export class TaskEngine {
       }
     }
     if (impl.isReady) {
-      const status = await impl.isReady({ solverType, role });
+      const status = await impl.isReady({ solverType: routingKey, role });
       if (!status.ready) {
         return `impl '${impl.name}' not ready: ${status.reason ?? 'unknown'}${status.nextStep?.cli ? ` — run \`${status.nextStep.cli}\`` : ''}`;
       }
@@ -627,9 +745,14 @@ export class TaskEngine {
    * records a minimal post-snapshot so data-driven advance can fire.
    */
   protected async runImpl(task: PersistedTaskRun): Promise<void> {
+    // The persisted `solver_type` column is authoritative for harness
+    // dispatch — it was derived at observation time from the canonical
+    // `${contractId}.${contractVersion}` alias (see Task 24's TaskCreated
+    // path). Internal routing key only — Task 30 retires the legacy
+    // string-keyed harness map.
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
-    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType, task.taskRole ?? 'restoration') : undefined;
+    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType, role) : undefined;
     const impl = this.implRegistry?.findFor({ solverType, role });
     if (!impl) {
       throw new NotImplementedError('runImpl');
