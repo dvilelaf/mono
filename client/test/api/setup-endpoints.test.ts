@@ -816,3 +816,240 @@ describe('POST /v1/setup/network', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('POST /v1/operator/join/:cid', () => {
+  // Operator participation flow keyed by manifestCid (Task 21).
+  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
+  const writeConfig = (path: string, body: unknown): void => {
+    require('node:fs').writeFileSync(path, JSON.stringify(body, null, 2) + '\n');
+  };
+
+  it('writes a manifest-keyed entry to config.joinedSolverNets', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, { network: 'testnet' });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiaaa', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Prediction',
+        roles: ['solver'],
+        harness: 'claude-code-learner',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: ['jinn-prediction-plugin'],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      restartRequired: boolean;
+      manifestCid: string;
+      config: Record<string, unknown>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.restartRequired).toBe(true);
+    expect(body.manifestCid).toBe('bafybeiaaa');
+
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiaaa).toEqual({
+      manifestCid: 'bafybeiaaa',
+      name: 'Prediction',
+      roles: ['solver'],
+      harness: 'claude-code-learner',
+      model: 'claude-haiku-4-5-20251001',
+      plugins: ['jinn-prediction-plugin'],
+    });
+    // Other top-level keys are preserved by persistTopLevelConfigValue.
+    expect(persisted.network).toBe('testnet');
+  });
+
+  it('persists evaluator-only entries without harness/model/plugins', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-eval-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeibbb', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Prediction',
+        roles: ['evaluator'],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeibbb).toEqual({
+      manifestCid: 'bafybeibbb',
+      name: 'Prediction',
+      roles: ['evaluator'],
+    });
+  });
+
+  it('deduplicates roles in the canonical order', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-dedup-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiccc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver', 'evaluator', 'solver'] }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiccc.roles).toEqual(['solver', 'evaluator']);
+  });
+
+  it('rejects an empty roles array', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-empty-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiddd', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: [] }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects unknown role values', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-bad-role-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeieee', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver', 'launcher'] }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects malformed JSON body', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-malformed-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeifff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('overwrites an existing manifest-keyed entry on re-join', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-overwrite-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      joinedSolverNets: {
+        bafybeiggg: { manifestCid: 'bafybeiggg', roles: ['solver'] },
+      },
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiggg', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver', 'evaluator'] }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiggg.roles).toEqual(['solver', 'evaluator']);
+  });
+});
+
+describe('DELETE /v1/operator/join/:cid', () => {
+  const writeConfig = (path: string, body: unknown): void => {
+    require('node:fs').writeFileSync(path, JSON.stringify(body, null, 2) + '\n');
+  };
+
+  it('removes the entry and returns 200', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-leave-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      joinedSolverNets: {
+        bafybeihhh: { manifestCid: 'bafybeihhh', roles: ['solver'] },
+        bafybeiiii: { manifestCid: 'bafybeiiii', roles: ['evaluator'] },
+      },
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeihhh', {
+      method: 'DELETE',
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; restartRequired: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.restartRequired).toBe(true);
+
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeihhh).toBeUndefined();
+    // Other entries are preserved.
+    expect(persisted.joinedSolverNets.bafybeiiii).toBeDefined();
+  });
+
+  it('returns 404 when the entry does not exist', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-leave-404-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, { joinedSolverNets: {} });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeijjj', {
+      method: 'DELETE',
+    });
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('join_not_found');
+  });
+
+  it('returns 404 when the config has no joinedSolverNets at all', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-leave-empty-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, { network: 'testnet' });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeikkk', {
+      method: 'DELETE',
+    });
+
+    expect(res.status).toBe(404);
+  });
+});
