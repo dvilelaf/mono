@@ -66,6 +66,7 @@
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
     "e2e:prediction": "tsx test/e2e/prediction-v1.ts",
+    "e2e:freeze-mode": "tsx test/e2e/freeze-mode.test.ts",
     "staking": "tsx test/e2e/staking.ts",
     "stolas": "tsx test/e2e/stolas.ts",
     "withdraw": "tsx scripts/withdraw.ts",
