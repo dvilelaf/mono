@@ -128,6 +128,12 @@ function convert(schema: unknown): z.ZodTypeAny {
       // honor that by leaving the object strict-ish (passthrough by default).
       // Use `.passthrough()` if additionalProperties is true or unset to
       // match permissive JSON Schema semantics.
+      //
+      // Note: `zodToJsonSchema` emits `additionalProperties: false` by default
+      // for `z.object()` (passthrough is opt-in), so a round-trip through this
+      // helper turns non-strict objects into strict ones. Day-1 acceptable;
+      // flag here in case downstream callers need passthrough semantics
+      // preserved.
       if (s.additionalProperties === false) {
         return obj.strict();
       }

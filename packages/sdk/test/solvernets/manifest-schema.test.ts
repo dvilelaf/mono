@@ -135,6 +135,26 @@ describe('SolverNetManifestV1 schema (§7)', () => {
     expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
   });
 
+  it('rejects the bare "0x" sentinel for HexString fields', () => {
+    // Without the `+` quantifier, "0x" with no hex digits would silently pass
+    // and propagate into a corrupt manifest.
+    const safeManifest = buildValidManifest();
+    safeManifest.launcher.safeAddress = '0x' as `0x${string}`;
+    expect(SolverNetManifestV1Schema.safeParse(safeManifest).success).toBe(false);
+
+    const eoaManifest = buildValidManifest();
+    eoaManifest.launcher.agentEoa = '0x' as `0x${string}`;
+    expect(SolverNetManifestV1Schema.safeParse(eoaManifest).success).toBe(false);
+
+    const sigSignerManifest = buildValidManifest();
+    sigSignerManifest.signature.signer = '0x' as `0x${string}`;
+    expect(SolverNetManifestV1Schema.safeParse(sigSignerManifest).success).toBe(false);
+
+    const sigValueManifest = buildValidManifest();
+    sigValueManifest.signature.value = '0x' as `0x${string}`;
+    expect(SolverNetManifestV1Schema.safeParse(sigValueManifest).success).toBe(false);
+  });
+
   it('rejects when solutionPriceWei is missing', () => {
     const manifest = buildValidManifest() as Record<string, unknown>;
     delete manifest.solutionPriceWei;
