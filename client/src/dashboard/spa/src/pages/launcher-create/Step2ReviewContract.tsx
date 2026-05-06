@@ -129,7 +129,7 @@ export function Step2ReviewContract({
           <ReadonlyRow label="Output" value={TEMPLATE.aggregationFunction.output} />
         </SectionBlock>
 
-        <SectionBlock title="Claim policy defaults">
+        <SectionBlock title="Solver claim policy" testId="step2-solver-claim-policy">
           <ReadonlyRow label="Mode" value={TEMPLATE.claimPolicy.solver.mode} />
           <ReadonlyRow
             label="Max claims"
@@ -143,6 +143,54 @@ export function Step2ReviewContract({
             label="Lease TTL"
             value={`${TEMPLATE.claimPolicy.solver.claimLeaseTtlSeconds}s`}
           />
+          <ReadonlyRow
+            label="Submission window"
+            value={`${TEMPLATE.claimPolicy.solver.submissionWindowSeconds}s`}
+          />
+        </SectionBlock>
+
+        <SectionBlock title="Evaluator claim policy" testId="step2-evaluator-claim-policy">
+          <ReadonlyRow
+            label="Required verdicts"
+            value={String(TEMPLATE.claimPolicy.evaluator.requiredVerdicts)}
+          />
+          <ReadonlyRow
+            label="Pass threshold"
+            value={String(TEMPLATE.claimPolicy.evaluator.passThreshold)}
+          />
+          <ReadonlyRow
+            label="Per evaluator"
+            value={String(TEMPLATE.claimPolicy.evaluator.maxVerdictsPerEvaluator)}
+          />
+          <ReadonlyRow
+            label="Lease TTL"
+            value={`${TEMPLATE.claimPolicy.evaluator.claimLeaseTtlSeconds}s`}
+          />
+          <ReadonlyRow
+            label="No self-evaluation"
+            value={TEMPLATE.claimPolicy.evaluator.disallowSolverSelfEvaluation ? 'yes' : 'no'}
+          />
+          <ReadonlyRow
+            label="Window duration"
+            value={`${TEMPLATE.claimPolicy.evaluator.window.duration}s`}
+          />
+          {TEMPLATE.claimPolicy.evaluator.window.externalReadyAt ? (
+            <ReadonlyRow
+              label="Window opens at"
+              value={TEMPLATE.claimPolicy.evaluator.window.externalReadyAt}
+            />
+          ) : null}
+          {TEMPLATE.claimPolicy.evaluator.preconditions.length > 0 ? (
+            <div data-testid="step2-evaluator-preconditions" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {TEMPLATE.claimPolicy.evaluator.preconditions.map((p, i) => (
+                <ReadonlyRow
+                  key={`${p.kind}-${i}`}
+                  label={`Precondition ${i + 1}`}
+                  value={`${p.kind} → ${p.expects} (source: ${p.source})`}
+                />
+              ))}
+            </div>
+          ) : null}
         </SectionBlock>
 
         <SectionBlock title="Credential requirements">
@@ -158,12 +206,15 @@ export function Step2ReviewContract({
 function SectionBlock({
   title,
   children,
+  testId,
 }: {
   title: string;
   children: React.ReactNode;
+  testId?: string;
 }): JSX.Element {
   return (
     <section
+      data-testid={testId}
       style={{
         display: 'flex',
         flexDirection: 'column',

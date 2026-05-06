@@ -88,4 +88,44 @@ describe('Step2ReviewContract', () => {
     fireEvent.click(screen.getByTestId('launcher-create-back'));
     expect(onBack).toHaveBeenCalled();
   });
+
+  it('renders both solver and evaluator claim-policy sections', () => {
+    render(
+      <Step2ReviewContract
+        draft={buildDraft()}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('step2-solver-claim-policy')).toBeTruthy();
+    expect(screen.getByTestId('step2-evaluator-claim-policy')).toBeTruthy();
+  });
+
+  it('surfaces the polymarket-resolution evaluator precondition', () => {
+    render(
+      <Step2ReviewContract
+        draft={buildDraft()}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    const block = screen.getByTestId('step2-evaluator-preconditions');
+    expect(block.textContent).toMatch(/oracle\.polymarket\.resolution/);
+    expect(block.textContent).toMatch(/resolved/);
+    expect(block.textContent).toMatch(/\$\{task\.spec\.source\.url\}/);
+  });
+
+  it('surfaces the evaluator window externalReadyAt + duration', () => {
+    render(
+      <Step2ReviewContract
+        draft={buildDraft()}
+        onAdvance={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    const evaluatorBlock = screen.getByTestId('step2-evaluator-claim-policy');
+    expect(evaluatorBlock.textContent).toMatch(/expectedResolutionTime/);
+    // 7 * 24 * 3600 = 604800
+    expect(evaluatorBlock.textContent).toMatch(/604800s/);
+  });
 });
