@@ -621,13 +621,15 @@ export class TaskEngine {
   }
 
   /**
-   * Internal routing key alias for the legacy `solverType`-keyed harness
-   * map (Task 8 of `spec/2026-05-05-solvernet-creation-and-launch.md`,
-   * removed in Task 30). Prefers the canonical
-   * `${contractId}.${contractVersion}` when the task carries them, and
-   * falls back to the legacy `task.solverType` field for pre-Task-24
-   * shapes / health-check tasks. Mirrors the SDK's internal
-   * `solverTypeAlias` helper but operates on a `Task`.
+   * Internal routing key alias for the daemon-internal `solverType`-keyed
+   * harness map. Per spec §15 (non-goal of
+   * `spec/2026-05-05-solvernet-creation-and-launch.md`), the harness
+   * dispatch alias is intentionally retained for one cycle past Task 30;
+   * the user-facing surface (manifest, SPA, SDK shapes) is `solverType`-
+   * free. Prefers the canonical `${contractId}.${contractVersion}` when
+   * the task carries them, and falls back to the legacy `task.solverType`
+   * field for pre-Task-24 shapes / health-check tasks. Mirrors the SDK's
+   * internal `solverTypeAlias` helper but operates on a `Task`.
    */
   private routingKeyForTask(task: Task | undefined, fallback?: string): string | undefined {
     if (task?.contractId && task?.contractVersion) {
