@@ -7,6 +7,8 @@ import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
+import { LauncherCreatePage } from './pages/LauncherCreate.js';
+import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 
 // Configuration + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
@@ -20,6 +22,20 @@ vi.mock('./api/client.js', () => ({
     fetchLauncherStatus: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     fetchLauncherTasks: async () => ({ schemaVersion: 1, generatedAt: '', tasks: [] }),
     patchLauncherSolverNet: async () => ({ ok: true, name: 'prediction', roles: [], generator: {} }),
+    solvernets: {
+      listDrafts: async () => ({ drafts: [] }),
+      getDraft: async () => ({}),
+      createDraft: async () => ({}),
+      updateDraft: async () => ({}),
+      deleteDraft: async () => ({ ok: true }),
+      launch: async () => ({ solverNetId: '', status: 'launching', pollUrl: '' }),
+      transitionLifecycle: async () => ({}),
+      updateGeneratorConfig: async () => ({}),
+      get: async () => ({}),
+      listLaunched: async () => ({ records: [] }),
+      listRegistry: async () => ({ summaries: [], lastRefreshedAt: null, lastError: null }),
+      getManifest: async () => ({}),
+    },
   },
 }));
 
@@ -91,5 +107,40 @@ describe('App routes', () => {
       ),
     );
     expect(screen.getByRole('heading', { name: /generator config/i })).toBeTruthy();
+  });
+
+  // ── New SolverNet creation/launch routes (Task 16 scaffolding) ──
+  // These routes render placeholder components until Tasks 18 + 19 fill them
+  // in. We assert the routes match and the placeholders render so the SPA
+  // doesn't crash when an operator navigates to them.
+
+  it('renders LauncherCreatePage placeholder on /launcher/create', () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher/create" component={LauncherCreatePage} />
+          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
+          <Route path="/launcher" component={LauncherPage} />
+        </Switch>,
+        '/launcher/create',
+      ),
+    );
+    expect(screen.getByTestId('launcher-create-placeholder')).toBeTruthy();
+  });
+
+  it('renders LauncherLaunchedPage placeholder on /launcher/launched/:solverNetId and exposes the param', () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/launcher/create" component={LauncherCreatePage} />
+          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
+          <Route path="/launcher" component={LauncherPage} />
+        </Switch>,
+        '/launcher/launched/agent-1_prediction.v1-1_abcdef01',
+      ),
+    );
+    expect(screen.getByTestId('launcher-launched-placeholder')).toBeTruthy();
+    const idEl = screen.getByTestId('launcher-launched-solvernet-id');
+    expect(idEl.textContent).toContain('agent-1_prediction.v1-1_abcdef01');
   });
 });
