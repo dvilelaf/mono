@@ -16,6 +16,7 @@
     "db:studio": "drizzle-kit studio",
     "seed:goals": "tsx scripts/seed-goals.ts",
     "seed:interventions": "tsx scripts/seed-interventions.ts",
+    "seed:tasks": "tsx scripts/seed-tasks-from-blockers.ts",
     "interventions:evaluate": "tsx scripts/run-interventions-eval.ts"
   },
   "keywords": [],
