@@ -162,12 +162,14 @@ export async function loadSolverNets(
       seenNames.add(plugin.name);
     }
 
-    // jinn-mono-qwdc.6 / .8 — `defaultRuntimePlugins` was removed from
-    // SolverNetContract in Task 6, so spreading it here would throw at
-    // startup. Operator-configurable plugins flow through `net.plugins`
-    // (iterated immediately below); Task 8 will fully reconcile plugin
-    // defaults out of the contract when migrating the rest of
-    // solverType-keyed dispatch.
+    // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, runtime
+    // plugins are operator-configured — the SolverNet contract no longer
+    // carries `defaultRuntimePlugins`. Network Tools is the one runtime-
+    // scoped default (`supports: ['jinn.runtime']`) auto-loaded so every
+    // operator's daemon can talk to the Jinn MCP surface. SolverType-bound
+    // plugins (e.g. the bundled prediction plugin) flow through
+    // `net.plugins`; the launcher seeds quick-start defaults into operator
+    // config rather than binding them to the contract.
     for (const entry of [JINN_NETWORK_TOOLS_PLUGIN]) {
       await addRuntimePlugin(entry, 'default');
     }
