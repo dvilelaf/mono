@@ -46,6 +46,7 @@ const LifecycleProgressSchema = z.object({
   phase: z.enum(['broadcasting', 'confirming']),
   target: z.enum(['paused', 'launched', 'retired']),
   txHash: HexString.optional(),
+  txError: TimestampedError.optional(),
   attemptCount: z.number().int().nonnegative(),
 });
 
