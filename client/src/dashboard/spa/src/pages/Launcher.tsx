@@ -1,106 +1,320 @@
-import { Fragment, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
-import { EmptyState } from './launcher/EmptyState.js';
-import { SetupFlow } from './launcher/SetupFlow.js';
-import { KnowledgeProductionCard } from './launcher/KnowledgeProductionCard.js';
-import { CostCard } from './launcher/CostCard.js';
-import { GeneratorStatusCard } from './launcher/GeneratorStatusCard.js';
-import { PostedTasksList } from './launcher/PostedTasksList.js';
-import { EmissionsPlaceholder } from './launcher/EmissionsPlaceholder.js';
+import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
 
 /**
- * Launcher mode overview page — composes Tasks 12-15's components per
- * spec/2026-05-05-launcher-role-and-mode.md §6.4 + §6.5.
+ * Launcher mode > `/launcher`. Owned-SolverNets list page.
  *
- * - No SolverNet has 'launching' role -> EmptyState (with CTA to setup).
- * - CTA clicked -> SetupFlow wizard (4 steps; flips 'launching' on via PATCH).
- * - At least one launching SolverNet -> tier 1-4 stack:
- *     1. KnowledgeProductionCard (intent + scoreboard + recent settled)
- *     2. CostCard (7d burn + funded + open-budget reservations)
- *     3. GeneratorStatusCard + PostedTasksList (tactical state)
- *     4. EmissionsPlaceholder (Phase B+ ve-JINN gauge)
+ * Spec: `spec/2026-05-05-solvernet-creation-and-launch.md` §10.
+ *
+ * Two states:
+ *
+ *   1. Empty — no launched records owned by this daemon. Surfaces the spec
+ *      §10 empty-state copy plus a primary CTA into the 5-step Create flow
+ *      (`/launcher/create`, Task 18).
+ *
+ *   2. Populated — one row per `LaunchedSolverNetRecord` returned by
+ *      `api.solvernets.listLaunched()`. Each row shows status badge,
+ *      `solverNetId`, truncated `manifestCid`, and `launchedAt` timestamp,
+ *      and click-throughs to the post-launch dashboard
+ *      (`/launcher/launched/:solverNetId`, Task 19).
+ *
+ * The wire shape (`LaunchedSolverNetRecord`) does not embed the manifest
+ * body, so this page intentionally avoids name / contractId / pricing
+ * fields; that summary fetches happen on the post-launch dashboard. A
+ * follow-up may extend `/v1/solvernets/launched` with embedded manifest
+ * summaries to avoid the click-through for catalog-y views.
  */
 
-const PREDICTION_INTENT = 'Calibrated probabilistic forecasts of Polymarket-listed events';
-
-const DEFAULT_GENERATOR_DEFAULTS = {
-  cadenceMs: 21_600_000,
-  maxNewRoundsPerPoll: 5,
-  maxNewRoundsPerDay: 100,
-  maxOpenRounds: 250,
+const STATUS_TONE: Record<
+  LaunchedStatus,
+  { fg: string; border: string; label: string }
+> = {
+  launching: { fg: 'var(--accent-sky)', border: 'var(--accent-sky)', label: 'Launching' },
+  launched: { fg: 'var(--vow-green)', border: 'var(--vow-green)', label: 'Launched' },
+  paused: { fg: 'var(--wane)', border: 'var(--wane)', label: 'Paused' },
+  retired: { fg: 'var(--fg-dim)', border: 'var(--border)', label: 'Retired' },
+  failed: { fg: 'var(--break-red)', border: 'var(--break-red)', label: 'Failed' },
 };
 
+function truncateCid(cid: string): string {
+  if (cid.length <= 16) return cid;
+  return `${cid.slice(0, 8)}…${cid.slice(-6)}`;
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  } catch {
+    return iso;
+  }
+}
+
+function StatusBadge({ status }: { status: LaunchedStatus }): JSX.Element {
+  const tone = STATUS_TONE[status] ?? STATUS_TONE.launching;
+  return (
+    <span
+      style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '11px',
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        letterSpacing: '0.14em',
+        color: tone.fg,
+        border: `1px solid ${tone.border}`,
+        borderRadius: 'var(--radius-1)',
+        padding: '2px 8px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {tone.label}
+    </span>
+  );
+}
+
+interface RecordRowProps {
+  record: LaunchedSolverNetRecord;
+}
+
+function RecordRow({ record }: RecordRowProps): JSX.Element {
+  const [, navigate] = useLocation();
+  const href = `/launcher/launched/${encodeURIComponent(record.solverNetId)}`;
+  return (
+    <a
+      href={href}
+      data-testid="launcher-owned-row"
+      data-solvernet-id={record.solverNetId}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(href);
+      }}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        alignItems: 'center',
+        gap: '16px',
+        padding: '16px 20px',
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-2)',
+        textDecoration: 'none',
+        color: 'inherit',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'var(--fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {record.solverNetId}
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            gap: '14px',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+            color: 'var(--fg-muted)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>cid {truncateCid(record.manifestCid)}</span>
+          <span>launched {formatTimestamp(record.launchedAt)}</span>
+        </div>
+      </div>
+      <StatusBadge status={record.status} />
+    </a>
+  );
+}
+
+function EmptyState(): JSX.Element {
+  return (
+    <div
+      data-testid="launcher-empty-state"
+      style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-3)',
+        padding: '32px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '14px',
+      }}
+    >
+      <h2
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '18px',
+          fontWeight: 500,
+          color: 'var(--fg)',
+          margin: 0,
+          letterSpacing: '-0.01em',
+        }}
+      >
+        No SolverNets created yet.
+      </h2>
+      <p
+        style={{
+          color: 'var(--fg-muted)',
+          fontSize: '14px',
+          lineHeight: 1.5,
+          margin: 0,
+        }}
+      >
+        Create a SolverNet to direct operators toward a specific kind of
+        knowledge work.
+      </p>
+      <div>
+        <Link
+          href="/launcher/create"
+          style={{
+            display: 'inline-block',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '14px',
+            padding: '12px 20px',
+            background: 'var(--accent-sky)',
+            color: 'var(--bg-sunken)',
+            border: '1px solid var(--accent-sky)',
+            borderRadius: 'var(--radius-2)',
+            textDecoration: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          Create SolverNet
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export function LauncherPage(): JSX.Element {
-  const qc = useQueryClient();
-  const { data: status } = useQuery({
-    queryKey: ['launcher-status'],
-    queryFn: () => api.fetchLauncherStatus(),
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['solvernets', 'launched', 'owned'],
+    queryFn: () => api.solvernets.listLaunched(),
     refetchInterval: 30_000,
   });
-  const { data: tasks } = useQuery({
-    queryKey: ['launcher-tasks'],
-    queryFn: () => api.fetchLauncherTasks(),
-  });
-  const [setupOpen, setSetupOpen] = useState(false);
-
-  if (!status) {
-    return <div style={{ padding: 24, color: 'var(--fg-muted)' }}>Loading…</div>;
-  }
-
-  if (setupOpen) {
-    return (
-      <div style={{ padding: '24px' }}>
-        <SetupFlow
-          netName="prediction"
-          defaults={DEFAULT_GENERATOR_DEFAULTS}
-          safeBalanceWei={status.nets[0]?.budget?.safeBalanceWei ?? '0'}
-          onPatch={(name, patch) => api.patchLauncherSolverNet(name, patch)}
-          onComplete={() => {
-            setSetupOpen(false);
-            qc.invalidateQueries({ queryKey: ['launcher-status'] });
-            qc.invalidateQueries({ queryKey: ['launcher-tasks'] });
-          }}
-        />
-      </div>
-    );
-  }
-
-  if (status.nets.length === 0) {
-    return (
-      <div style={{ padding: '24px' }}>
-        <EmptyState onLaunch={() => setSetupOpen(true)} />
-      </div>
-    );
-  }
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {status.nets.map((net) => (
-        <Fragment key={net.name}>
-          <KnowledgeProductionCard
-            netName={net.name}
-            intent={net.name === 'prediction' ? PREDICTION_INTENT : net.name}
-            // TODO(jinn-mono-l2zl.16.X): wire actual Brier scoreboard endpoint.
-            // Data path exists in client/src/corpus/prediction-brier-scoreboard.ts
-            // but is not exposed via HTTP to the SPA yet.
-            scoreboard={undefined}
-            recentSettled={[]}
-          />
-          <CostCard
-            // TODO(jinn-mono-l2zl.16.X): derive 7d burn from settled tasks.
-            burn7dWei="0"
-            tasksFunded7d={net.openTasks}
-            openTaskBudgetWei={net.budget.reservedBudgetWei}
-          />
-          <GeneratorStatusCard status={net.generator} />
-          <PostedTasksList
-            tasks={(tasks?.tasks ?? []).filter((t) => t.solverNet === net.name)}
-            onLoadMore={() => qc.invalidateQueries({ queryKey: ['launcher-tasks'] })}
-          />
-          <EmissionsPlaceholder />
-        </Fragment>
-      ))}
+    <div
+      style={{
+        padding: '24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <h1
+          style={{
+            fontFamily: "'Instrument Serif', 'Times New Roman', serif",
+            fontSize: '32px',
+            margin: 0,
+            color: 'var(--fg)',
+            fontWeight: 400,
+          }}
+        >
+          Your SolverNets
+        </h1>
+        {(data?.records.length ?? 0) > 0 && (
+          <Link
+            href="/launcher/create"
+            data-testid="launcher-create-cta"
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '13px',
+              padding: '10px 16px',
+              background: 'var(--accent-sky)',
+              color: 'var(--bg-sunken)',
+              border: '1px solid var(--accent-sky)',
+              borderRadius: 'var(--radius-2)',
+              textDecoration: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Create SolverNet
+          </Link>
+        )}
+      </div>
+
+      {isLoading && (
+        <p
+          data-testid="launcher-loading"
+          style={{ color: 'var(--fg-muted)', fontSize: '13px', margin: 0 }}
+        >
+          Loading…
+        </p>
+      )}
+
+      {isError && (
+        <div
+          data-testid="launcher-error"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--break-red)',
+            borderRadius: 'var(--radius-2)',
+            padding: '16px 20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '16px',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span
+              style={{
+                color: 'var(--break-red)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '13px',
+                fontWeight: 500,
+              }}
+            >
+              Failed to load your SolverNets.
+            </span>
+            <span style={{ color: 'var(--fg-muted)', fontSize: '12px' }}>
+              {error instanceof Error ? error.message : 'Unknown error'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void refetch();
+            }}
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '13px',
+              padding: '8px 14px',
+              background: 'transparent',
+              color: 'var(--fg)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-2)',
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !isError && data && data.records.length === 0 && <EmptyState />}
+
+      {!isLoading && !isError && data && data.records.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {data.records.map((record) => (
+            <RecordRow key={record.solverNetId} record={record} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
