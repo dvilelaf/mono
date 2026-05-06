@@ -117,7 +117,7 @@ const SEEDS: SeedGoal[] = [
     domain: "finance",
     metricSource: {
       kind: "sql",
-      query: "select coalesce(round(sum(abs(amount::numeric))::numeric, 2), 0) from transactions where amount::numeric < 0 and currency = 'GBP' and date >= date_trunc('month', current_date)::date and date <= current_date and (category is null or category not in ('self_transfer','other','income','property','tax','investment','vehicle'))",
+      query: "select coalesce(round(sum(abs(amount::numeric))::numeric, 2), 0) from transactions where amount::numeric < 0 and currency = 'GBP' and date >= date_trunc('month', current_date)::date and date <= current_date and category is not null and category not in ('self_transfer','other','income','property','tax','investment','vehicle')",
     },
     targetValue: 19000,
     targetDirection: "below",

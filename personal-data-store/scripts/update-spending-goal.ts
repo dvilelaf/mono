@@ -14,9 +14,10 @@ const QUERY = `
     and currency = 'GBP'
     and date >= date_trunc('month', current_date)::date
     and date <= current_date
-    and (category is null or category not in (
+    and category is not null
+    and category not in (
       'self_transfer','other','income','property','tax','investment','vehicle'
-    ))
+    )
 `.trim().replace(/\s+/g, " ");
 
 async function main() {
