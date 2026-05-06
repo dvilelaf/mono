@@ -45,6 +45,10 @@ import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract, validateTask } from '@jinn-network/sdk/solvernets';
+import {
+  runHarnessWithFreezeFence,
+  type FreezeViolation,
+} from '../../daemon/freeze-fence.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -172,6 +176,19 @@ export interface TaskEngineOptions {
     defaultPriceUsdc: string;
     perArtifactTypePrice: Record<string, string>;
   };
+  /**
+   * Harness execution mode from operator config (JinnConfig.harness.mode).
+   * Controls whether implStateDir writes are permitted during each Task run.
+   *
+   * 'train' (default): harness may mutate implStateDir — normal learning mode.
+   * 'frozen': freeze-fence enforces read-only implStateDir; violations cause
+   *   the envelope to be rejected and the task to fail.
+   *
+   * Defaults to 'train' when absent so existing callers are unaffected.
+   *
+   * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
+   */
+  harnessMode?: 'train' | 'frozen';
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -196,6 +213,11 @@ export class TaskEngine {
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
   protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
+  /**
+   * Operator-configured harness mode. Defaults to 'train' when absent.
+   * Propagated to HarnessContext.mode for each runImpl dispatch.
+   */
+  protected readonly harnessMode: 'train' | 'frozen';
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -204,6 +226,15 @@ export class TaskEngine {
   // Transient storage for impl output between runImpl and pack transitions.
   // Keyed by requestId; cleared after successful pack.
   private readonly solutionOutputs = new Map<string, Solution>();
+
+  // Transient storage for the harness mode used during runImpl.
+  // Keyed by requestId; cleared after successful pack.
+  private readonly modesByRequest = new Map<string, 'train' | 'frozen'>();
+
+  // Transient storage for the codeDigest returned by the freeze-fence.
+  // In train mode this is the post-run hash; in frozen mode it's the stable pre-hash.
+  // Keyed by requestId; cleared after successful pack.
+  private readonly codeDigestsByRequest = new Map<string, string>();
 
   // Transient storage for trajectory collectors produced in runImpl.
   // emitTrajectory is deferred to pack() so that artifact spans can be added
@@ -232,6 +263,7 @@ export class TaskEngine {
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
+    this.harnessMode = opts.harnessMode ?? 'train';
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -636,12 +668,16 @@ export class TaskEngine {
         abort: abort.signal,
         msUntilEndTs,
         trajectory,
-        mode: 'train',
+        mode: this.harnessMode,
       };
 
-      let output: Solution;
+      // Run the harness through the freeze-fence so frozen-mode violations
+      // are detected, rolled back, and surfaced as a structured event before
+      // envelope assembly (spec §6.3). SkippableError thrown by the harness
+      // will bubble out of the fence and be caught below.
+      let fence: Awaited<ReturnType<typeof runHarnessWithFreezeFence>>;
       try {
-        output = await impl.run(ctx);
+        fence = await runHarnessWithFreezeFence(impl, ctx);
       } catch (err) {
         if (err instanceof SkippableError) {
           const skippedAt = Date.now();
@@ -649,7 +685,7 @@ export class TaskEngine {
           console.warn(
             `[harness-engine] ${task.requestId}: impl=${impl.name} skipped (${err.reason}): ${detail}`,
           );
-          output = {
+          const skippedOutput: Solution = {
             venueRef: { name: 'legacy' },
             gating: {
               skipped: true,
@@ -662,10 +698,48 @@ export class TaskEngine {
             },
             artifacts: [],
           };
-        } else {
-          throw err;
+          this.solutionOutputs.set(task.requestId, skippedOutput);
+          this.modesByRequest.set(task.requestId, ctx.mode);
+          // No codeDigest for skipped runs — leave map empty.
+          // Fall through to persistence below via goto-equivalent pattern.
+          this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
+            postSnapshotCapturedAt: Date.now(),
+            postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
+            fillsPayload: [],
+            gatingClaim: skippedOutput.gating,
+            informationalClaim: skippedOutput.informational ?? null,
+            solutionOutputsJson: JSON.stringify(skippedOutput),
+            implName: impl.name,
+            runtimePluginsJson: JSON.stringify(runtimePlugins),
+          });
+          console.log(`[harness-engine] ${task.requestId} RUNNING → POST_SNAPSHOT via impl=${impl.name} (skipped)`);
+          return;
         }
+        throw err;
       }
+
+      if (!fence.ok) {
+        // Violation: the harness mutated implStateDir in frozen mode.
+        // Snapshot already restored by the fence. Emit a structured log,
+        // skip envelope assembly, and mark the task FAILED.
+        ctx.log({
+          level: 'error',
+          msg: 'Harness violated frozen-mode contract — envelope rejected',
+          data: fence.violation,
+        });
+        this.persistence.markFailed(
+          task.requestId,
+          `freeze-fence violation: implStateDir mutated in frozen mode (harness=${fence.violation.harnessName}@${fence.violation.harnessVersion})`,
+        );
+        return;
+      }
+
+      // Store the codeDigest from the fence (post-run hash in train mode;
+      // stable pre-hash in frozen mode) for use in pack().
+      this.codeDigestsByRequest.set(task.requestId, `sha256:${fence.codeDigest}`);
+      this.modesByRequest.set(task.requestId, ctx.mode);
+
+      const output = fence.output;
       this.solutionOutputs.set(task.requestId, output);
 
       // Store the trajectory collector so pack() can:
@@ -945,6 +1019,13 @@ export class TaskEngine {
       }))
       .digest('hex')}`;
 
+    // Resolve the mode and codeDigest from the in-memory maps populated by
+    // runImpl. Defaults: mode = 'train' (backward compat), codeDigest from
+    // buildInfo (fallback when runImpl did not run through the fence, e.g.
+    // crash-recovery from solutionOutputsJson without a fresh runImpl).
+    const executorMode = this.modesByRequest.get(task.requestId) ?? 'train';
+    const fenceCodeDigest = this.codeDigestsByRequest.get(task.requestId) ?? buildInfo.codeDigest;
+
     const envelopeInputs: EnvelopeInputs = {
       solverType,
       role,
@@ -963,10 +1044,13 @@ export class TaskEngine {
         // via tsx without a prior `yarn build` (dev mode).
         implVersion: buildInfo.implVersion,
         clientGitSha: buildInfo.clientGitSha,
-        codeDigest: buildInfo.codeDigest,
+        codeDigest: fenceCodeDigest,
         runtimeBundleDigest,
         plugins: executorPlugins,
         signingKey: { kind: 'agent-eoa', pubkey: agentEoa },
+        // Propagate the harness execution mode (train | frozen) so the
+        // envelope records whether implStateDir was locked during this run.
+        mode: executorMode,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
@@ -1019,6 +1103,8 @@ export class TaskEngine {
     this.solutionOutputs.delete(task.requestId);
     this.trajectoryCollectors.delete(task.requestId);
     this.trajectoryRefs.delete(task.requestId);
+    this.modesByRequest.delete(task.requestId);
+    this.codeDigestsByRequest.delete(task.requestId);
   }
 
   /**
@@ -1505,4 +1591,68 @@ export class TaskEngine {
         break;
     }
   }
+}
+
+// ── runHarnessOnce ────────────────────────────────────────────────────────────
+
+/**
+ * Thin, test-friendly entry point for the freeze-fence + mode propagation
+ * path.  Runs a single `harness.run(ctx)` call through `runHarnessWithFreezeFence`
+ * and returns either a minimal envelope stub (carrying `executor.mode`) or a
+ * structured violation result — without requiring a full DB-backed TaskEngine
+ * state machine.
+ *
+ * This function is *not* the production dispatch path; it exists so integration
+ * tests can drive the mode-propagation and freeze-fence behaviour in isolation.
+ *
+ * @returns
+ *   `{ envelope: { executor: { mode } } }` on success.
+ *   `{ violation: FreezeViolation }` when the fence rejects the harness output.
+ *
+ * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
+ */
+export async function runHarnessOnce(params: {
+  harness: Harness;
+  implStateDir: string;
+  mode: 'train' | 'frozen';
+  /** Optional working directory (defaults to implStateDir). */
+  workingDir?: string;
+  /** Optional task stub (defaults to a minimal no-op task). */
+  task?: HarnessContext['task'];
+}): Promise<{ envelope?: { executor: { mode: 'train' | 'frozen'; codeDigest: string } }; violation?: FreezeViolation }> {
+  const { harness, implStateDir, mode } = params;
+  const workingDir = params.workingDir ?? implStateDir;
+
+  const task: HarnessContext['task'] = params.task ?? {
+    id: 'test-task',
+    description: '',
+    role: 'restoration',
+    window: { startTs: 0, endTs: Date.now() + 3_600_000 },
+  };
+
+  const ctx: HarnessContext = {
+    task,
+    implStateDir,
+    workingDir,
+    log: () => { /* no-op for test-friendly invocations */ },
+    abort: new AbortController().signal,
+    msUntilEndTs: () => Math.max(0, (task.window?.endTs ?? Date.now() + 3_600_000) - Date.now()),
+    trajectory: new TrajectoryCollector({ taskCid: '', runId: 'test-run' }),
+    mode,
+  };
+
+  const fence = await runHarnessWithFreezeFence(harness, ctx);
+
+  if (!fence.ok) {
+    return { violation: fence.violation };
+  }
+
+  return {
+    envelope: {
+      executor: {
+        mode,
+        codeDigest: `sha256:${fence.codeDigest}`,
+      },
+    },
+  };
 }
