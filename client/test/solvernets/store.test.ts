@@ -322,3 +322,65 @@ describe('createSolverNetStore — path isolation', () => {
     expect(drafts.filter(f => f.endsWith('.json'))).toHaveLength(1);
   });
 });
+
+// ── Id-validation guard (jinn-mono-qwdc.34) ────────────────────────────────
+
+describe('createSolverNetStore — id validation', () => {
+  // The store keys files by solverNetId / draftId. Without input validation,
+  // an id containing `/` would create subdirectories that listJsonFiles
+  // can't recurse into; an id like `..` or `../etc/passwd` could escape the
+  // baseDir entirely.
+
+  it.each([
+    ['contains forward slash', 'launcher-1/prediction-001'],
+    ['contains backslash', 'launcher\\\\prediction'],
+    ['is "."', '.'],
+    ['is ".."', '..'],
+    ['contains "../" path traversal', '../etc/passwd'],
+    ['contains shell metachar (semicolon)', 'a;b'],
+    ['contains shell metachar (pipe)', 'a|b'],
+    ['contains space', 'has space'],
+    ['contains newline', 'a\\nb'],
+    ['is empty', ''],
+  ])('writeRecord rejects solverNetId that %s', async (_description, badId) => {
+    const store = createSolverNetStore({ baseDir });
+    const rec = makeLaunched({ solverNetId: badId });
+    await expect(store.writeRecord(rec)).rejects.toThrow();
+  });
+
+  it('loadRecord rejects solverNetId with path separator (defense in depth)', async () => {
+    const store = createSolverNetStore({ baseDir });
+    await expect(store.loadRecord('launcher-1/prediction-001')).rejects.toThrow(
+      /Invalid solverNetId/,
+    );
+  });
+
+  it('loadRecord rejects ".." (path traversal)', async () => {
+    const store = createSolverNetStore({ baseDir });
+    await expect(store.loadRecord('..')).rejects.toThrow(/Invalid solverNetId/);
+  });
+
+  it('writeDraft rejects draftId with forward slash', async () => {
+    const store = createSolverNetStore({ baseDir });
+    const draft = makeDraft({ draftId: 'campaign/2026-05' });
+    await expect(store.writeDraft(draft)).rejects.toThrow();
+  });
+
+  it('loadDraft rejects draftId with path separator', async () => {
+    const store = createSolverNetStore({ baseDir });
+    await expect(store.loadDraft('campaign/2026-05')).rejects.toThrow(
+      /Invalid draftId/,
+    );
+  });
+
+  it('accepts ids that contain only safe chars (alnum, dash, underscore, dot)', async () => {
+    const store = createSolverNetStore({ baseDir });
+    const ids = ['sn_01', 'launcher-1.prediction', 'AaBb_99', 'x.y.z', '01HEXAMPLE'];
+    for (const id of ids) {
+      const rec = makeLaunched({ solverNetId: id });
+      await expect(store.writeRecord(rec)).resolves.toBeUndefined();
+      const loaded = await store.loadRecord(id);
+      expect(loaded?.solverNetId).toBe(id);
+    }
+  });
+});
