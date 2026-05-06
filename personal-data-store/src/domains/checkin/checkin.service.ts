@@ -1,6 +1,7 @@
 import { db } from "../../db/index.js";
 import { supplementStack, adherenceMisses } from "./checkin.schema.js";
 import { supplements, healthMetrics, nutritionEntries } from "../health/health.schema.js";
+import { createDocument } from "../documents/documents.service.js";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 
 const CHECKIN_SOURCE = "checkin";
@@ -242,6 +243,77 @@ export interface NutritionInput {
   fat?: number | null;
   recordedAt?: string;
   notes?: string | null;
+}
+
+export interface BloodPressureInput {
+  systolic: number;
+  diastolic: number;
+  pulse?: number | null;
+  recordedAt?: string;
+  notes?: string | null;
+}
+
+export async function recordBloodPressure(input: BloodPressureInput) {
+  const recordedAt = input.recordedAt ? new Date(input.recordedAt) : new Date();
+  const meta = input.notes ? { notes: input.notes } : null;
+  const writes = [
+    { metricType: "blood_pressure_systolic", value: input.systolic, unit: "mmHg" },
+    { metricType: "blood_pressure_diastolic", value: input.diastolic, unit: "mmHg" },
+  ];
+  if (input.pulse !== undefined && input.pulse !== null && Number.isFinite(input.pulse)) {
+    writes.push({ metricType: "resting_heart_rate", value: input.pulse, unit: "bpm" });
+  }
+  const rows = await Promise.all(
+    writes.map(async (w) => {
+      const [row] = await db
+        .insert(healthMetrics)
+        .values({
+          source: CHECKIN_SOURCE,
+          metricType: w.metricType,
+          value: String(w.value),
+          unit: w.unit,
+          recordedAt,
+          metadata: meta,
+        })
+        .onConflictDoUpdate({
+          target: [healthMetrics.source, healthMetrics.metricType, healthMetrics.recordedAt],
+          set: { value: String(w.value), unit: w.unit, metadata: meta },
+        })
+        .returning();
+      return row;
+    }),
+  );
+  return rows;
+}
+
+export interface NoteInput {
+  content: string;
+  title?: string | null;
+  tags?: string[] | null;
+  recordedAt?: string;
+}
+
+export async function recordNote(input: NoteInput) {
+  const trimmed = input.content?.trim() ?? "";
+  if (!trimmed) throw new Error("content is required");
+  const recordedAt = input.recordedAt ? new Date(input.recordedAt) : new Date();
+  const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
+  const title =
+    input.title?.trim() ||
+    trimmed.split(/\s+/).slice(0, 8).join(" ").slice(0, 80) ||
+    `Note ${recordedAt.toISOString().slice(0, 10)}`;
+  return createDocument({
+    domain: "notes",
+    type: "note",
+    title,
+    content: trimmed,
+    source: "oak",
+    metadata: {
+      recordedAt: recordedAt.toISOString(),
+      tags,
+      origin: "checkin",
+    },
+  });
 }
 
 export async function recordNutrition(input: NutritionInput) {
