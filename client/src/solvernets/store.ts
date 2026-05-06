@@ -163,13 +163,24 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 // ── Generic load helpers ───────────────────────────────────────────────────
 
 /**
- * List `.json` files in a directory, ignoring tmp / dotfiles. Returns []
- * when the directory does not yet exist (the daemon lazy-creates).
+ * List `.json` files in a directory. Returns [] when the directory does
+ * not yet exist (the daemon lazy-creates). Uses try/catch on `readdir`
+ * rather than a pre-`existsSync` check to avoid a TOCTOU race where the
+ * directory disappears between the check and the read.
+ *
+ * Tmp files produced by `writeJsonAtomic` are named
+ * `<name>.json.tmp-<pid>-<ts>-<rand>` and are excluded by the
+ * `.endsWith('.json')` predicate alone — no separate `.tmp` filter needed.
  */
 async function listJsonFiles(dir: string): Promise<string[]> {
-  if (!existsSync(dir)) return [];
-  const entries = await readdir(dir);
-  return entries.filter(name => name.endsWith('.json') && !name.includes('.tmp'));
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return [];
+    throw err;
+  }
+  return entries.filter(name => name.endsWith('.json'));
 }
 
 async function readAndParse<T>(
