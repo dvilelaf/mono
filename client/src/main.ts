@@ -64,6 +64,7 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
+import { joinedSolverNetsViewFromConfig } from './harnesses/engine/engine.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
@@ -1675,6 +1676,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // Spec §14, Task 28: per-launch claim eligibility filter. Operators
+      // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
+      // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
+      // doesn't match a joined entry (plus a role gate). Absent when the
+      // operator hasn't joined any nets yet — the engine then falls back to
+      // the legacy solverType-keyed gate.
+      ...(config.joinedSolverNets
+        ? { joinedSolverNets: joinedSolverNetsViewFromConfig(config.joinedSolverNets) }
+        : {}),
       // Spec §14: task validation resolves manifest → contract → schemas.
       // Threaded only when the SolverNet registry client was constructed
       // (testnet branch above). The engine treats absence as "schema
