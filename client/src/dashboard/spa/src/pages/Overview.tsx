@@ -3,7 +3,7 @@ import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
-import { OperatorCard } from './overview/OperatorCard.js';
+import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
 import { RecentActivity } from './overview/RecentActivity.js';
 import { QuickActions } from './overview/QuickActions.js';
 import { IdentityCard, type ServiceIdentity } from './overview/IdentityCard.js';
@@ -51,6 +51,100 @@ interface OverviewStatusV1 {
   };
 }
 
+/**
+ * The operator's joined SolverNets per spec §12. Tasks 21/22 finish the
+ * migration from the legacy short-name-keyed `solverNets` shape to the
+ * `manifestCid`-keyed shape; until then, OperatorCard accepts both.
+ *
+ * New shape:    { '<manifestCid>': { name, manifestCid, roles: ['solver'|'evaluator'], harness?, ... } }
+ * Legacy shape: { '<shortName>':   { enabled: boolean, roles?: ['solving'|'evaluating'], ... } }
+ */
+interface BootstrapWithSolverNets {
+  solverNets?: Record<
+    string,
+    {
+      name?: string;
+      manifestCid?: string;
+      enabled?: boolean;
+      roles?: string[];
+    }
+  >;
+}
+
+interface JoinedSolverNet {
+  /** Display name for the OperatorCard. */
+  name: string;
+  /** Roles narrowed to OperatorCard's `solving` / `evaluating` vocabulary. */
+  roles: OperatorCardRole[];
+}
+
+/**
+ * Detect whether the operator has joined any SolverNet. Returns the first
+ * joined entry projected into OperatorCard's prop shape. The new
+ * manifestCid-keyed shape (any entry with non-empty `roles`) wins over the
+ * legacy `enabled` flag; both are accepted during the Tasks 21/22 migration
+ * (spec §12). The predictionV1 status payload is a final-fallback signal
+ * for daemons that haven't been restarted since this migration landed.
+ */
+function detectJoinedSolverNet(
+  bootstrapSolverNets: BootstrapWithSolverNets['solverNets'] | undefined,
+  predictionEnabled: boolean,
+  predictionRoles: Array<'solving' | 'evaluating'> | undefined,
+): JoinedSolverNet | null {
+  if (bootstrapSolverNets) {
+    // Pass 1: new shape — entries keyed by manifestCid (heuristic: starts
+    // with 'baf' / 'Qm', or has a `manifestCid` field) with non-empty roles.
+    for (const [key, entry] of Object.entries(bootstrapSolverNets)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const looksLikeCid =
+        entry.manifestCid !== undefined ||
+        key.startsWith('baf') ||
+        key.startsWith('Qm');
+      if (!looksLikeCid) continue;
+      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
+      if (rawRoles.length === 0) continue;
+      const roles = mapRolesToOperatorVocab(rawRoles);
+      return {
+        name: entry.name ?? key,
+        roles: roles.length > 0 ? roles : ['solving'],
+      };
+    }
+    // Pass 2: legacy short-name shape — any entry with `enabled: true`.
+    for (const [key, entry] of Object.entries(bootstrapSolverNets)) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.enabled !== true) continue;
+      const rawRoles = Array.isArray(entry.roles) ? entry.roles : [];
+      const roles = mapRolesToOperatorVocab(rawRoles);
+      return {
+        name: entry.name ?? key,
+        roles: roles.length > 0 ? roles : ['solving'],
+      };
+    }
+  }
+
+  // Pass 3: predictionV1 status payload as a last-resort signal. The daemon
+  // surfaces this for back-compat with the pre-spec-§12 single-net world.
+  if (predictionEnabled) {
+    return {
+      name: 'prediction',
+      roles: predictionRoles ?? ['solving'],
+    };
+  }
+  return null;
+}
+
+function mapRolesToOperatorVocab(roles: string[]): OperatorCardRole[] {
+  const mapped: OperatorCardRole[] = [];
+  for (const r of roles) {
+    if (r === 'solving' || r === 'solver') {
+      if (!mapped.includes('solving')) mapped.push('solving');
+    } else if (r === 'evaluating' || r === 'evaluator') {
+      if (!mapped.includes('evaluating')) mapped.push('evaluating');
+    }
+  }
+  return mapped;
+}
+
 function formatEth(wei?: string): string {
   if (!wei || !/^\d+$/.test(wei)) return '—';
   try {
@@ -68,14 +162,24 @@ export function OverviewPage(): JSX.Element {
     queryFn: () => api.getStatus() as Promise<OverviewStatusV1>,
     refetchInterval: 5_000,
   });
+  const { data: bootstrap } = useQuery<BootstrapWithSolverNets>({
+    queryKey: ['bootstrap'],
+    queryFn: () => api.getBootstrap() as Promise<BootstrapWithSolverNets>,
+    refetchInterval: 30_000,
+  });
 
   const operator = status?.predictionV1?.operator;
-  // `solverNet.enabled` is the canonical opt-in signal coming from
-  // `PredictionOperatorStatus.solverNet.enabled`, which mirrors
-  // `config.solverNets.<name>.enabled`. Treat any enabled SolverNet as
-  // opted-in regardless of role (solving / evaluating); the future
-  // multi-role surface (jinn-mono-l2zl.15.4.8) keeps the same predicate.
-  const operatorEnabled = operator?.solverNet?.enabled === true;
+  // Spec §12: surface the operator's joined SolverNets from the
+  // `solverNets[manifestCid]` config block. Until Task 22 retires the
+  // legacy short-name-keyed shape, we accept both shapes in
+  // `detectJoinedSolverNet`. Falling back to the predictionV1 status payload
+  // covers the current Phase-1 single-net world where the daemon writes
+  // `solverNets.prediction.enabled` rather than a manifestCid entry.
+  const joined = detectJoinedSolverNet(
+    bootstrap?.solverNets,
+    operator?.solverNet?.enabled === true,
+    operator?.solverNet?.roles,
+  );
   const totals = {
     tasks: status?.predictionV1?.totals?.observedTasks ?? 0,
     active: status?.predictionV1?.totals?.activeTaskRuns ?? 0,
@@ -122,17 +226,17 @@ export function OverviewPage(): JSX.Element {
 
       {/*
        * Operator-side state vs. empty-state — strictly mutually exclusive.
-       * Show OperatorCard whenever the operator has toggled the SolverNet
-       * on, regardless of role; show the "Pick a SolverNet" prompt only
-       * when no SolverNet is enabled. The operator-status payload does
-       * not currently expose role (see jinn-mono-l2zl.15.4.8 for the
-       * upcoming multi-role surface), so we render the default 'solving'
-       * label until that lands.
+       * Spec §12: the OperatorCard surfaces the operator's joined SolverNet
+       * from `bootstrap.solverNets`. The empty state ("Pick a SolverNet")
+       * deep-links to `/configuration#solvernets` where the registry catalog
+       * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
+       * shape and the new manifestCid-keyed shape during the Tasks 21/22
+       * migration window.
        */}
-      {operatorEnabled ? (
+      {joined ? (
         <OperatorCard
-          name="prediction"
-          roles={operator?.solverNet?.roles ?? ['solving']}
+          name={joined.name}
+          roles={joined.roles}
           state="live"
           waitingMessage={operator?.nextAction?.description}
         />
