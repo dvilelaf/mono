@@ -62,6 +62,10 @@ import {
   type SetMetadataPublishResult,
   type SubgraphClient,
 } from './registry-client-erc8004.js';
+import type {
+  SetMetadataEvent,
+  SetMetadataLifecyclePayload,
+} from './most-recent-wins.js';
 import {
   recoverInFlightLaunches,
   type LaunchActionDeps,
@@ -453,6 +457,131 @@ export function createNoopSubgraphClient(): SubgraphClient {
       return [];
     },
   };
+}
+
+/**
+ * jinn-mono-{follow-up}: real subgraph adapter that queries the deployed
+ * Jinn subgraph (e.g. https://api.studio.thegraph.com/query/.../jinn-testnet/...)
+ * for `SolverNetManifestEvent` rows and JCS-decodes each event's payload
+ * bytes into the typed lifecycle payload. Replaces `createNoopSubgraphClient`
+ * for any daemon that reads `JINN_SUBGRAPH_URL`.
+ *
+ * The schema only stores `solvernet-manifest:<cid>` events (lifecycle and
+ * launch share the prefix). `keyPrefix` is therefore an effective filter:
+ * the entity itself encodes that constraint, so we do not pass it to the
+ * GraphQL query. Callers passing a different prefix get an empty list.
+ */
+export function createGraphqlSubgraphClient(args: { url: string }): SubgraphClient {
+  const url = args.url;
+
+  async function runQuery(
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<{ solverNetManifestEvents: Array<Record<string, unknown>> }> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!response.ok) {
+      throw new Error(`subgraph query failed: ${response.status} ${response.statusText}`);
+    }
+    const json = (await response.json()) as {
+      data?: { solverNetManifestEvents?: Array<Record<string, unknown>> };
+      errors?: Array<{ message: string }>;
+    };
+    if (json.errors && json.errors.length > 0) {
+      throw new Error(
+        `subgraph errors: ${json.errors.map((e) => e.message).join('; ')}`,
+      );
+    }
+    return {
+      solverNetManifestEvents: json.data?.solverNetManifestEvents ?? [],
+    };
+  }
+
+  function decodePayload(rowPayloadHex: string): SetMetadataLifecyclePayload {
+    const bytes = hexToBytes(rowPayloadHex);
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json) as SetMetadataLifecyclePayload;
+    return parsed;
+  }
+
+  function rowToEvent(row: Record<string, unknown>): SetMetadataEvent {
+    return {
+      agentId: String(row.agentId),
+      key: String(row.metadataKey),
+      payload: decodePayload(String(row.payload)),
+      blockNumber: Number(row.blockNumber),
+      transactionIndex: Number(row.transactionIndex ?? 0),
+    };
+  }
+
+  return {
+    async fetchSetMetadataEvents(opts) {
+      if (opts.keyPrefix !== 'solvernet-manifest:') {
+        // The schema entity is hardcoded to this prefix; any other prefix
+        // would yield zero rows. Keep behaviour consistent with the noop.
+        return [];
+      }
+      const sinceBlock = typeof opts.sinceBlock === 'number' ? opts.sinceBlock : 0;
+      const query = `
+        query MetadataEventsSince($sinceBlock: BigInt!) {
+          solverNetManifestEvents(
+            where: { blockNumber_gte: $sinceBlock }
+            orderBy: blockNumber
+            orderDirection: asc
+            first: 1000
+          ) {
+            agentId
+            metadataKey
+            payload
+            blockNumber
+            transactionIndex
+          }
+        }
+      `;
+      const { solverNetManifestEvents } = await runQuery(query, {
+        sinceBlock: String(sinceBlock),
+      });
+      return solverNetManifestEvents.map(rowToEvent);
+    },
+
+    async fetchSetMetadataEventsForCid(opts) {
+      const query = `
+        query MetadataEventsForCid($manifestCid: String!) {
+          solverNetManifestEvents(
+            where: { manifestCid: $manifestCid }
+            orderBy: blockNumber
+            orderDirection: asc
+            first: 1000
+          ) {
+            agentId
+            metadataKey
+            payload
+            blockNumber
+            transactionIndex
+          }
+        }
+      `;
+      const { solverNetManifestEvents } = await runQuery(query, {
+        manifestCid: opts.manifestCid,
+      });
+      return solverNetManifestEvents.map(rowToEvent);
+    },
+  };
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0) {
+    throw new Error(`invalid hex payload length: ${clean.length}`);
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
 }
 
 /**

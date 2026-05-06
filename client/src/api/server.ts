@@ -32,6 +32,10 @@ import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
+import {
+  registerSolverNetsEndpoints,
+  type SolverNetsEndpointsDeps,
+} from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
@@ -93,6 +97,15 @@ export interface ApiServerConfig {
   launcher?: LauncherRoutesDeps;
   /** When set, GET /v1/solvernets exposes the catalog from a daemon registry. */
   solverNets?: { registry: SolverNetsRegistry };
+  /**
+   * jinn-mono-hqz0: SolverNet creation/launch endpoints (drafts CRUD,
+   * launched CRUD, registry list/by-cid). Deps are populated AFTER
+   * startApiServer returns (the SolverNet subsystem in main.ts depends on
+   * post-bootstrap state), so we accept a holder ref. Routes register
+   * eagerly here and dereference `holder.current` per-request, returning
+   * 503 until the holder is populated.
+   */
+  solverNetsLauncher?: { holder: { current: SolverNetsEndpointsDeps | undefined } };
   /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
@@ -108,6 +121,10 @@ export interface ApiServer {
   /** Underlying node http.Server, exposed so other subsystems (e.g. agent WS bridge)
    *  can mount on the same port. */
   server: HttpServer;
+  /** Hono app, exposed so subsystems initialised AFTER startApiServer (e.g. the
+   *  SolverNet subsystem in main.ts) can mount their routes on the same instance.
+   *  See jinn-mono-hqz0. */
+  app: Hono;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -261,6 +278,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/events/*', requireUiToken(config.ui.token));
     app.use('/v1/bootstrap', requireUiToken(config.ui.token));
     app.use('/v1/solvernets', requireUiToken(config.ui.token));
+    app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
     app.use('/v1/auth/*', requireUiToken(config.ui.token));
     app.use('/v1/setup/*', requireUiToken(config.ui.token));
     app.use('/v1/launcher', requireUiToken(config.ui.token));
@@ -276,6 +294,34 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.solverNets) {
     addSolverNetsRoutes(app, { registry: config.solverNets.registry });
+  }
+
+  // jinn-mono-hqz0: SolverNet creation/launch endpoints. Deps come from a
+  // post-bootstrap subsystem; we register the routes eagerly with a
+  // deps-proxy that dereferences a holder per-request. If the holder is
+  // empty (subsystem not ready yet) the routes effectively no-op via 503
+  // because the underlying handlers can't reach `store`. We surface a
+  // clear 503 by short-circuiting in a middleware before delegating.
+  if (config.solverNetsLauncher) {
+    const { holder } = config.solverNetsLauncher;
+    app.use('/v1/solvernets/drafts', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    app.use('/v1/solvernets/drafts/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    app.use('/v1/solvernets/launched', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    app.use('/v1/solvernets/launched/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    app.use('/v1/solvernets/registry', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    app.use('/v1/solvernets/registry/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
+    // Build a Proxy whose property reads dereference the holder. Route
+    // handlers in solvernets-endpoints.ts read deps.store, deps.launch,
+    // etc. eagerly inside each handler, so per-request dereference is
+    // sufficient.
+    const depsProxy = new Proxy({} as SolverNetsEndpointsDeps, {
+      get(_target, prop) {
+        const live = holder.current;
+        if (!live) return undefined;
+        return live[prop as keyof SolverNetsEndpointsDeps];
+      },
+    });
+    registerSolverNetsEndpoints(app, depsProxy);
   }
 
   if (config.agentBinding) {
@@ -546,6 +592,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         // serve() returns Server | Http2Server | Http2SecureServer; we never
         // pass http2/https opts so it's always a node http.Server at runtime.
         server: server as HttpServer,
+        app,
       });
     });
 

@@ -227,7 +227,12 @@ const RegistryStatusFilterSchema = z.enum(['launched', 'paused', 'retired']);
  * advertised hash is the canonical gate; this regex only filters obviously
  * non-CID inputs.
  */
-const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|bafy[A-Za-z0-9]{10,})$/u;
+// CIDv0 (Qm-base58) or CIDv1 (any multicodec — multibase prefix `b` is
+// base32 lowercase alphanumeric). Earlier this regex anchored to `bafy`,
+// the dag-pb codec prefix; the IPFS adapter actually pins manifests as
+// raw bytes (codec `raw`), producing `bafkrei...`. See jinn-mono-wkzp.
+// Loose by design — the registry client does the canonical decode.
+const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|b[a-z2-7]{20,})$/u;
 
 // ── Lifecycle / generator-config validation schemas ─────────────────────────
 
@@ -449,7 +454,20 @@ export function registerSolverNetsEndpoints(
   app: Hono,
   deps: SolverNetsEndpointsDeps,
 ): void {
-  const { store } = deps;
+  // jinn-mono-hqz0: deps may be a Proxy whose `store` property only resolves
+  // after the SolverNet subsystem finishes post-bootstrap init. We bind a
+  // Proxy-backed `store` so each method call dereferences the live value
+  // at invocation time — destructuring would capture the initial undefined.
+  const store: SolverNetStore = new Proxy({} as SolverNetStore, {
+    get(_t, prop) {
+      const live = deps.store;
+      if (!live) {
+        throw new Error('SolverNet store not initialised; subsystem still booting');
+      }
+      const value = (live as unknown as Record<string | symbol, unknown>)[prop as string];
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(live) : value;
+    },
+  });
 
   // POST /v1/solvernets/drafts — create a new draft.
   app.post('/v1/solvernets/drafts', async (c) => {
