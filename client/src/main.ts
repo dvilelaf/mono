@@ -694,6 +694,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     | undefined;
   let safeAddressForLauncher: `0x${string}` | undefined;
 
+  // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
+  // The routes register eagerly in startApiServer (Hono freezes its matcher
+  // on first request); subsystem init below populates `holder.current` and
+  // the route handlers dereference it per-request.
+  const solverNetEndpointsDepsHolder: {
+    current: import('./api/solvernets-endpoints.js').SolverNetsEndpointsDeps | undefined;
+  } = { current: undefined };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -760,6 +768,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ],
         },
       },
+      // jinn-mono-hqz0: SolverNet creation/launch endpoints. Routes register
+      // eagerly here; deps are populated by main.ts post-bootstrap via the
+      // holder, and each route handler reads `holder.current` per-request.
+      solverNetsLauncher: { holder: solverNetEndpointsDepsHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1464,6 +1476,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       initSolverNetSubsystem,
       createIpfsClientAdapter,
       createNoopSubgraphClient,
+      createGraphqlSubgraphClient,
       createMetadataPublisherFromViem,
       createDefaultRegistryClient,
     } = await import('./solvernets/daemon-init.js');
@@ -1474,7 +1487,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       registryUrl: config.ipfsRegistryUrl,
       gatewayUrl: config.ipfsGatewayUrl,
     });
-    const solverNetSubgraph = createNoopSubgraphClient();
+    const solverNetSubgraph = config.subgraphUrl?.trim()
+      ? createGraphqlSubgraphClient({ url: config.subgraphUrl })
+      : createNoopSubgraphClient();
     const solverNetPublisher = createMetadataPublisherFromViem({
       identityRegistryAddress,
       walletClient: agentClients.walletClient,
@@ -1513,6 +1528,60 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
           `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
       );
+
+      // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
+      // routes themselves were registered eagerly inside startApiServer
+      // (Hono's matcher freezes before the holder is filled, so handlers
+      // dereference holder.current per-request). Without this the SPA's
+      // /launcher list page 404s on /v1/solvernets/launched.
+      if (solverNetEndpointsDepsHolder) {
+        const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
+        const { LifecycleTransition } = await import('./solvernets/lifecycle-transitions.js');
+        const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
+          const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
+          return { blockNumber: Number(receipt.blockNumber) };
+        };
+        const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
+        const launchAction = new LaunchAction({
+          store: solverNetStore,
+          ipfs: solverNetIpfs,
+          publisher: solverNetPublisher,
+          subgraph: solverNetSubgraph,
+          spawnGenerator: async () => {
+            /* Generators are spawned by main.ts post-launch loop;
+             * the launcher endpoint just persists the record here. */
+          },
+          awaitTxConfirmation: awaitLauncherTxConfirmation,
+        });
+        const lifecycleTransition = new LifecycleTransition({
+          store: solverNetStore,
+          registry: solverNetRegistryClient,
+          signer: launcherSigner,
+          subgraph: solverNetSubgraph,
+          awaitTxConfirmation: awaitLauncherTxConfirmation,
+        });
+        if (!safeAddressForLauncher) {
+          throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
+        }
+        solverNetEndpointsDepsHolder.current = {
+          store: solverNetStore,
+          launch: {
+            launchAction,
+            lifecycleTransition,
+            pendingGenerators: pendingGeneratorsRef,
+            signer: launcherSigner,
+            network: 'base-sepolia',
+            launcher: {
+              safeAddress: safeAddressForLauncher,
+              agentEoa: launcherSigner.agentEoaAddress,
+              agentId: launcherSigner.agentId,
+            },
+          },
+          catalog: solverNetSubsystem.catalog,
+          registry: solverNetRegistryClient,
+        };
+        console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
+      }
     } catch (err) {
       console.warn(
         `[main] SolverNet subsystem init failed; continuing without it: ${err instanceof Error ? err.message : String(err)}`,
