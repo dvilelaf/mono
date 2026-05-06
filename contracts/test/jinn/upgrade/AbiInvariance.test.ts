@@ -63,64 +63,116 @@ function selectorOf(signature: string): string {
   return keccak256(toUtf8Bytes(signature)).slice(0, 10);
 }
 
+// ── Full-surface event invariance ─────────────────────────────────────────
+//
+// The `*CreateTask` selector and `*TaskCreated` topic0 above were sufficient
+// when only the headline rename was at risk. The lists below extend the
+// regression guard to every event emitted by both contracts so a future PR
+// that retypes ANY param (whether or not it touches manifestDigest) fails
+// loudly. Function selectors beyond `createTask` are not enumerated here:
+// they have the same Solidity-language guarantee, and `createTask`'s pin
+// already demonstrates the property — adding the rest would be belt-and-
+// braces for marginal value.
+//
+// Signatures sourced from `git show 217cb804^:contracts/src/...`. Param
+// names omitted (the EVM does not see them).
+const TASK_COORDINATOR_EVENTS: Array<readonly [string, string]> = [
+  ['Initialized',                  'Initialized(address,address)'],
+  ['OwnershipTransferred',         'OwnershipTransferred(address,address)'],
+  ['AuthorizedRouterUpdated',      'AuthorizedRouterUpdated(address,address)'],
+  ['TaskCreated',                  PRE_RENAME.taskCoordinatorTaskCreated],
+  ['TaskClaimed',                  'TaskClaimed(uint256,uint32,address,uint64)'],
+  ['TaskAttemptRequestRegistered', 'TaskAttemptRequestRegistered(uint256,uint32,bytes32)'],
+  ['TaskSubmitted',                'TaskSubmitted(uint256,uint32,address,bytes32,bytes32,uint256)'],
+  ['EvaluationClaimed',            'EvaluationClaimed(uint256,uint32,uint32,address,uint64)'],
+  ['VerdictRequestRegistered',     'VerdictRequestRegistered(uint256,uint32,uint32,bytes32)'],
+  ['VerdictDelivered',             'VerdictDelivered(uint256,uint32,uint32,address,bytes32,uint8)'],
+  ['AttemptFinalized',             'AttemptFinalized(uint256,uint32,bool,uint16,uint16)'],
+  ['TaskCreationCreditLocked',     'TaskCreationCreditLocked(uint256,address,uint256)'],
+  ['TaskAttemptExpired',           'TaskAttemptExpired(uint256,uint32,address)'],
+];
+
+const ROUTER_V3_EVENTS: Array<readonly [string, string]> = [
+  ['Initialized',                  'Initialized(address,address,address,address)'],
+  ['OwnershipTransferred',         'OwnershipTransferred(address,address)'],
+  ['TaskCreated',                  PRE_RENAME.routerV3TaskCreated],
+  ['TaskAttemptCreated',           'TaskAttemptCreated(uint256,uint32,bytes32,address,address,uint256)'],
+  ['EvaluationAttemptCreated',     'EvaluationAttemptCreated(uint256,uint32,uint32,bytes32,address,address,uint256)'],
+  ['SolutionDeliveryClaimed',      'SolutionDeliveryClaimed(address,bytes32,uint256,uint32)'],
+  ['VerdictDeliveryClaimed',       'VerdictDeliveryClaimed(address,bytes32,uint256,uint32,uint32,uint8)'],
+  ['TaskBudgetRefunded',           'TaskBudgetRefunded(uint256,address,uint256,uint256)'],
+];
+
 describe('abi-invariance — manifestDigest rename was cosmetic', function () {
   // Loading artifacts from the hardhat cache is cheap, but we keep a
   // generous timeout in case the suite runs cold.
   this.timeout(30_000);
 
-  it('TaskCoordinator.createTask selector unchanged', async () => {
-    const expected = selectorOf(PRE_RENAME.taskCoordinatorCreateTask);
-    const artifact = await artifacts.readArtifact('TaskCoordinator');
-    const iface = new Interface(artifact.abi);
-    const fn = iface.getFunction('createTask');
-    if (!fn) throw new Error('createTask not found in post-rename TaskCoordinator ABI');
-    expect(fn.selector).to.equal(
-      expected,
-      `selector drift: post-rename TaskCoordinator.createTask = ${fn.selector}, ` +
-        `pre-rename signature ${PRE_RENAME.taskCoordinatorCreateTask} = ${expected}. ` +
-        `The manifestDigest rename should be cosmetic — a selector change means a TYPE changed.`,
-    );
+  describe('TaskCoordinator', () => {
+    let iface: Interface;
+    before(async () => {
+      const artifact = await artifacts.readArtifact('TaskCoordinator');
+      iface = new Interface(artifact.abi);
+    });
+
+    it('createTask selector unchanged', () => {
+      const expected = selectorOf(PRE_RENAME.taskCoordinatorCreateTask);
+      const fn = iface.getFunction('createTask');
+      if (!fn) throw new Error('createTask not found in post-rename TaskCoordinator ABI');
+      expect(fn.selector).to.equal(
+        expected,
+        `selector drift: post-rename TaskCoordinator.createTask = ${fn.selector}, ` +
+          `pre-rename signature ${PRE_RENAME.taskCoordinatorCreateTask} = ${expected}. ` +
+          `The manifestDigest rename should be cosmetic — a selector change means a TYPE changed.`,
+      );
+    });
+
+    for (const [eventName, preRenameSig] of TASK_COORDINATOR_EVENTS) {
+      it(`${eventName} topic0 unchanged`, () => {
+        const expected = id(preRenameSig);
+        const ev = iface.getEvent(eventName);
+        if (!ev) throw new Error(`${eventName} not found in post-rename TaskCoordinator ABI`);
+        expect(ev.topicHash).to.equal(
+          expected,
+          `topic0 drift: post-rename TaskCoordinator.${eventName} = ${ev.topicHash}, ` +
+            `pre-rename signature ${preRenameSig} = ${expected}. ` +
+            `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
+        );
+      });
+    }
   });
 
-  it('JinnRouterV3.createTask selector unchanged', async () => {
-    const expected = selectorOf(PRE_RENAME.routerV3CreateTask);
-    const artifact = await artifacts.readArtifact('JinnRouterV3');
-    const iface = new Interface(artifact.abi);
-    const fn = iface.getFunction('createTask');
-    if (!fn) throw new Error('createTask not found in post-rename JinnRouterV3 ABI');
-    expect(fn.selector).to.equal(
-      expected,
-      `selector drift: post-rename JinnRouterV3.createTask = ${fn.selector}, ` +
-        `pre-rename signature ${PRE_RENAME.routerV3CreateTask} = ${expected}. ` +
-        `Subgraph mappings + SDK encoders depend on selector stability.`,
-    );
-  });
+  describe('JinnRouterV3', () => {
+    let iface: Interface;
+    before(async () => {
+      const artifact = await artifacts.readArtifact('JinnRouterV3');
+      iface = new Interface(artifact.abi);
+    });
 
-  it('TaskCoordinator.TaskCreated topic0 unchanged', async () => {
-    const expected = id(PRE_RENAME.taskCoordinatorTaskCreated);
-    const artifact = await artifacts.readArtifact('TaskCoordinator');
-    const iface = new Interface(artifact.abi);
-    const ev = iface.getEvent('TaskCreated');
-    if (!ev) throw new Error('TaskCreated not found in post-rename TaskCoordinator ABI');
-    expect(ev.topicHash).to.equal(
-      expected,
-      `topic0 drift: post-rename TaskCoordinator.TaskCreated = ${ev.topicHash}, ` +
-        `pre-rename signature ${PRE_RENAME.taskCoordinatorTaskCreated} = ${expected}. ` +
-        `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
-    );
-  });
+    it('createTask selector unchanged', () => {
+      const expected = selectorOf(PRE_RENAME.routerV3CreateTask);
+      const fn = iface.getFunction('createTask');
+      if (!fn) throw new Error('createTask not found in post-rename JinnRouterV3 ABI');
+      expect(fn.selector).to.equal(
+        expected,
+        `selector drift: post-rename JinnRouterV3.createTask = ${fn.selector}, ` +
+          `pre-rename signature ${PRE_RENAME.routerV3CreateTask} = ${expected}. ` +
+          `Subgraph mappings + SDK encoders depend on selector stability.`,
+      );
+    });
 
-  it('JinnRouterV3.TaskCreated topic0 unchanged', async () => {
-    const expected = id(PRE_RENAME.routerV3TaskCreated);
-    const artifact = await artifacts.readArtifact('JinnRouterV3');
-    const iface = new Interface(artifact.abi);
-    const ev = iface.getEvent('TaskCreated');
-    if (!ev) throw new Error('TaskCreated not found in post-rename JinnRouterV3 ABI');
-    expect(ev.topicHash).to.equal(
-      expected,
-      `topic0 drift: post-rename JinnRouterV3.TaskCreated = ${ev.topicHash}, ` +
-        `pre-rename signature ${PRE_RENAME.routerV3TaskCreated} = ${expected}. ` +
-        `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
-    );
+    for (const [eventName, preRenameSig] of ROUTER_V3_EVENTS) {
+      it(`${eventName} topic0 unchanged`, () => {
+        const expected = id(preRenameSig);
+        const ev = iface.getEvent(eventName);
+        if (!ev) throw new Error(`${eventName} not found in post-rename JinnRouterV3 ABI`);
+        expect(ev.topicHash).to.equal(
+          expected,
+          `topic0 drift: post-rename JinnRouterV3.${eventName} = ${ev.topicHash}, ` +
+            `pre-rename signature ${preRenameSig} = ${expected}. ` +
+            `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
+        );
+      });
+    }
   });
 });
