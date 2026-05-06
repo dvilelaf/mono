@@ -7,6 +7,7 @@ import {
   type PredictionV1RestorationPayload,
   type PredictionV1VerdictPayload,
 } from './payloads/prediction-v1.js';
+import { type JsonSchema, zodToJsonSchema } from './json-schema.js';
 
 export type SolverNetContractRole = 'creator' | 'solver' | 'evaluator';
 export type PayloadKind = 'task' | 'solution' | 'verdict';
@@ -42,30 +43,63 @@ export interface SolverNetClaimPolicyDefaults {
   claimLeaseTtlSeconds: number;
 }
 
+/**
+ * A schema entry on a SolverNet contract. Carries both the canonical wire
+ * format (JSON Schema, embedded into manifests) and a Zod validator
+ * (daemon-side ergonomic check). See `spec/2026-05-05-solvernet-creation-and-launch.md` §8.
+ *
+ * The two forms are kept in sync at definition time via `zodToJsonSchema`.
+ */
+export interface SolverNetContractSchema {
+  zod: z.ZodTypeAny;
+  json: JsonSchema;
+}
+
 export interface SolverNetContract {
-  name: string;
+  /** Stable contract identity (e.g. `'prediction'`). Replaces the legacy `solverType`. */
+  id: string;
+  /** Contract version label (e.g. `'v1'`). Replaces the legacy `solverType`. */
+  version: string;
+  /**
+   * @deprecated Use `id` + `version`. Removed in Task 30 of the SolverNet
+   * creation-and-launch plan; kept here so callers can migrate incrementally
+   * (Task 8). Always equals `${id}.${version}`.
+   */
   solverType: SupportedSolverType;
+  name: string;
   schemas: {
-    task: z.ZodTypeAny;
-    solution: z.ZodTypeAny;
-    verdict: z.ZodTypeAny;
+    task: SolverNetContractSchema;
+    solution: SolverNetContractSchema;
+    verdict: SolverNetContractSchema;
   };
   claimPolicyDefaults: SolverNetClaimPolicyDefaults;
   credentialRequirements: Record<SolverNetContractRole, CredentialRequirement[]>;
   evaluationFunction: SolverNetEvaluationFunction;
   aggregationFunction: SolverNetAggregationFunction;
-  defaultRuntimePlugins: string[];
 }
 
 export type SolverNetContractMap = Record<SupportedSolverType, SolverNetContract>;
 
 export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
-  name: 'Prediction',
+  id: 'prediction',
+  version: 'v1',
+  // Derived: `${id}.${version}`. Retained during the Task 8 migration; Task 30
+  // removes this field.
   solverType: 'prediction.v1',
+  name: 'Prediction',
   schemas: {
-    task: PredictionV1TaskSchema,
-    solution: PredictionV1RestorationPayloadSchema,
-    verdict: PredictionV1VerdictPayloadSchema,
+    task: {
+      zod: PredictionV1TaskSchema,
+      json: zodToJsonSchema(PredictionV1TaskSchema),
+    },
+    solution: {
+      zod: PredictionV1RestorationPayloadSchema,
+      json: zodToJsonSchema(PredictionV1RestorationPayloadSchema),
+    },
+    verdict: {
+      zod: PredictionV1VerdictPayloadSchema,
+      json: zodToJsonSchema(PredictionV1VerdictPayloadSchema),
+    },
   },
   claimPolicyDefaults: {
     mode: 'parallel',
@@ -106,7 +140,6 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     output: 'trailing mean brierSpread',
     windowDays: 84,
   },
-  defaultRuntimePlugins: ['bundled:jinn-prediction-plugin'],
 };
 
 export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
@@ -158,7 +191,7 @@ function issuesFrom(error: z.ZodError): PayloadValidationIssue[] {
 }
 
 function getSchema(solverType: string, kind: PayloadKind): z.ZodTypeAny | undefined {
-  return getSolverNetContract(solverType)?.schemas[kind];
+  return getSolverNetContract(solverType)?.schemas[kind].zod;
 }
 
 function validateWithSchema<T>(solverType: string, kind: PayloadKind, value: unknown): PayloadValidationResult<T> {
