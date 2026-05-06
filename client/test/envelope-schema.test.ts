@@ -49,10 +49,10 @@ describe('Executor.mode', () => {
     expect(() => UnsignedEnvelopeSchema.parse(env)).not.toThrow();
   });
 
-  it('defaults Executor.mode to "train" when absent (back-compat)', () => {
+  it('parses envelopes without an Executor.mode field (back-compat: undefined treated as train at use sites)', () => {
     const env = { ...baseEnvelope, executor: baseExecutor };
     const parsed = UnsignedEnvelopeSchema.parse(env);
-    expect(parsed.executor.mode).toBe('train');
+    expect(parsed.executor.mode).toBeUndefined();
   });
 
   it('rejects invalid mode values', () => {
