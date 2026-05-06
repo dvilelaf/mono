@@ -18,6 +18,11 @@
  *     PATCH  /v1/solvernets/launched/:id/lifecycle              — pause/resume/retire.
  *     PATCH  /v1/solvernets/launched/:id/generator-config       — hot-apply config.
  *
+ *   Catalog (Task 15):
+ *     GET    /v1/solvernets/launched                            — list owned launched records.
+ *     GET    /v1/solvernets/registry                            — list global launched SolverNets (cached).
+ *     GET    /v1/solvernets/registry/:cid                       — fetch a manifest from the registry.
+ *
  * Auth: route mounting is handled by server.ts (UI-token gate via
  * `requireUiToken`). This module assumes the gate is in place upstream
  * — the same posture as `setup-endpoints.ts` / `launcher-endpoints.ts`.
@@ -64,8 +69,14 @@ import {
 } from '../solvernets/manifest.js';
 import { LaunchAction } from '../solvernets/launch-state-machine.js';
 import { LifecycleTransition } from '../solvernets/lifecycle-transitions.js';
-import type { PendingGeneratorSpawn } from '../solvernets/daemon-init.js';
-import type { SignerWithAgentEoa } from '../solvernets/registry-client.js';
+import type {
+  PendingGeneratorSpawn,
+  SolverNetCatalogCache,
+} from '../solvernets/daemon-init.js';
+import type {
+  SignerWithAgentEoa,
+  SolverNetRegistryClient,
+} from '../solvernets/registry-client.js';
 import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 
 /**
@@ -98,6 +109,20 @@ export interface SolverNetsEndpointsDeps {
   store: SolverNetStore;
   /** Optional Task 14 launch + lifecycle + generator-config wiring. */
   launch?: SolverNetsLaunchDeps;
+  /**
+   * Optional Task 15 catalog cache (from `daemon-init.ts`). Surfaces the
+   * global SolverNet registry to `GET /v1/solvernets/registry`. When omitted
+   * the registry list endpoint returns 503; the owned-list endpoint
+   * (`/launched`) still works because it reads only from `store`.
+   */
+  catalog?: SolverNetCatalogCache;
+  /**
+   * Optional Task 15 registry client. Used by `GET /v1/solvernets/registry/:cid`
+   * to resolve a manifest body and its lifecycle status from the global
+   * registry. Independently optional from `catalog` so a daemon could expose
+   * one but not the other (in practice they ship together).
+   */
+  registry?: SolverNetRegistryClient;
 }
 
 // ── Draft CRUD validation schemas ──────────────────────────────────────────
@@ -170,6 +195,38 @@ function applyEditable(
   }
   return next;
 }
+
+// ── Catalog query-string schemas (Task 15) ──────────────────────────────────
+
+/**
+ * Status filter shared by `/launched` (owned-list) and `/registry`
+ * (global-list). The owned-list also accepts `launching`/`failed` because
+ * those are local-only states that never make it to the registry; the
+ * registry list is restricted to lifecycle-broadcast states.
+ */
+const OwnedStatusFilterSchema = z.enum([
+  'launching',
+  'launched',
+  'paused',
+  'retired',
+  'failed',
+]);
+
+const RegistryStatusFilterSchema = z.enum(['launched', 'paused', 'retired']);
+
+/**
+ * Loose CIDv0 / CIDv1 sniff. We are not validating the full multihash —
+ * that is the registry client's job — but rejecting trivial garbage here
+ * (slashes from path traversal, hyphens, empty strings) keeps the IPFS
+ * round-trip away from obvious attacks. CIDv0 = `Qm` + base58btc; CIDv1 in
+ * the dag-pb codec we use here is base32-lower and starts with `bafy`.
+ *
+ * We accept any sufficiently-long alphanumeric tail without enforcing the
+ * exact alphabet — the registry client's hash check against the on-chain
+ * advertised hash is the canonical gate; this regex only filters obviously
+ * non-CID inputs.
+ */
+const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|bafy[A-Za-z0-9]{10,})$/u;
 
 // ── Lifecycle / generator-config validation schemas ─────────────────────────
 
@@ -968,5 +1025,195 @@ export function registerSolverNetsEndpoints(
     }
 
     return c.json(nextConfig);
+  });
+
+  // ── Task 15 routes ────────────────────────────────────────────────────────
+
+  // GET /v1/solvernets/launched — list owned launched records (= what this
+  // daemon launched). The registry catalog (below) is the global view; this
+  // is the local mirror — exactly the rows the daemon is responsible for
+  // running generators for.
+  //
+  // Optional `?status=<launching|launched|paused|retired|failed>` filter
+  // narrows the list. Without the filter, all records (including retired)
+  // are returned — the SPA decides what to show. This shape lets the SPA
+  // render a unified "your SolverNets" tab without N round-trips.
+  app.get('/v1/solvernets/launched', async (c) => {
+    const statusQuery = c.req.query('status');
+    let statusFilter: z.infer<typeof OwnedStatusFilterSchema> | undefined;
+    if (statusQuery !== undefined) {
+      const parsed = OwnedStatusFilterSchema.safeParse(statusQuery);
+      if (!parsed.success) {
+        return c.json(
+          {
+            error: 'invalid_query',
+            message: `unknown status filter: ${statusQuery}`,
+          },
+          400,
+        );
+      }
+      statusFilter = parsed.data;
+    }
+
+    let records: LaunchedSolverNetRecord[];
+    try {
+      records = await store.loadOwnedRecords();
+    } catch (err) {
+      return c.json(
+        {
+          error: 'store_read_failed',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        500,
+      );
+    }
+
+    if (statusFilter !== undefined) {
+      records = records.filter((r) => r.status === statusFilter);
+    }
+
+    return c.json({ records });
+  });
+
+  // GET /v1/solvernets/registry — list global launched SolverNets from the
+  // catalog cache (populated by the daemon's registry-catalog refresh loop
+  // wired in `daemon-init.ts`).
+  //
+  // Behaviour:
+  //   - Default filter is `launched + paused`; retired entries are excluded
+  //     unless the caller explicitly asks for `?status=retired`. This matches
+  //     the join-flow's "useful surface" — operators picking a SolverNet to
+  //     join shouldn't have to scroll past tombstoned ones.
+  //   - `?refresh=1` forces a refresh before reading the snapshot. The SPA
+  //     uses this on user-initiated reload; the auto-tick keeps the cache
+  //     warm in the background.
+  //   - Cache metadata (`lastRefreshedAt`, `lastError`) is always returned
+  //     so the SPA can render a "stale" indicator and surface errors.
+  app.get('/v1/solvernets/registry', async (c) => {
+    if (!deps.catalog) {
+      return c.json(
+        {
+          error: 'registry_unavailable',
+          message: 'registry catalog cache is not configured',
+        },
+        503,
+      );
+    }
+    const catalog = deps.catalog;
+
+    const statusQuery = c.req.query('status');
+    let statusFilter: Array<z.infer<typeof RegistryStatusFilterSchema>>;
+    if (statusQuery !== undefined) {
+      const parsed = RegistryStatusFilterSchema.safeParse(statusQuery);
+      if (!parsed.success) {
+        return c.json(
+          {
+            error: 'invalid_query',
+            message: `unknown status filter: ${statusQuery}`,
+          },
+          400,
+        );
+      }
+      statusFilter = [parsed.data];
+    } else {
+      // Default: launched + paused. Retired is excluded from the default
+      // surface — operators see those only via explicit ?status=retired.
+      statusFilter = ['launched', 'paused'];
+    }
+
+    if (c.req.query('refresh') === '1') {
+      // Force a refresh before reading the snapshot. The cache itself
+      // suppresses errors — they land in `lastError` which we surface in
+      // the response, so the SPA can show "couldn't refresh, here's the
+      // last cached snapshot" rather than a blank page.
+      await catalog.refresh();
+    }
+
+    const snapshot = catalog.getCatalog();
+    const summaries = snapshot.filter((s) => statusFilter.includes(s.status));
+
+    const lastRefreshedAt = catalog.lastRefreshedAt();
+    const lastError = catalog.lastError();
+    return c.json({
+      summaries,
+      lastRefreshedAt: lastRefreshedAt === null ? null : lastRefreshedAt.toISOString(),
+      lastError:
+        lastError === null
+          ? null
+          : { message: lastError.message, at: lastError.at.toISOString() },
+    });
+  });
+
+  // GET /v1/solvernets/registry/:cid — fetch a specific manifest from the
+  // registry, with its current lifecycle status.
+  //
+  // The registry client validates the manifest's canonical hash against the
+  // on-chain advertised hash; if it throws (missing IPFS body, schema
+  // mismatch, hash mismatch), we surface 404 — the manifest is "not found"
+  // from a useful-surface perspective regardless of which leg failed. The
+  // exact failure reason is in the response message for debugging.
+  //
+  // CID validation here is intentionally loose: we reject obvious garbage
+  // (path-traversal, decimals, empty) so we never round-trip them to IPFS,
+  // but the registry client does the canonical check.
+  app.get('/v1/solvernets/registry/:cid', async (c) => {
+    if (!deps.registry) {
+      return c.json(
+        {
+          error: 'registry_unavailable',
+          message: 'registry client is not configured',
+        },
+        503,
+      );
+    }
+    const registry = deps.registry;
+
+    const cid = c.req.param('cid');
+    if (!cid || !CID_SHAPE_REGEX.test(cid)) {
+      return c.json(
+        {
+          error: 'invalid_cid',
+          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
+        },
+        400,
+      );
+    }
+
+    let manifest: SolverNetManifestV1;
+    try {
+      manifest = await registry.getManifest({ manifestCid: cid });
+    } catch (err) {
+      return c.json(
+        {
+          error: 'manifest_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        404,
+      );
+    }
+
+    let lifecycle: {
+      status: 'launched' | 'paused' | 'retired';
+      statusUpdatedAt: string;
+      sourceBlock: number;
+    };
+    try {
+      lifecycle = await registry.getLifecycleStatus({ manifestCid: cid });
+    } catch (err) {
+      // The manifest body exists on IPFS but no lifecycle events were found
+      // on chain — surface as 404 with the real reason in the message.
+      // This is genuinely unusual (the launcher must have setMetadata'd the
+      // initial cid for the manifest to be discoverable at all), but it can
+      // happen during the brief window between IPFS pin and on-chain confirm.
+      return c.json(
+        {
+          error: 'manifest_not_found',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        404,
+      );
+    }
+
+    return c.json({ manifest, lifecycle });
   });
 }
