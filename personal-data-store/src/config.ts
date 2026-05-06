@@ -22,5 +22,9 @@ export const config = {
     morning_briefing: { enabled: true, schedule: process.env.BRIEFING_SCHEDULE ?? "30 6 * * *" },
     watchdog: { enabled: true, schedule: process.env.WATCHDOG_SCHEDULE ?? "0 */4 * * *" },
     correlations: { enabled: true, schedule: process.env.CORRELATIONS_SCHEDULE ?? "0 4 * * 1" },
+    issue_runner: {
+      enabled: (process.env.ISSUE_RUNNER_ENABLED ?? "true") === "true",
+      schedule: process.env.ISSUE_RUNNER_SCHEDULE ?? "0 23 * * *",
+    },
   },
 } as const;

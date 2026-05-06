@@ -14,6 +14,7 @@ import { checkinMorningConnector, checkinEveningConnector } from "./connectors/c
 import { briefingConnector } from "./connectors/briefing.connector.js";
 import { watchdogConnector } from "./connectors/watchdog.connector.js";
 import { correlationsConnector } from "./connectors/correlations.connector.js";
+import { issueRunnerConnector } from "./connectors/issue-runner.connector.js";
 
 registerConnector(auraConnector);
 registerConnector(cryptoConnector);
@@ -29,6 +30,7 @@ registerConnector(checkinEveningConnector);
 registerConnector(briefingConnector);
 registerConnector(watchdogConnector);
 registerConnector(correlationsConnector);
+registerConnector(issueRunnerConnector);
 
 const server = app.listen(config.port, "0.0.0.0", () => {
   console.log(`Personal Data Store running at http://0.0.0.0:${config.port}`);
