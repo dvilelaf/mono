@@ -75,6 +75,7 @@ import type {
 } from '../solvernets/daemon-init.js';
 import type {
   SignerWithAgentEoa,
+  SolverNetManifestSummary,
   SolverNetRegistryClient,
 } from '../solvernets/registry-client.js';
 import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
@@ -364,6 +365,82 @@ function buildUnsignedManifest(args: {
   };
 
   return { ok: true, manifest };
+}
+
+/**
+ * Project a (record, manifest) pair into the catalog-row summary shape
+ * shared with `SolverNetRegistryClient.listLaunched`.
+ *
+ * The lifecycle fields (`status`, `statusUpdatedAt`, `anchorBlock`) come
+ * from the local `LaunchedSolverNetRecord` because the daemon owns the
+ * authoritative view of what it has launched — we do *not* want to pay
+ * an extra subgraph round-trip to re-derive lifecycle state when the
+ * record already has it. The remaining fields (name, contract, prices,
+ * openRoles, launcher) come from the manifest body.
+ *
+ * `status` widens to the registry's three-value enum: launching/failed
+ * are local-only and never present on a record that has a manifest cached,
+ * but we coerce them defensively to `launched`/`retired` respectively to
+ * keep the projection total. Callers should gate on `record.status`
+ * being one of {launched, paused, retired} before deciding to display.
+ */
+function summarizeLaunchedRecord(
+  record: LaunchedSolverNetRecord,
+  manifest: SolverNetManifestV1,
+): SolverNetManifestSummary {
+  const status: 'launched' | 'paused' | 'retired' =
+    record.status === 'paused'
+      ? 'paused'
+      : record.status === 'retired'
+        ? 'retired'
+        : 'launched';
+  return {
+    manifestCid: record.manifestCid,
+    solverNetId: manifest.solverNetId,
+    name: manifest.name,
+    network: manifest.network,
+    launcherAgentId: manifest.launcher.agentId,
+    launcherSafeAddress: manifest.launcher.safeAddress,
+    status,
+    statusUpdatedAt: record.statusUpdatedAt,
+    contractId: manifest.contract.id,
+    contractVersion: manifest.contract.version,
+    solutionPriceWei: manifest.solutionPriceWei,
+    verdictPriceWei: manifest.verdictPriceWei,
+    openRoles: manifest.openRoles,
+    anchorBlock: record.registry.metadataBlockNumber ?? 0,
+  };
+}
+
+/**
+ * Look up a manifest summary for a record, using only the registry
+ * client's in-process cache. Returns `undefined` on cache miss or when
+ * the registry client is not wired — callers (the launched-list /
+ * launched-get endpoints) treat `undefined` as "no summary available"
+ * and fall back to displaying record-only fields.
+ *
+ * Cache-only by design: the launched-list endpoint runs on every SPA
+ * poll, and an IPFS round-trip per row would dominate latency. For
+ * SolverNets the daemon launched itself, the cache is warm by
+ * construction (the launch path populates it).
+ */
+async function tryGetSummary(
+  record: LaunchedSolverNetRecord,
+  registry: SolverNetRegistryClient | undefined,
+): Promise<SolverNetManifestSummary | undefined> {
+  if (!registry) return undefined;
+  try {
+    const manifest = await registry.getManifestFromCache({
+      manifestCid: record.manifestCid,
+    });
+    if (manifest === null) return undefined;
+    return summarizeLaunchedRecord(record, manifest);
+  } catch {
+    // Defensive — the cache lookup is supposed to be infallible, but a
+    // future async-backed cache could throw (storage error). We surface
+    // an undefined summary rather than failing the entire list response.
+    return undefined;
+  }
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -777,6 +854,13 @@ export function registerSolverNetsEndpoints(
   // mutate it synchronously after each disk write) and falls back to disk.
   // Either source is up-to-date because both are written before the
   // operation returns.
+  //
+  // Response shape: the persisted record fields + an optional
+  // `summary?: SolverNetManifestSummary` derived from the registry
+  // client's in-process manifest cache. Cache miss → `summary` is
+  // omitted. The summary is the only place catalog-y identity (name,
+  // contract id/version, prices, openRoles) appears on this surface;
+  // the SPA falls back to bare record fields when it is missing.
   app.get('/v1/solvernets/launched/:id', async (c) => {
     const id = c.req.param('id');
     if (!id) {
@@ -790,7 +874,14 @@ export function registerSolverNetsEndpoints(
         (g) => g.recordRef.current.solverNetId === id,
       );
       if (entry) {
-        return c.json(entry.recordRef.current);
+        const summary = await tryGetSummary(
+          entry.recordRef.current,
+          deps.registry,
+        );
+        return c.json({
+          ...entry.recordRef.current,
+          ...(summary !== undefined ? { summary } : {}),
+        });
       }
     }
 
@@ -809,7 +900,11 @@ export function registerSolverNetsEndpoints(
     if (!record) {
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
-    return c.json(record);
+    const summary = await tryGetSummary(record, deps.registry);
+    return c.json({
+      ...record,
+      ...(summary !== undefined ? { summary } : {}),
+    });
   });
 
   // PATCH /v1/solvernets/launched/:id/lifecycle — pause / resume / retire.
@@ -1038,6 +1133,13 @@ export function registerSolverNetsEndpoints(
   // narrows the list. Without the filter, all records (including retired)
   // are returned — the SPA decides what to show. This shape lets the SPA
   // render a unified "your SolverNets" tab without N round-trips.
+  //
+  // Each row also carries an optional `summary?: SolverNetManifestSummary`
+  // populated from the registry client's in-process manifest cache —
+  // populated for every SolverNet this daemon launched (the launch path
+  // primes the cache), `undefined` for the pre-cache window during a
+  // launch in flight. Cache-only on purpose: list responses run on every
+  // SPA poll, and an IPFS round-trip per row would dominate latency.
   app.get('/v1/solvernets/launched', async (c) => {
     const statusQuery = c.req.query('status');
     let statusFilter: z.infer<typeof OwnedStatusFilterSchema> | undefined;
@@ -1072,7 +1174,18 @@ export function registerSolverNetsEndpoints(
       records = records.filter((r) => r.status === statusFilter);
     }
 
-    return c.json({ records });
+    // Enrich each record with its manifest summary from the cache, when
+    // available. We `Promise.all` the lookups so a future async-backed
+    // cache (e.g. SQLite) would not serialize per row, even though the
+    // day-1 implementation is a synchronous Map read.
+    const enriched = await Promise.all(
+      records.map(async (record) => {
+        const summary = await tryGetSummary(record, deps.registry);
+        return summary !== undefined ? { ...record, summary } : record;
+      }),
+    );
+
+    return c.json({ records: enriched });
   });
 
   // GET /v1/solvernets/registry — list global launched SolverNets from the

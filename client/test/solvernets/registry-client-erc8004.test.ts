@@ -762,6 +762,86 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
   });
 });
 
+// ── Tests: getManifestFromCache ─────────────────────────────────────────────
+
+describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', () => {
+  it('returns the cached manifest after publishManifest (warm cache)', async () => {
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await client.publishManifest({ manifest, signer });
+
+    const cached = await client.getManifestFromCache({ manifestCid });
+    expect(cached).not.toBeNull();
+    expect(cached?.solverNetId).toBe(manifest.solverNetId);
+    // Critical: cache-only — no IPFS round-trip beyond the publishManifest
+    // upload itself, and no subgraph round-trip at all.
+    expect(ipfs.fetchCalls).toBe(0);
+    expect(subgraph.fetchByCidCalls).toHaveLength(0);
+  });
+
+  it('returns null on cache miss without falling through to IPFS', async () => {
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    const cached = await client.getManifestFromCache({
+      manifestCid: 'bafy-not-cached',
+    });
+    expect(cached).toBeNull();
+    // No IPFS round-trip on miss — that's the contract.
+    expect(ipfs.fetchCalls).toBe(0);
+    expect(subgraph.fetchByCidCalls).toHaveLength(0);
+  });
+
+  it('returns the cached manifest after a successful getManifest (cold-then-warm cache)', async () => {
+    // listLaunched + getManifest path for an other-launcher manifest:
+    // first getManifest does the IPFS fetch + hash verify and warms the
+    // cache; subsequent getManifestFromCache reads it without I/O.
+    const sharedIpfs = makeMockIpfs();
+    const sharedSubgraph = makeMockSubgraph();
+
+    const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph: sharedSubgraph,
+      network: 'base-sepolia',
+    });
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
+
+    const reader = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph: sharedSubgraph,
+      network: 'base-sepolia',
+    });
+    // Cold: cache miss before getManifest.
+    expect(await reader.getManifestFromCache({ manifestCid })).toBeNull();
+
+    // Hydrate via getManifest (this round-trips IPFS + subgraph once).
+    await reader.getManifest({ manifestCid });
+
+    // Warm: subsequent cache lookup returns the body.
+    const cached = await reader.getManifestFromCache({ manifestCid });
+    expect(cached?.solverNetId).toBe(manifest.solverNetId);
+  });
+});
+
 // ── Tests: getLifecycleStatus ───────────────────────────────────────────────
 
 describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () => {

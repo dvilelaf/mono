@@ -221,6 +221,7 @@ function makeMockRegistry(): MockRegistry {
     },
     async listLaunched() { return []; },
     async getManifest() { throw new Error('not used'); },
+    async getManifestFromCache() { return null; },
     async getLifecycleStatus() { throw new Error('not used'); },
     get publishLifecycleCalls() { return publishLifecycleCalls; },
     get failNextPublishLifecycle() { return failNextPublishLifecycle; },
