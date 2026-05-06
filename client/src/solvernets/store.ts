@@ -63,6 +63,13 @@ const RegistrySchema = z.object({
 /**
  * Local persistent record for a SolverNet the launcher daemon owns. Mirrors
  * the spec §6.2 shape exactly.
+ *
+ * `generatorConfig` is the per-record hot-applyable runtime config the
+ * launcher edits via `PATCH /v1/solvernets/launched/:id/generator-config`
+ * (Task 14). Stored as an opaque blob — the precise shape lives with the
+ * solver-type's runtime-config interface (e.g.
+ * `PredictionV1GeneratorRuntimeConfig`). The endpoint validates against
+ * that interface before persisting; the store treats it as JSON.
  */
 export const LaunchedSolverNetRecordSchema = z.object({
   schemaVersion: z.literal('solvernet.launched.v1'),
@@ -80,6 +87,7 @@ export const LaunchedSolverNetRecordSchema = z.object({
 
   generatorEnabled: z.boolean(),
   generatorState: GeneratorStateSchema.optional(),
+  generatorConfig: z.record(z.string(), z.unknown()).optional(),
 
   launchProgress: LaunchProgressSchema.optional(),
   lifecycleProgress: LifecycleProgressSchema.optional(),

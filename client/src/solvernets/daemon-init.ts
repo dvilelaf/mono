@@ -312,7 +312,13 @@ export async function initSolverNetSubsystem(
     .map((record) => ({
       record,
       recordRef: { current: record },
-      configRef: { current: {} as PredictionV1GeneratorRuntimeConfig },
+      // Seed configRef from the record's persisted generatorConfig if present
+      // (set by Task 14's `PATCH /v1/solvernets/launched/:id/generator-config`
+      // endpoint), otherwise use an empty config so the generator falls back
+      // to its built-in defaults.
+      configRef: {
+        current: ((record.generatorConfig ?? {}) as PredictionV1GeneratorRuntimeConfig),
+      },
     }));
   logger.info(
     `[solvernet] loaded ${records.length} owned record(s); ` +
