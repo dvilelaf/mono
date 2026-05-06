@@ -23,6 +23,16 @@ export interface MechAdapterConfig {
   /** Base mainnet V1, Phase 1b V2, or Task-native V3 delivery claim ABI. */
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
+  /**
+   * Optional resolver from manifestCid → manifest body. When supplied,
+   * `contractPolicyForTask` reads the evaluator branch of
+   * `manifest.contract.claimPolicy` to populate the on-chain
+   * EvaluationPolicy (duration, externalReadyAt, requiredVerdicts, etc.).
+   * Falls back to conservative defaults if absent or the manifest can't
+   * be resolved — keeps tests + ad-hoc posting paths working.
+   */
+  manifestResolver?: (manifestCid: string) =>
+    Promise<import('@jinn-network/sdk/solvernets').SolverNetManifestV1 | null>;
 }
 
 export const MECH_MARKETPLACE_ABI = [
@@ -210,7 +220,8 @@ export const JINN_ROUTER_ABI = [
             components: [
               { name: 'requiredVerdicts', type: 'uint16' },
               { name: 'passThreshold', type: 'uint16' },
-              { name: 'evaluationDeadline', type: 'uint64' },
+              { name: 'evaluationDuration', type: 'uint64' },
+              { name: 'externalReadyAt', type: 'uint64' },
               { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
               { name: 'disallowSolverSelfEvaluation', type: 'bool' },
             ],

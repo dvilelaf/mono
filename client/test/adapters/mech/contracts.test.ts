@@ -4,6 +4,8 @@ import {
   JINN_ROUTER_ABI,
   JINN_ROUTER_CLAIM_DELIVERY_V2_ABI,
 } from '../../../src/adapters/mech/types.js';
+import { interpolateExternalReadyAt } from '../../../src/adapters/mech/adapter.js';
+import type { Task } from '../../../src/types/index.js';
 
 describe('JinnRouter contract encoding', () => {
   const taskCidDigest = ('0x' + '11'.repeat(32)) as `0x${string}`;
@@ -19,7 +21,8 @@ describe('JinnRouter contract encoding', () => {
     evaluationPolicy: {
       requiredVerdicts: 1,
       passThreshold: 1,
-      evaluationDeadline: 4n,
+      evaluationDuration: 600n,
+      externalReadyAt: 0n,
       maxVerdictsPerEvaluator: 1,
       disallowSolverSelfEvaluation: true,
     },
@@ -186,5 +189,75 @@ describe('JinnRouter contract encoding', () => {
     expect(decoded.args.taskId).toBe(1n);
     expect(decoded.args.attemptIndex).toBe(0);
     expect(decoded.args.requestId).toBe(requestId);
+  });
+});
+
+describe('interpolateExternalReadyAt', () => {
+  function makeTask(spec: Record<string, unknown>): Task {
+    return {
+      id: 'fixture',
+      description: 'fixture',
+      role: 'restoration',
+      solverType: 'prediction.v1',
+      solverNetManifestCid: 'bafkreitestfixture',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      spec,
+    } as unknown as Task;
+  }
+
+  it('resolves a placeholder against the Task body and adds a +Nh offset', () => {
+    const task = makeTask({ resolution: { expectedResolutionTime: 1735689600 } });
+    const result = interpolateExternalReadyAt(
+      '${task.spec.resolution.expectedResolutionTime}+1h',
+      task,
+    );
+    expect(result).toBe(1735689600n + 3600n);
+  });
+
+  it('handles ms-epoch values (normalizes to seconds)', () => {
+    const task = makeTask({ resolution: { expectedResolutionTime: 1735689600000 } });
+    const result = interpolateExternalReadyAt(
+      '${task.spec.resolution.expectedResolutionTime}+1h',
+      task,
+    );
+    expect(result).toBe(1735689600n + 3600n);
+  });
+
+  it('supports -Nm subtractive offsets', () => {
+    const task = makeTask({ resolution: { expectedResolutionTime: 100_000 } });
+    const result = interpolateExternalReadyAt(
+      '${task.spec.resolution.expectedResolutionTime}-30m',
+      task,
+    );
+    expect(result).toBe(100_000n - 1800n);
+  });
+
+  it('supports a placeholder with no offset', () => {
+    const task = makeTask({ resolution: { expectedResolutionTime: 42 } });
+    const result = interpolateExternalReadyAt(
+      '${task.spec.resolution.expectedResolutionTime}',
+      task,
+    );
+    expect(result).toBe(42n);
+  });
+
+  it('rejects an unresolvable path', () => {
+    const task = makeTask({ resolution: {} });
+    expect(() =>
+      interpolateExternalReadyAt('${task.spec.resolution.missing}', task),
+    ).toThrow(/did not resolve/);
+  });
+
+  it('rejects a non-numeric resolved value', () => {
+    const task = makeTask({ resolution: { expectedResolutionTime: 'not-a-number' } });
+    expect(() =>
+      interpolateExternalReadyAt('${task.spec.resolution.expectedResolutionTime}', task),
+    ).toThrow(/non-finite/);
+  });
+
+  it('rejects a malformed template (no placeholder)', () => {
+    const task = makeTask({});
+    expect(() => interpolateExternalReadyAt('1735689600+1h', task)).toThrow(/single \$\{path\}/);
   });
 });

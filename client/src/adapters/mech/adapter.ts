@@ -71,6 +71,68 @@ const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
 };
 
 /**
+ * Resolve a manifest's `evaluator.window.externalReadyAt` template against
+ * a Task body. The template syntax supports:
+ *   - `${a.b.c}` — JSON-path-style lookup against the Task object
+ *   - trailing `+Nh|Nm|Ns` or `-Nh|Nm|Ns` — additive/subtractive offset
+ *
+ * Returns a uint64-compatible bigint of seconds since epoch. Throws on
+ * unresolvable templates rather than silently producing 0; the daemon's
+ * caller catches and falls back to a sensible default.
+ *
+ * Example: `'${task.spec.resolution.expectedResolutionTime}+1h'` against
+ * a Task whose spec.resolution.expectedResolutionTime is `1735689600000`
+ * (ms) → `1735693200n` (seconds, +3600 added).
+ */
+export function interpolateExternalReadyAt(template: string, task: Task): bigint {
+  const offsetMatch = template.match(/([+-])(\d+)([hms])$/u);
+  let coreTemplate = template;
+  let offsetSeconds = 0;
+  if (offsetMatch) {
+    const [, sign, magnitude, unit] = offsetMatch;
+    const n = Number(magnitude);
+    const unitSeconds = unit === 'h' ? 3600 : unit === 'm' ? 60 : 1;
+    offsetSeconds = (sign === '-' ? -1 : 1) * n * unitSeconds;
+    coreTemplate = template.slice(0, offsetMatch.index).trim();
+  }
+
+  const placeholderMatch = coreTemplate.match(/^\$\{([^}]+)\}$/u);
+  if (!placeholderMatch) {
+    throw new Error(
+      `externalReadyAt template must be a single \${path} placeholder ` +
+      `(with optional trailing +Nh|Nm|Ns offset); got: ${template}`,
+    );
+  }
+  const path = placeholderMatch[1];
+
+  // Resolve `task.spec.resolution.expectedResolutionTime` etc. against the
+  // Task object. The leading `task.` is stripped so the same template can
+  // be authored as if the task were the implicit root.
+  const segments = path.replace(/^task\./u, '').split('.');
+  let cursor: unknown = task;
+  for (const seg of segments) {
+    if (cursor && typeof cursor === 'object' && seg in (cursor as Record<string, unknown>)) {
+      cursor = (cursor as Record<string, unknown>)[seg];
+    } else {
+      throw new Error(`externalReadyAt path '${path}' did not resolve on task`);
+    }
+  }
+
+  if (typeof cursor !== 'number' && typeof cursor !== 'string') {
+    throw new Error(
+      `externalReadyAt resolved to non-numeric ${typeof cursor}; path=${path}`,
+    );
+  }
+  const raw = typeof cursor === 'string' ? Number(cursor) : cursor;
+  if (!Number.isFinite(raw)) {
+    throw new Error(`externalReadyAt resolved to non-finite number; path=${path}`);
+  }
+  // Allow either ms-epoch or s-epoch values; normalize to seconds.
+  const seconds = raw > 10_000_000_000 ? Math.floor(raw / 1000) : Math.floor(raw);
+  return BigInt(seconds + offsetSeconds);
+}
+
+/**
  * Spec §14 (Task 24): a Task carries `contractId` + `contractVersion` (BINDING)
  * and a derivable `solverType = `${contractId}.${contractVersion}``. When the
  * caller only supplies a legacy `solverType`, derive the BINDING fields from
@@ -264,7 +326,7 @@ export class MechAdapter implements ExecutionAdapter {
       );
     }
     const manifestDigest = keccak256(toBytes(signedTask.solverNetManifestCid));
-    const policy = this.contractPolicyForTask(restorationState);
+    const policy = await this.contractPolicyForTask(restorationState);
 
     const taskSubmission = await submitTask(
       this.publicClient,
@@ -348,7 +410,7 @@ export class MechAdapter implements ExecutionAdapter {
     return signTaskV1(taskDoc, this.config.agentEoaPrivateKey);
   }
 
-  private contractPolicyForTask(state: Task): RouterTaskPolicy {
+  private async contractPolicyForTask(state: Task): Promise<RouterTaskPolicy> {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const claimPolicy = state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
     const normalizeTs = (value: number | undefined, fallback: number): bigint => {
@@ -368,6 +430,48 @@ export class MechAdapter implements ExecutionAdapter {
       Number(claimWindowEnd) + claimPolicy.claimLeaseTtlSeconds,
     );
 
+    // Read evaluator policy from the manifest if a resolver is wired and
+    // the Task carries a manifest CID. Otherwise fall back to a
+    // conservative default (window from claim-window-start to
+    // submission-deadline; one verdict; no external readiness gate). The
+    // legacy hardcoded path is only kept for tests and ad-hoc posting
+    // flows that don't go through the launcher.
+    let evaluationDuration: bigint = submissionDeadline - claimWindowStart;
+    let externalReadyAt: bigint = 0n;
+    let requiredVerdicts = 1;
+    let passThreshold = 1;
+    let maxVerdictsPerEvaluator = 1;
+    let disallowSolverSelfEvaluation = true;
+    let policyHookFromManifest: Address | undefined;
+
+    if (this.config.manifestResolver && state.solverNetManifestCid) {
+      try {
+        const manifest = await this.config.manifestResolver(state.solverNetManifestCid);
+        if (manifest) {
+          const evaluator = manifest.contract.claimPolicy.evaluator;
+          evaluationDuration = BigInt(evaluator.window.duration);
+          if (evaluator.window.externalReadyAt) {
+            externalReadyAt = interpolateExternalReadyAt(
+              evaluator.window.externalReadyAt,
+              state,
+            );
+          }
+          requiredVerdicts = evaluator.requiredVerdicts;
+          passThreshold = evaluator.passThreshold;
+          maxVerdictsPerEvaluator = evaluator.maxVerdictsPerEvaluator;
+          disallowSolverSelfEvaluation = evaluator.disallowSolverSelfEvaluation;
+          // Note: SolverNet manifest doesn't currently carry policyHook —
+          // tracked separately at the operator-config layer. If a future
+          // schema adds it, plumb it in here.
+        }
+      } catch (err) {
+        console.warn(
+          `[mech-adapter] manifest resolver failed for ${state.solverNetManifestCid}; ` +
+          `falling back to default evaluator policy. ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+
     return {
       claimWindowStart,
       claimWindowEnd,
@@ -375,13 +479,14 @@ export class MechAdapter implements ExecutionAdapter {
       claimLeaseTtlSeconds: claimPolicy.claimLeaseTtlSeconds,
       maxClaims: claimPolicy.maxClaims,
       maxClaimsPerOperator: claimPolicy.maxClaimsPerOperator,
-      policyHook: (claimPolicy.policyHook ?? zeroAddress) as Address,
+      policyHook: (policyHookFromManifest ?? claimPolicy.policyHook ?? zeroAddress) as Address,
       evaluationPolicy: {
-        requiredVerdicts: 1,
-        passThreshold: 1,
-        evaluationDeadline: submissionDeadline + BigInt(claimPolicy.claimLeaseTtlSeconds),
-        maxVerdictsPerEvaluator: 1,
-        disallowSolverSelfEvaluation: true,
+        requiredVerdicts,
+        passThreshold,
+        evaluationDuration,
+        externalReadyAt,
+        maxVerdictsPerEvaluator,
+        disallowSolverSelfEvaluation,
       },
     };
   }

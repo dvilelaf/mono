@@ -1148,6 +1148,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  // Adapter is constructed before the SolverNet subsystem (which holds the
+  // registry client + manifest resolver). We thread a holder ref so the
+  // adapter can pick it up once initSolverNetSubsystem has run; until then
+  // contractPolicyForTask falls back to its conservative defaults.
+  const adapterManifestResolverHolder: {
+    current?: (cid: string) =>
+      Promise<import('@jinn-network/sdk/solvernets').SolverNetManifestV1 | null>;
+  } = {};
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1161,6 +1169,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
+    manifestResolver: async (cid) => adapterManifestResolverHolder.current?.(cid) ?? null,
   });
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1479,6 +1488,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       network: 'base-sepolia',
     });
     solverNetRegistryClientForEngine = solverNetRegistryClient;
+    adapterManifestResolverHolder.current = async (cid) => {
+      try {
+        return await solverNetRegistryClient.getManifest({ manifestCid: cid });
+      } catch {
+        return null;
+      }
+    };
 
     const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
       agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,

@@ -62,7 +62,8 @@ const TASK_COORDINATOR_ABI = [
                 components: [
                   { name: 'requiredVerdicts', type: 'uint16' },
                   { name: 'passThreshold', type: 'uint16' },
-                  { name: 'evaluationDeadline', type: 'uint64' },
+                  { name: 'evaluationDuration', type: 'uint64' },
+                  { name: 'externalReadyAt', type: 'uint64' },
                   { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
                   { name: 'disallowSolverSelfEvaluation', type: 'bool' },
                 ],
@@ -293,7 +294,8 @@ export interface RouterTaskPolicy {
   evaluationPolicy: {
     requiredVerdicts: number;
     passThreshold: number;
-    evaluationDeadline: bigint;
+    evaluationDuration: bigint;
+    externalReadyAt: bigint;
     maxVerdictsPerEvaluator: number;
     disallowSolverSelfEvaluation: boolean;
   };
