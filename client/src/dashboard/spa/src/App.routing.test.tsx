@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
 import { LauncherPage } from './pages/Launcher.js';
-import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 
@@ -19,9 +18,6 @@ vi.mock('./api/client.js', () => ({
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
-    fetchLauncherStatus: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
-    fetchLauncherTasks: async () => ({ schemaVersion: 1, generatedAt: '', tasks: [] }),
-    patchLauncherSolverNet: async () => ({ ok: true, name: 'prediction', roles: [], generator: {} }),
     solvernets: {
       listDrafts: async () => ({ drafts: [] }),
       getDraft: async () => ({}),
@@ -84,29 +80,17 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
+          <Route path="/launcher/create" component={LauncherCreatePage} />
+          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
           <Route path="/launcher" component={LauncherPage} />
-          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
         </Switch>,
         '/launcher',
       ),
     );
-    // No SolverNet has 'launching' role yet -> empty state surfaces.
+    // No owned launched records yet -> empty state surfaces (spec §10).
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /you haven't launched a solvernet yet/i })).toBeTruthy(),
+      expect(screen.getByText(/no solvernets created yet\./i)).toBeTruthy(),
     );
-  });
-
-  it('renders LauncherConfigurationPage on /launcher/configuration', () => {
-    render(
-      withProviders(
-        <Switch>
-          <Route path="/launcher" component={LauncherPage} />
-          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
-        </Switch>,
-        '/launcher/configuration',
-      ),
-    );
-    expect(screen.getByRole('heading', { name: /generator config/i })).toBeTruthy();
   });
 
   // ── New SolverNet creation/launch routes (Task 16 scaffolding) ──

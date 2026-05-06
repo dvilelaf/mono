@@ -13,7 +13,6 @@ import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { ConfigurationPage } from './pages/Configuration.js';
 import { LauncherPage } from './pages/Launcher.js';
-import { LauncherConfigurationPage } from './pages/LauncherConfiguration.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 
@@ -72,7 +71,6 @@ export default function App(): JSX.Element {
           </Route>
           <Route path="/launcher/create" component={LauncherCreatePage} />
           <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
-          <Route path="/launcher/configuration" component={LauncherConfigurationPage} />
           <Route path="/launcher" component={LauncherPage} />
           <Route><Redirect to="/overview" /></Route>
         </Switch>
