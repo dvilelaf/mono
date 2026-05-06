@@ -488,10 +488,21 @@ export class TaskEngine {
     if (this.solverNetRegistry && solverType && !solverNet) {
       return `no enabled SolverNet for solverType '${solverType}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
-    if (solverType && task && getSolverNetContract(solverType)) {
-      const validation = validateTask(solverType, task);
-      if (!validation.ok) {
-        return validation.error.message;
+    if (solverType && task) {
+      // Migrated from `getSolverNetContract(solverType)` (deprecated string-
+      // keyed overload, removed in Task 30) to the `{id,version}` form.
+      // `solverType` here is the legacy routing alias (`'<id>.<version>'`)
+      // — internal dispatch keeps it as a string per Task 8 of
+      // `spec/2026-05-05-solvernet-creation-and-launch.md`.
+      const dot = solverType.lastIndexOf('.');
+      const ref = dot > 0 && dot < solverType.length - 1
+        ? { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) }
+        : undefined;
+      if (ref && getSolverNetContract(ref)) {
+        const validation = validateTask(solverType, task);
+        if (!validation.ok) {
+          return validation.error.message;
+        }
       }
     }
     if (!this.implRegistry || !solverType) return null;
