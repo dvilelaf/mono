@@ -123,10 +123,16 @@ function RoleChips({ openRoles }: { openRoles: SolverNetManifestSummary['openRol
 
 interface RegistryCardProps {
   summary: SolverNetManifestSummary;
+  /**
+   * Roles the operator has joined for this SolverNet (manifest cid keyed in
+   * config.joinedSolverNets). Empty / undefined means not joined.
+   */
+  joinedRoles?: ReadonlyArray<'solver' | 'evaluator'>;
 }
 
-function RegistryCard({ summary }: RegistryCardProps): JSX.Element {
+function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element {
   const joinHref = `/operator/join/${encodeURIComponent(summary.manifestCid)}`;
+  const isJoined = (joinedRoles ?? []).length > 0;
   return (
     <article
       data-testid="registry-card"
@@ -207,6 +213,25 @@ function RegistryCard({ summary }: RegistryCardProps): JSX.Element {
           gap: '12px',
         }}
       >
+        {isJoined && (
+          <span
+            data-testid="registry-card-joined"
+            data-manifest-cid={summary.manifestCid}
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '11px',
+              fontWeight: 500,
+              textTransform: 'uppercase',
+              letterSpacing: '0.14em',
+              color: 'var(--vow-green)',
+              border: '1px solid var(--vow-green)',
+              borderRadius: 'var(--radius-pill)',
+              padding: '4px 10px',
+            }}
+          >
+            JOINED · {(joinedRoles ?? []).join(', ')}
+          </span>
+        )}
         <Link
           href={joinHref}
           data-testid="registry-join-cta"
@@ -217,11 +242,17 @@ function RegistryCard({ summary }: RegistryCardProps): JSX.Element {
             fontSize: '13px',
             padding: '8px 16px',
             background:
-              summary.status === 'launched' ? 'var(--accent-sky)' : 'transparent',
+              summary.status === 'launched' && !isJoined
+                ? 'var(--accent-sky)'
+                : 'transparent',
             color:
-              summary.status === 'launched' ? 'var(--bg-sunken)' : 'var(--fg-dim)',
+              summary.status === 'launched' && !isJoined
+                ? 'var(--bg-sunken)'
+                : 'var(--fg-dim)',
             border: `1px solid ${
-              summary.status === 'launched' ? 'var(--accent-sky)' : 'var(--border)'
+              summary.status === 'launched' && !isJoined
+                ? 'var(--accent-sky)'
+                : 'var(--border)'
             }`,
             borderRadius: 'var(--radius-2)',
             textDecoration: 'none',
@@ -229,7 +260,7 @@ function RegistryCard({ summary }: RegistryCardProps): JSX.Element {
             pointerEvents: summary.status === 'launched' ? 'auto' : 'none',
           }}
         >
-          Join
+          {isJoined ? 'Edit' : 'Join'}
         </Link>
       </footer>
     </article>
@@ -249,6 +280,17 @@ export function RegistryCatalog({
     queryFn: () => api.solvernets.listRegistry(),
     refetchInterval: refetchIntervalMs,
   });
+  // Joined state — manifest-cid-keyed dict from operator config. Used to
+  // render a JOINED badge alongside the Join CTA so operators don't see a
+  // stale "Join" button after a successful join. Refetched on the same
+  // cadence as the registry; the SPA's join/leave mutations should also
+  // invalidate this query (post-mutation cache busts are out of scope here).
+  const joinedQuery = useQuery({
+    queryKey: ['operator', 'joined'],
+    queryFn: () => api.operator.listJoined(),
+    refetchInterval: refetchIntervalMs,
+  });
+  const joinedByCid = joinedQuery.data?.joinedSolverNets ?? {};
 
   if (isLoading) {
     return (
@@ -372,7 +414,11 @@ export function RegistryCatalog({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {summaries.map((summary) => (
-            <RegistryCard key={summary.manifestCid} summary={summary} />
+            <RegistryCard
+              key={summary.manifestCid}
+              summary={summary}
+              joinedRoles={joinedByCid[summary.manifestCid]?.roles}
+            />
           ))}
         </div>
       )}

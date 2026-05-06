@@ -48,12 +48,29 @@ interface EligibleMarket {
  * endpoint surfaces these fields verbatim. Stale-poll detection
  * (lastPollAt + 2*cadence) is computed by the endpoint, not here.
  */
+export type PredictionV1SkipReason =
+  | 'already_posted'
+  | 'blocklisted'
+  | 'no_rules_text'
+  | 'low_liquidity'
+  | 'low_volume'
+  | 'invalid_resolution_time'
+  | 'too_soon'
+  | 'too_late'
+  | 'resolution_fetch_failed'
+  | 'already_resolved'
+  | 'inactive_or_closed'
+  | 'orderbook_fetch_failed'
+  | 'orderbook_stale'
+  | 'spread_too_wide';
+
 export interface PredictionV1GeneratorState {
   lastPollAt?: string;
   lastPollSummary?: {
     evaluated: number;
     posted: number;
     skipped: number;
+    skipReasons?: Partial<Record<PredictionV1SkipReason, number>>;
   };
   lastError?: { message: string; at: string };
 }
@@ -80,20 +97,28 @@ const DEFAULTS = {
   submissionWindowMs: 6 * 60 * 60 * 1000,
 } as const;
 
+type EligibilityResult =
+  | { ok: true; market: EligibleMarket }
+  | { ok: false; reason: PredictionV1SkipReason };
+
 async function checkMarketEligibility(
   market: MarketCandidate,
   config: PredictionV1AutoConfig,
   now: number,
-): Promise<EligibleMarket | null> {
-  if (!market.rulesText.trim()) return null;
-  if (Number(market.liquidityUsd) < Number(config.minLiquidityUsd ?? DEFAULTS.minLiquidityUsd)) return null;
-  if (Number(market.volume24hUsd) < Number(config.minVolume24hUsd ?? DEFAULTS.minVolume24hUsd)) return null;
+): Promise<EligibilityResult> {
+  if (!market.rulesText.trim()) return { ok: false, reason: 'no_rules_text' };
+  if (Number(market.liquidityUsd) < Number(config.minLiquidityUsd ?? DEFAULTS.minLiquidityUsd))
+    return { ok: false, reason: 'low_liquidity' };
+  if (Number(market.volume24hUsd) < Number(config.minVolume24hUsd ?? DEFAULTS.minVolume24hUsd))
+    return { ok: false, reason: 'low_volume' };
 
   const resolutionMs = Date.parse(market.endTime);
-  if (!Number.isFinite(resolutionMs)) return null;
+  if (!Number.isFinite(resolutionMs)) return { ok: false, reason: 'invalid_resolution_time' };
   const timeToResolutionHours = (resolutionMs - now) / 3_600_000;
-  if (timeToResolutionHours < (config.minTimeToResolutionHours ?? DEFAULTS.minTimeToResolutionHours)) return null;
-  if (timeToResolutionHours > (config.maxTimeToResolutionHours ?? DEFAULTS.maxTimeToResolutionHours)) return null;
+  if (timeToResolutionHours < (config.minTimeToResolutionHours ?? DEFAULTS.minTimeToResolutionHours))
+    return { ok: false, reason: 'too_soon' };
+  if (timeToResolutionHours > (config.maxTimeToResolutionHours ?? DEFAULTS.maxTimeToResolutionHours))
+    return { ok: false, reason: 'too_late' };
 
   let resolutionStatus: string;
   try {
@@ -104,10 +129,11 @@ async function checkMarketEligibility(
     });
     resolutionStatus = resolution.status;
   } catch {
-    return null;
+    return { ok: false, reason: 'resolution_fetch_failed' };
   }
-  if (resolutionStatus !== 'unresolved') return null;
-  if (!market.active || market.closed || market.archived) return null;
+  if (resolutionStatus !== 'unresolved') return { ok: false, reason: 'already_resolved' };
+  if (!market.active || market.closed || market.archived)
+    return { ok: false, reason: 'inactive_or_closed' };
 
   let orderbook: OrderbookSnapshot;
   try {
@@ -118,13 +144,15 @@ async function checkMarketEligibility(
       yesTokenId: market.tokenIds.yes,
     });
   } catch {
-    return null;
+    return { ok: false, reason: 'orderbook_fetch_failed' };
   }
   const orderbookAgeSeconds = Math.max(0, (now - Date.parse(orderbook.sampledAt)) / 1000);
-  if (orderbookAgeSeconds > (config.maxOrderbookAgeSeconds ?? DEFAULTS.maxOrderbookAgeSeconds)) return null;
-  if (Number(orderbook.spread) > Number(config.maxYesSpread ?? DEFAULTS.maxYesSpread)) return null;
+  if (orderbookAgeSeconds > (config.maxOrderbookAgeSeconds ?? DEFAULTS.maxOrderbookAgeSeconds))
+    return { ok: false, reason: 'orderbook_stale' };
+  if (Number(orderbook.spread) > Number(config.maxYesSpread ?? DEFAULTS.maxYesSpread))
+    return { ok: false, reason: 'spread_too_wide' };
 
-  return { market, orderbook, timeToResolutionHours, orderbookAgeSeconds };
+  return { ok: true, market: { market, orderbook, timeToResolutionHours, orderbookAgeSeconds } };
 }
 
 interface BuildTaskExtras {
@@ -463,13 +491,28 @@ export function makePredictionV1GeneratorForLaunchedRecord(
 
     const eligible: EligibleMarket[] = [];
     let evaluatedCount = 0;
+    const skipReasons: Partial<Record<PredictionV1SkipReason, number>> = {};
+    const bumpSkip = (reason: PredictionV1SkipReason) => {
+      skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
+    };
     for (const market of prioritizeAllowlisted(candidates, allowlist)) {
       if (eligible.length >= pollLimit * 3) break;
       const conditionId = normalizeConditionId(market.conditionId);
-      if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
+      if (postedAtByCondition.has(conditionId)) {
+        bumpSkip('already_posted');
+        continue;
+      }
+      if (blocklist.has(conditionId)) {
+        bumpSkip('blocklisted');
+        continue;
+      }
       evaluatedCount += 1;
       const checked = await checkMarketEligibility(market, callConfig, now);
-      if (checked) eligible.push(checked);
+      if (checked.ok) {
+        eligible.push(checked.market);
+      } else {
+        bumpSkip(checked.reason);
+      }
     }
 
     eligible.sort((a, b) => {
@@ -501,7 +544,12 @@ export function makePredictionV1GeneratorForLaunchedRecord(
     const evaluated = evaluatedCount;
     const posted = tasks.length;
     const skipped = Math.max(0, evaluated - posted);
-    state.lastPollSummary = { evaluated, posted, skipped };
+    state.lastPollSummary = {
+      evaluated,
+      posted,
+      skipped,
+      skipReasons: Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
+    };
     state.lastError = undefined;
     return tasks.length > 0 ? tasks : null;
   };

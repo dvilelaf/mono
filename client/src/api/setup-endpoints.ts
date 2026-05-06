@@ -613,6 +613,35 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     return c.json({ ok: true, restartRequired: true, manifestCid: cid });
   });
 
+  // GET /v1/operator/joined — list the operator's joined SolverNets.
+  //
+  // Returns the manifest-keyed `joinedSolverNets` dict from the operator
+  // config so the SPA's catalog cards (RegistryCatalog) can render a
+  // "JOINED" indicator alongside the Join CTA. Without this the SPA cannot
+  // distinguish a joined SolverNet from one the operator hasn't joined yet
+  // and operators see a stale "Join" CTA even after a successful join.
+  // (jinn-mono follow-up to dogfood walk.)
+  app.get('/v1/operator/joined', async (c) => {
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
+    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(rawJoined)) {
+      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+    }
+    return c.json({ joinedSolverNets });
+  });
+
   // Edit the chain's RPC URL from the SPA's Configuration > Network section.
   // Chain itself is read-only here; switching chains is a separate flow.
   // Empty / null rpcUrl reverts to the chain's bundled default.

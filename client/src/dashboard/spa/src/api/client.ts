@@ -291,6 +291,20 @@ export const api = {
         `/v1/operator/join/${encodeURIComponent(manifestCid)}`,
         { method: 'DELETE' },
       ),
+    listJoined: () =>
+      jfetch<{
+        joinedSolverNets: Record<
+          string,
+          {
+            manifestCid: string;
+            name?: string;
+            roles: Array<'solver' | 'evaluator'>;
+            harness?: string;
+            model?: string;
+            plugins?: string[];
+          }
+        >;
+      }>('/v1/operator/joined'),
   },
 };
 
