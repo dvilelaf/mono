@@ -141,6 +141,41 @@ contract MockTaskMarketplace {
     }
 }
 
+contract MockTaskPolicyHook {
+    struct Call {
+        address operator;
+        uint256 taskId;
+        bytes32 manifestDigest;
+        uint8 role;
+    }
+
+    bool public allow = true;
+    Call[] private _calls;
+
+    function setAllow(bool value) external {
+        allow = value;
+    }
+
+    function canClaim(
+        address operator,
+        uint256 taskId,
+        bytes32 manifestDigest,
+        uint8 role
+    ) external returns (bool) {
+        _calls.push(Call({operator: operator, taskId: taskId, manifestDigest: manifestDigest, role: role}));
+        return allow;
+    }
+
+    function callsCount() external view returns (uint256) {
+        return _calls.length;
+    }
+
+    function callAt(uint256 i) external view returns (address operator, uint256 taskId, bytes32 manifestDigest, uint8 role) {
+        Call memory c = _calls[i];
+        return (c.operator, c.taskId, c.manifestDigest, c.role);
+    }
+}
+
 contract MockTaskActivityChecker {
     mapping(address => bytes32) public lastSolutionDigest;
     mapping(address => bytes32) public lastVerdictDigest;

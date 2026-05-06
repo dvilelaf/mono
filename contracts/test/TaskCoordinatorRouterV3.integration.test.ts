@@ -25,7 +25,8 @@ describe("TaskCoordinator + JinnRouterV3 integration", function () {
       evaluationPolicy: {
         requiredVerdicts: 1,
         passThreshold: 1,
-        evaluationDeadline: now + 2400,
+        evaluationDuration: 2400,
+        externalReadyAt: 0,
         maxVerdictsPerEvaluator: 2,
         disallowSolverSelfEvaluation: true,
       },

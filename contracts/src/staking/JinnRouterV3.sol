@@ -329,9 +329,16 @@ contract JinnRouterV3 {
             payment.solutionBudgetRefunded = true;
         }
 
-        bool verdictRefundable = block.timestamp > record.policy.evaluationPolicy.evaluationDeadline;
-        if (!verdictRefundable && record.submittedCount > 0) {
-            verdictRefundable = taskCoordinator.allSubmittedAttemptsFinalized(taskId);
+        bool verdictRefundable;
+        if (record.submittedCount == 0) {
+            // No solutions submitted: the verdict budget can be released
+            // once the submission window closes — no attempt can be made
+            // that would require evaluation.
+            verdictRefundable = block.timestamp > record.policy.submissionDeadline;
+        } else if (taskCoordinator.allSubmittedAttemptsFinalized(taskId)) {
+            verdictRefundable = true;
+        } else {
+            verdictRefundable = taskCoordinator.allEvaluationWindowsClosed(taskId);
         }
         if (!payment.verdictBudgetRefunded && payment.verdictBudgetRemaining > 0 && verdictRefundable) {
             verdictAmount = payment.verdictBudgetRemaining;

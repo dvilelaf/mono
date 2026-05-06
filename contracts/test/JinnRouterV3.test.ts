@@ -23,7 +23,8 @@ describe("JinnRouterV3", function () {
       evaluationPolicy: {
         requiredVerdicts,
         passThreshold: 1,
-        evaluationDeadline: now + 2400,
+        evaluationDuration: 2400,
+        externalReadyAt: 0,
         maxVerdictsPerEvaluator: 1,
         disallowSolverSelfEvaluation: true,
       },

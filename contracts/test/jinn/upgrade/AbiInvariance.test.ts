@@ -1,18 +1,22 @@
 /**
- * abi-invariance — manifestDigest rename was cosmetic at the wire level.
+ * abi-invariance — pinned canonical signatures for TaskCoordinator + JinnRouterV3.
  *
- * Background: commit 217cb804 renamed `solverTypeDigest` to `manifestDigest`
- * across TaskCoordinator and JinnRouterV3. Function selectors and event
- * topic hashes are computed from parameter *types* (not names), so the
- * rename should not have changed any selector or topic. This test enforces
- * that invariant by hardcoding the pre-rename canonical signatures
- * (sourced from `git show 217cb804^:contracts/src/...`) and asserting the
- * post-rename ABI produces identical hashes.
+ * Background: this file enforces stable selectors / topic hashes for the
+ * subgraph-indexed surface. Two cutovers have happened:
+ *   - 217cb804: cosmetic rename solverTypeDigest -> manifestDigest. Names
+ *     are not part of selectors/topics, so signatures were unchanged.
+ *   - Stage 1 (2026-05): EvaluationPolicy refactor — replaced
+ *     `evaluationDeadline (uint64)` with
+ *     `evaluationDuration (uint64) + externalReadyAt (uint64)`. The
+ *     TaskPolicy tuple grew by one uint64 in the nested EvaluationPolicy,
+ *     and TaskCreated emits one extra trailing uint64. This is a planned
+ *     breaking ABI change; subgraph schema + SDK encoders updated in the
+ *     same series.
  *
- * If a test in this file fails, the rename accidentally changed a TYPE
- * (or the signature changed for some other reason). Either revert the
- * type change or treat it as a breaking ABI change and update consumers
- * (subgraph schema, SDK encoders, off-chain indexers) in the same PR.
+ * The pinned signatures below reflect the *current* canonical wire
+ * format. If a test in this file fails, the type changed unintentionally
+ * — either revert the change or update the pin in the same PR with the
+ * same propagation step.
  *
  * Not gated; runs on every `yarn test`.
  */
@@ -21,40 +25,29 @@ import { expect } from 'chai';
 import { Interface, id, keccak256, toUtf8Bytes } from 'ethers';
 import { artifacts } from 'hardhat';
 
-// Canonical pre-rename signatures from git@217cb804^:
-//   contracts/src/tasks/TaskCoordinator.sol
-//   contracts/src/staking/JinnRouterV3.sol
-//
-// Param names are deliberately omitted — the EVM does not see them, only
-// types contribute to the selector / topic hash. The TaskPolicy tuple
-// expands to (uint64,uint64,uint64,uint32,uint16,uint16,address,
-//             (uint16,uint16,uint64,uint16,bool))
-// where the trailing nested tuple is EvaluationPolicy.
-const PRE_RENAME = {
-  // TaskCoordinator.createTask(address creator, bytes32 taskCidDigest,
-  //   bytes32 solverTypeDigest, TaskPolicy calldata policy)
+// Canonical signatures (post-Stage-1). The TaskPolicy tuple expands to
+//   (uint64,uint64,uint64,uint32,uint16,uint16,address,
+//     (uint16,uint16,uint64,uint64,uint16,bool))
+// where the trailing nested tuple is EvaluationPolicy with its new shape:
+//   (requiredVerdicts, passThreshold, evaluationDuration, externalReadyAt,
+//    maxVerdictsPerEvaluator, disallowSolverSelfEvaluation).
+const CANONICAL = {
+  // TaskCoordinator.createTask(address, bytes32, bytes32, TaskPolicy)
   taskCoordinatorCreateTask:
-    'createTask(address,bytes32,bytes32,(uint64,uint64,uint64,uint32,uint16,uint16,address,(uint16,uint16,uint64,uint16,bool)))',
+    'createTask(address,bytes32,bytes32,(uint64,uint64,uint64,uint32,uint16,uint16,address,(uint16,uint16,uint64,uint64,uint16,bool)))',
 
-  // JinnRouterV3.createTask(bytes32 taskCidDigest, bytes32 solverTypeDigest,
-  //   TaskCoordinator.TaskPolicy calldata policy,
-  //   uint256 solutionMaxDeliveryRate, uint256 verdictMaxDeliveryRate,
-  //   uint256 responseTimeout)
+  // JinnRouterV3.createTask(bytes32, bytes32, TaskPolicy,
+  //   uint256, uint256, uint256)
   routerV3CreateTask:
-    'createTask(bytes32,bytes32,(uint64,uint64,uint64,uint32,uint16,uint16,address,(uint16,uint16,uint64,uint16,bool)),uint256,uint256,uint256)',
+    'createTask(bytes32,bytes32,(uint64,uint64,uint64,uint32,uint16,uint16,address,(uint16,uint16,uint64,uint64,uint16,bool)),uint256,uint256,uint256)',
 
-  // TaskCoordinator.TaskCreated(uint256 indexed taskId, address indexed creator,
-  //   bytes32 indexed solverTypeDigest, bytes32 taskCidDigest,
-  //   uint16 maxClaims, uint16 requiredVerdicts,
-  //   uint64 claimWindowStart, uint64 claimWindowEnd,
-  //   uint64 submissionDeadline, uint64 evaluationDeadline)
+  // TaskCoordinator.TaskCreated(uint256 indexed, address indexed,
+  //   bytes32 indexed, bytes32, uint16, uint16, uint64, uint64, uint64,
+  //   uint64 (evaluationDuration), uint64 (externalReadyAt))
   taskCoordinatorTaskCreated:
-    'TaskCreated(uint256,address,bytes32,bytes32,uint16,uint16,uint64,uint64,uint64,uint64)',
+    'TaskCreated(uint256,address,bytes32,bytes32,uint16,uint16,uint64,uint64,uint64,uint64,uint64)',
 
-  // JinnRouterV3.TaskCreated(address indexed creator, uint256 indexed taskId,
-  //   bytes32 indexed solverTypeDigest, bytes32 taskCidDigest,
-  //   uint16 maxClaims, uint16 requiredVerdicts,
-  //   uint256 solutionBudget, uint256 verdictBudget)
+  // JinnRouterV3.TaskCreated unchanged across both cutovers.
   routerV3TaskCreated:
     'TaskCreated(address,uint256,bytes32,bytes32,uint16,uint16,uint256,uint256)',
 };
@@ -80,7 +73,7 @@ const TASK_COORDINATOR_EVENTS: Array<readonly [string, string]> = [
   ['Initialized',                  'Initialized(address,address)'],
   ['OwnershipTransferred',         'OwnershipTransferred(address,address)'],
   ['AuthorizedRouterUpdated',      'AuthorizedRouterUpdated(address,address)'],
-  ['TaskCreated',                  PRE_RENAME.taskCoordinatorTaskCreated],
+  ['TaskCreated',                  CANONICAL.taskCoordinatorTaskCreated],
   ['TaskClaimed',                  'TaskClaimed(uint256,uint32,address,uint64)'],
   ['TaskAttemptRequestRegistered', 'TaskAttemptRequestRegistered(uint256,uint32,bytes32)'],
   ['TaskSubmitted',                'TaskSubmitted(uint256,uint32,address,bytes32,bytes32,uint256)'],
@@ -95,7 +88,7 @@ const TASK_COORDINATOR_EVENTS: Array<readonly [string, string]> = [
 const ROUTER_V3_EVENTS: Array<readonly [string, string]> = [
   ['Initialized',                  'Initialized(address,address,address,address)'],
   ['OwnershipTransferred',         'OwnershipTransferred(address,address)'],
-  ['TaskCreated',                  PRE_RENAME.routerV3TaskCreated],
+  ['TaskCreated',                  CANONICAL.routerV3TaskCreated],
   ['TaskAttemptCreated',           'TaskAttemptCreated(uint256,uint32,bytes32,address,address,uint256)'],
   ['EvaluationAttemptCreated',     'EvaluationAttemptCreated(uint256,uint32,uint32,bytes32,address,address,uint256)'],
   ['SolutionDeliveryClaimed',      'SolutionDeliveryClaimed(address,bytes32,uint256,uint32)'],
@@ -103,7 +96,7 @@ const ROUTER_V3_EVENTS: Array<readonly [string, string]> = [
   ['TaskBudgetRefunded',           'TaskBudgetRefunded(uint256,address,uint256,uint256)'],
 ];
 
-describe('abi-invariance — manifestDigest rename was cosmetic', function () {
+describe('abi-invariance — pinned canonical signatures', function () {
   // Loading artifacts from the hardhat cache is cheap, but we keep a
   // generous timeout in case the suite runs cold.
   this.timeout(30_000);
@@ -116,14 +109,14 @@ describe('abi-invariance — manifestDigest rename was cosmetic', function () {
     });
 
     it('createTask selector unchanged', () => {
-      const expected = selectorOf(PRE_RENAME.taskCoordinatorCreateTask);
+      const expected = selectorOf(CANONICAL.taskCoordinatorCreateTask);
       const fn = iface.getFunction('createTask');
-      if (!fn) throw new Error('createTask not found in post-rename TaskCoordinator ABI');
+      if (!fn) throw new Error('createTask not found in post-cutover TaskCoordinator ABI');
       expect(fn.selector).to.equal(
         expected,
-        `selector drift: post-rename TaskCoordinator.createTask = ${fn.selector}, ` +
-          `pre-rename signature ${PRE_RENAME.taskCoordinatorCreateTask} = ${expected}. ` +
-          `The manifestDigest rename should be cosmetic — a selector change means a TYPE changed.`,
+        `selector drift: post-cutover TaskCoordinator.createTask = ${fn.selector}, ` +
+          `canonical signature ${CANONICAL.taskCoordinatorCreateTask} = ${expected}. ` +
+          `The EvaluationPolicy refactor changed types intentionally; further drift means another type changed.`,
       );
     });
 
@@ -131,11 +124,11 @@ describe('abi-invariance — manifestDigest rename was cosmetic', function () {
       it(`${eventName} topic0 unchanged`, () => {
         const expected = id(preRenameSig);
         const ev = iface.getEvent(eventName);
-        if (!ev) throw new Error(`${eventName} not found in post-rename TaskCoordinator ABI`);
+        if (!ev) throw new Error(`${eventName} not found in post-cutover TaskCoordinator ABI`);
         expect(ev.topicHash).to.equal(
           expected,
-          `topic0 drift: post-rename TaskCoordinator.${eventName} = ${ev.topicHash}, ` +
-            `pre-rename signature ${preRenameSig} = ${expected}. ` +
+          `topic0 drift: post-cutover TaskCoordinator.${eventName} = ${ev.topicHash}, ` +
+            `canonical signature ${preRenameSig} = ${expected}. ` +
             `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
         );
       });
@@ -150,13 +143,13 @@ describe('abi-invariance — manifestDigest rename was cosmetic', function () {
     });
 
     it('createTask selector unchanged', () => {
-      const expected = selectorOf(PRE_RENAME.routerV3CreateTask);
+      const expected = selectorOf(CANONICAL.routerV3CreateTask);
       const fn = iface.getFunction('createTask');
-      if (!fn) throw new Error('createTask not found in post-rename JinnRouterV3 ABI');
+      if (!fn) throw new Error('createTask not found in post-cutover JinnRouterV3 ABI');
       expect(fn.selector).to.equal(
         expected,
-        `selector drift: post-rename JinnRouterV3.createTask = ${fn.selector}, ` +
-          `pre-rename signature ${PRE_RENAME.routerV3CreateTask} = ${expected}. ` +
+        `selector drift: post-cutover JinnRouterV3.createTask = ${fn.selector}, ` +
+          `canonical signature ${CANONICAL.routerV3CreateTask} = ${expected}. ` +
           `Subgraph mappings + SDK encoders depend on selector stability.`,
       );
     });
@@ -165,11 +158,11 @@ describe('abi-invariance — manifestDigest rename was cosmetic', function () {
       it(`${eventName} topic0 unchanged`, () => {
         const expected = id(preRenameSig);
         const ev = iface.getEvent(eventName);
-        if (!ev) throw new Error(`${eventName} not found in post-rename JinnRouterV3 ABI`);
+        if (!ev) throw new Error(`${eventName} not found in post-cutover JinnRouterV3 ABI`);
         expect(ev.topicHash).to.equal(
           expected,
-          `topic0 drift: post-rename JinnRouterV3.${eventName} = ${ev.topicHash}, ` +
-            `pre-rename signature ${preRenameSig} = ${expected}. ` +
+          `topic0 drift: post-cutover JinnRouterV3.${eventName} = ${ev.topicHash}, ` +
+            `canonical signature ${preRenameSig} = ${expected}. ` +
             `Subgraph eventHandlers key off topic0 — drift unwires the indexer.`,
         );
       });

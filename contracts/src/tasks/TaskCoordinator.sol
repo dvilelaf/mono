@@ -2,7 +2,13 @@
 pragma solidity ^0.8.25;
 
 interface ITaskPolicyHook {
-    function canClaim(address operator, uint256 taskId, bytes32 manifestDigest) external view returns (bool);
+    /// @param role 0 = Solver (claimTask), 1 = Evaluator (claimEvaluation)
+    function canClaim(
+        address operator,
+        uint256 taskId,
+        bytes32 manifestDigest,
+        uint8 role
+    ) external returns (bool);
 }
 
 error TCZeroAddress();
@@ -18,6 +24,7 @@ error TCTaskNotOpen(uint256 taskId);
 error TCClaimWindowClosed(uint256 taskId);
 error TCSubmissionDeadlinePassed(uint256 taskId);
 error TCEvaluationDeadlinePassed(uint256 taskId);
+error TCEvaluationNotYetOpen(uint256 taskId, uint32 attemptIndex);
 error TCMaxClaimsReached(uint256 taskId);
 error TCOperatorClaimLimitReached(uint256 taskId, address operator);
 error TCPolicyHookRejected(uint256 taskId, address operator);
@@ -87,7 +94,8 @@ contract TaskCoordinator {
     struct EvaluationPolicy {
         uint16 requiredVerdicts;
         uint16 passThreshold;
-        uint64 evaluationDeadline;
+        uint64 evaluationDuration;
+        uint64 externalReadyAt;
         uint16 maxVerdictsPerEvaluator;
         bool disallowSolverSelfEvaluation;
     }
@@ -127,7 +135,16 @@ contract TaskCoordinator {
         uint64 submittedAt;
         AttemptStatus status;
         AttemptFinalization finalization;
+        // Monotonic counter; doubles as the next verdictIndex. Each
+        // claimEvaluation assigns verdictIndex = verdictClaimCount and
+        // increments. Unresolved verdicts reopen the slot via
+        // unresolvedVerdictCount (see recordVerdict).
         uint16 verdictClaimCount;
+        // How many delivered verdicts came back as Unresolved. The
+        // gate against requiredVerdicts uses
+        // (verdictClaimCount - unresolvedVerdictCount), so an Unresolved
+        // verdict effectively returns the slot to the pool.
+        uint16 unresolvedVerdictCount;
         uint16 validVerdictCount;
         uint16 passVerdictCount;
     }
@@ -185,7 +202,8 @@ contract TaskCoordinator {
         uint64 claimWindowStart,
         uint64 claimWindowEnd,
         uint64 submissionDeadline,
-        uint64 evaluationDeadline
+        uint64 evaluationDuration,
+        uint64 externalReadyAt
     );
     event TaskClaimed(
         uint256 indexed taskId,
@@ -309,7 +327,8 @@ contract TaskCoordinator {
             normalizedPolicy.claimWindowStart,
             normalizedPolicy.claimWindowEnd,
             normalizedPolicy.submissionDeadline,
-            normalizedPolicy.evaluationPolicy.evaluationDeadline
+            normalizedPolicy.evaluationPolicy.evaluationDuration,
+            normalizedPolicy.evaluationPolicy.externalReadyAt
         );
     }
 
@@ -332,7 +351,7 @@ contract TaskCoordinator {
             revert TCOperatorClaimLimitReached(taskId, operator);
         }
         if (policy.policyHook != address(0)) {
-            if (!ITaskPolicyHook(policy.policyHook).canClaim(operator, taskId, record.manifestDigest)) {
+            if (!ITaskPolicyHook(policy.policyHook).canClaim(operator, taskId, record.manifestDigest, 0)) {
                 revert TCPolicyHookRejected(taskId, operator);
             }
         }
@@ -357,6 +376,7 @@ contract TaskCoordinator {
             status: AttemptStatus.Claimed,
             finalization: AttemptFinalization.None,
             verdictClaimCount: 0,
+            unresolvedVerdictCount: 0,
             validVerdictCount: 0,
             passVerdictCount: 0
         });
@@ -428,18 +448,33 @@ contract TaskCoordinator {
         }
 
         EvaluationPolicy memory evalPolicy = task.policy.evaluationPolicy;
-        if (block.timestamp > evalPolicy.evaluationDeadline) revert TCEvaluationDeadlinePassed(taskId);
+        uint64 opensAt = attempt.submittedAt > evalPolicy.externalReadyAt
+            ? attempt.submittedAt
+            : evalPolicy.externalReadyAt;
+        uint64 closesAt = opensAt + evalPolicy.evaluationDuration;
+        if (block.timestamp < opensAt) revert TCEvaluationNotYetOpen(taskId, attemptIndex);
+        if (block.timestamp > closesAt) revert TCEvaluationDeadlinePassed(taskId);
         if (evalPolicy.disallowSolverSelfEvaluation && evaluator == attempt.operator) {
             revert TCSolverSelfEvaluation(taskId, attemptIndex, evaluator);
         }
-        if (attempt.verdictClaimCount >= evalPolicy.requiredVerdicts) revert TCMaxVerdictsReached(taskId, attemptIndex);
+        // Active claims = monotonic claimCount minus those that came back Unresolved.
+        // Unresolved verdicts return their slot to the pool, so the gate against
+        // requiredVerdicts only counts claims that could still produce a valid verdict.
+        if (attempt.verdictClaimCount - attempt.unresolvedVerdictCount >= evalPolicy.requiredVerdicts) {
+            revert TCMaxVerdictsReached(taskId, attemptIndex);
+        }
         if (verdictClaimsByAttemptByEvaluator[taskId][attemptIndex][evaluator] >= evalPolicy.maxVerdictsPerEvaluator) {
             revert TCEvaluatorClaimLimitReached(taskId, attemptIndex, evaluator);
+        }
+        if (task.policy.policyHook != address(0)) {
+            if (!ITaskPolicyHook(task.policy.policyHook).canClaim(evaluator, taskId, task.manifestDigest, 1)) {
+                revert TCPolicyHookRejected(taskId, evaluator);
+            }
         }
 
         verdictIndex = attempt.verdictClaimCount;
         uint256 expires = block.timestamp + task.policy.claimLeaseTtlSeconds;
-        if (expires > evalPolicy.evaluationDeadline) expires = evalPolicy.evaluationDeadline;
+        if (expires > closesAt) expires = closesAt;
         claimExpiresAt = uint64(expires);
 
         attempt.verdictClaimCount++;
@@ -523,7 +558,13 @@ contract TaskCoordinator {
         }
 
         TaskRecord storage task = _tasks[ref.taskId];
-        if (block.timestamp > task.policy.evaluationPolicy.evaluationDeadline) {
+        AttemptRecord storage attempt = _attempts[ref.taskId][ref.attemptIndex];
+        EvaluationPolicy memory evalPolicy = task.policy.evaluationPolicy;
+        uint64 opensAt = attempt.submittedAt > evalPolicy.externalReadyAt
+            ? attempt.submittedAt
+            : evalPolicy.externalReadyAt;
+        uint64 closesAt = opensAt + evalPolicy.evaluationDuration;
+        if (block.timestamp > closesAt) {
             revert TCEvaluationDeadlinePassed(ref.taskId);
         }
         if (block.timestamp > verdict.claimExpiresAt) {
@@ -536,7 +577,26 @@ contract TaskCoordinator {
         verdict.deliveredAt = uint64(block.timestamp);
         verdict.status = VerdictStatus.Delivered;
 
-        AttemptRecord storage attempt = _attempts[ref.taskId][ref.attemptIndex];
+        if (verdictCode == VerdictCode.Unresolved) {
+            // Unresolved verdicts don't burn the slot from the gate — the
+            // evaluator honestly reported the precondition isn't met yet.
+            // verdictClaimCount stays monotonic (verdictIndex pointer is
+            // preserved); unresolvedVerdictCount tracks how many slots
+            // returned to the pool so the gate computation
+            // (verdictClaimCount - unresolvedVerdictCount) opens room for
+            // a fresh claim.
+            attempt.unresolvedVerdictCount++;
+            emit VerdictDelivered(
+                ref.taskId,
+                ref.attemptIndex,
+                ref.verdictIndex,
+                evaluator,
+                verdictCidDigest,
+                verdictCodeRaw
+            );
+            return (false, false, false, address(0), 0);
+        }
+
         attempt.validVerdictCount++;
         if (verdictCode == VerdictCode.Pass) {
             attempt.passVerdictCount++;
@@ -551,7 +611,6 @@ contract TaskCoordinator {
             verdictCodeRaw
         );
 
-        EvaluationPolicy memory evalPolicy = task.policy.evaluationPolicy;
         if (attempt.validVerdictCount == evalPolicy.requiredVerdicts) {
             attemptFinalized = true;
             attemptPassed = attempt.passVerdictCount >= evalPolicy.passThreshold;
@@ -627,28 +686,68 @@ contract TaskCoordinator {
         return task.submittedCount > 0 && task.finalizedAttemptCount == task.submittedCount;
     }
 
+    function evaluationOpensAt(uint256 taskId, uint32 attemptIndex) external view returns (uint64) {
+        AttemptRecord storage attempt = _attempts[taskId][attemptIndex];
+        if (attempt.status == AttemptStatus.None) revert TCAttemptNotFound(taskId, attemptIndex);
+        TaskRecord storage task = _tasks[taskId];
+        uint64 ext = task.policy.evaluationPolicy.externalReadyAt;
+        return attempt.submittedAt > ext ? attempt.submittedAt : ext;
+    }
+
+    function evaluationClosesAt(uint256 taskId, uint32 attemptIndex) external view returns (uint64) {
+        AttemptRecord storage attempt = _attempts[taskId][attemptIndex];
+        if (attempt.status == AttemptStatus.None) revert TCAttemptNotFound(taskId, attemptIndex);
+        TaskRecord storage task = _tasks[taskId];
+        EvaluationPolicy storage evalPolicy = task.policy.evaluationPolicy;
+        uint64 opensAt = attempt.submittedAt > evalPolicy.externalReadyAt
+            ? attempt.submittedAt
+            : evalPolicy.externalReadyAt;
+        return opensAt + evalPolicy.evaluationDuration;
+    }
+
+    /// @notice True iff every submitted attempt's evaluation window has
+    ///         closed (block.timestamp > closesAt for each).
+    /// @dev    Returns false if there are no submitted attempts; the
+    ///         router's refund path treats that case separately.
+    function allEvaluationWindowsClosed(uint256 taskId) external view returns (bool) {
+        TaskRecord storage task = _tasks[taskId];
+        if (task.status == TaskStatus.None) revert TCTaskNotFound(taskId);
+        if (task.submittedCount == 0) return false;
+        EvaluationPolicy storage evalPolicy = task.policy.evaluationPolicy;
+        uint64 ext = evalPolicy.externalReadyAt;
+        uint64 dur = evalPolicy.evaluationDuration;
+        for (uint32 i = 0; i < task.claimCount; i++) {
+            AttemptRecord storage a = _attempts[taskId][i];
+            if (a.status != AttemptStatus.Submitted) continue;
+            uint64 opensAt = a.submittedAt > ext ? a.submittedAt : ext;
+            uint64 closesAt = opensAt + dur;
+            if (block.timestamp <= closesAt) return false;
+        }
+        return true;
+    }
+
     function _normalizePolicy(TaskPolicy calldata policy) internal pure returns (TaskPolicy memory normalized) {
         normalized = policy;
         EvaluationPolicy memory evalPolicy = policy.evaluationPolicy;
         bool evalPolicyZero = evalPolicy.requiredVerdicts == 0
             && evalPolicy.passThreshold == 0
-            && evalPolicy.evaluationDeadline == 0
+            && evalPolicy.evaluationDuration == 0
+            && evalPolicy.externalReadyAt == 0
             && evalPolicy.maxVerdictsPerEvaluator == 0
             && !evalPolicy.disallowSolverSelfEvaluation;
 
-        if (normalized.evaluationPolicy.requiredVerdicts == 0) {
-            normalized.evaluationPolicy.requiredVerdicts = 1;
-        }
-        if (normalized.evaluationPolicy.passThreshold == 0) {
-            normalized.evaluationPolicy.passThreshold = 1;
-        }
-        if (normalized.evaluationPolicy.evaluationDeadline == 0) {
-            normalized.evaluationPolicy.evaluationDeadline = normalized.submissionDeadline;
-        }
-        if (normalized.evaluationPolicy.maxVerdictsPerEvaluator == 0) {
-            normalized.evaluationPolicy.maxVerdictsPerEvaluator = 1;
-        }
         if (evalPolicyZero) {
+            // Heuristic: caller didn't supply any evaluation policy. Fill
+            // with conservative defaults so a Task with a no-op eval block
+            // still validates. Partial fills (some fields set, others 0)
+            // are rejected by _validatePolicy below — callers must opt
+            // into the heuristic by zeroing every field, or supply a
+            // complete policy.
+            normalized.evaluationPolicy.requiredVerdicts = 1;
+            normalized.evaluationPolicy.passThreshold = 1;
+            normalized.evaluationPolicy.evaluationDuration =
+                normalized.submissionDeadline - normalized.claimWindowStart;
+            normalized.evaluationPolicy.maxVerdictsPerEvaluator = 1;
             normalized.evaluationPolicy.disallowSolverSelfEvaluation = true;
         }
     }
@@ -671,10 +770,10 @@ contract TaskCoordinator {
             evalPolicy.requiredVerdicts == 0 ||
             evalPolicy.passThreshold == 0 ||
             evalPolicy.passThreshold > evalPolicy.requiredVerdicts ||
-            evalPolicy.maxVerdictsPerEvaluator == 0
+            evalPolicy.maxVerdictsPerEvaluator == 0 ||
+            evalPolicy.evaluationDuration == 0
         ) {
             revert TCInvalidPolicy();
         }
-        if (evalPolicy.evaluationDeadline < policy.submissionDeadline) revert TCInvalidWindow();
     }
 }
