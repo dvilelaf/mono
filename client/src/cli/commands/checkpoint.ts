@@ -83,3 +83,27 @@ function canonicalize(obj: unknown): string {
   const keys = Object.keys(obj as Record<string, unknown>).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalize((obj as any)[k])}`).join(',')}}`;
 }
+
+export interface CheckpointInstallDeps {
+  fetchFromIpfs(cid: string): Promise<string>;
+  verifySignature(args: { manifest: HarnessCheckpointManifest; signature: string }): Promise<boolean>;
+  fetchImplStateDirToLocal(implStateDirCid: string, targetDir: string): Promise<string>;
+  stageAsHarnessState(stagedDir: string, implName: string): Promise<void>;
+}
+
+export async function checkpointInstallCommand(args: {
+  cid: string;
+  deps: CheckpointInstallDeps;
+  targetDir?: string;
+}): Promise<{ installed: true; codeDigest: string; implName: string }> {
+  const manifestRaw = await args.deps.fetchFromIpfs(args.cid);
+  const manifest = HarnessCheckpointManifestSchema.parse(JSON.parse(manifestRaw));
+  const ok = await args.deps.verifySignature({ manifest, signature: manifest.signature });
+  if (!ok) throw new Error(`Checkpoint ${args.cid}: invalid signature`);
+
+  const stagingDir = args.targetDir ?? `/tmp/checkpoint-${args.cid}`;
+  await args.deps.fetchImplStateDirToLocal(manifest.implStateDirCid, stagingDir);
+  await args.deps.stageAsHarnessState(stagingDir, manifest.harnessPackage.implName);
+
+  return { installed: true, codeDigest: manifest.codeDigest, implName: manifest.harnessPackage.implName };
+}
