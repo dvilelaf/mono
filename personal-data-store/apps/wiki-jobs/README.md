@@ -24,6 +24,23 @@ curl -X POST http://localhost:3100/run/extract
 curl http://localhost:3100/status
 ```
 
+## Eval harness
+
+Validates the wiki against fixtures in `wiki/eval-fixtures/` and posts
+regressions to the PDS watchdog as `wiki_eval` alerts. Catches silent rot
+when prompts drift or schemas change.
+
+```bash
+npm run run:eval                # local validation, exits non-zero on failure
+npm run run:eval -- --report    # also POST regressions to PDS watchdog
+```
+
+HTTP: `POST /eval` (optional `?report=true`). Cron: `WIKI_EVAL_CRON`
+(default Sunday 09:00) runs with `--report` automatically. Disable with
+`WIKI_EVAL_ENABLED=false`.
+
+See `wiki/eval-fixtures/README.md` for fixture format and rationale.
+
 ## PM2
 ```bash
 pm2 start apps/wiki-jobs/ecosystem.config.cjs

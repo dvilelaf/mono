@@ -1,0 +1,27 @@
+{
+  "name": "synthesise-baseline",
+  "job": "synthesise",
+  "description": "Structural invariants the synthesise job must satisfy. Updated when the wiki layout intentionally changes.",
+  "expectations": {
+    "goalPages": [
+      "data-automation.md",
+      "finance-monthly-spend.md",
+      "finance-yield-170k.md",
+      "health-body-composition.md",
+      "health-cardiovascular.md"
+    ],
+    "minBlockersPerGoal": 1,
+    "requireBlockerLinksResolve": true,
+    "requireTopBlockersSection": true,
+    "readMe": {
+      "required": true,
+      "maxAgeDays": 14,
+      "maxWords": 500,
+      "requiredSectionPatterns": ["top.{0,5}3.{0,10}blockers"]
+    },
+    "blockerPage": {
+      "requireBlocksGoalLink": true,
+      "requireSmallestNextAction": true
+    }
+  }
+}

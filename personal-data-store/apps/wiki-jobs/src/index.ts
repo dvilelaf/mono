@@ -2,9 +2,12 @@ import express from "express";
 import cron from "node-cron";
 import { config, type JobName } from "./config.js";
 import { runJob, isRunning } from "./runner.js";
+import { runEval } from "./eval/runner.js";
 
 const app = express();
 app.use(express.json());
+
+let evalRunning = false;
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
@@ -12,12 +15,30 @@ app.get("/status", (_req, res) => {
   res.json({
     schedules: config.schedules,
     enabled: config.enabled,
+    evalEnabled: config.evalEnabled,
+    evalRunning,
     running: {
       extract: isRunning("extract"),
       analyse: isRunning("analyse"),
       synthesise: isRunning("synthesise"),
     },
   });
+});
+
+app.post("/eval", async (req, res) => {
+  if (evalRunning) {
+    return res.status(409).json({ error: "eval already running" });
+  }
+  const report = req.body?.report === true || req.query.report === "true";
+  evalRunning = true;
+  try {
+    const r = await runEval({ report });
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  } finally {
+    evalRunning = false;
+  }
 });
 
 app.post("/run/:job", async (req, res) => {
@@ -61,6 +82,28 @@ if (config.enabled) {
   schedule("synthesise", config.schedules.synthesise);
 } else {
   console.log("[wiki-jobs] cron disabled via WIKI_JOBS_CRON_ENABLED=false");
+}
+
+if (config.evalEnabled && cron.validate(config.schedules.eval)) {
+  cron.schedule(config.schedules.eval, async () => {
+    if (evalRunning) {
+      console.log("[wiki-jobs] skip eval — already running");
+      return;
+    }
+    console.log("[wiki-jobs] cron fire: eval");
+    evalRunning = true;
+    try {
+      const r = await runEval({ report: true });
+      console.log(
+        `[wiki-jobs] eval done passed=${r.totalPassed} failed=${r.totalFailed} reported=${r.report?.posted ?? 0}`,
+      );
+    } catch (err) {
+      console.error("[wiki-jobs] eval failed:", err);
+    } finally {
+      evalRunning = false;
+    }
+  });
+  console.log(`[wiki-jobs] scheduled eval: ${config.schedules.eval}`);
 }
 
 app.listen(config.port, () => {
