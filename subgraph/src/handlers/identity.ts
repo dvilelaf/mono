@@ -23,6 +23,7 @@ import {
 } from "../utils";
 
 import { updateHarnessRollup } from "./harness-rollup";
+import { detectFreezeViolation } from "./freeze-violation-detector";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Registered(uint256 indexed agentId, string agentURI, address indexed owner)
@@ -170,6 +171,14 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
   // Called for every Execution save, but the handler short-circuits early for
   // ENVELOPE kind and for any execution where implName/codeDigest are absent
   // (all v1 payloads). EVALUATION kind with payload v2 will populate rollups.
+  // FreezeViolation detection:
+  // Called for ENVELOPE kind only (envelopes carry the mode + codeDigest
+  // fields that drive the detector). Short-circuits early for all v1 payloads
+  // because codeDigest is null until payload v2 ships. No-op until then.
+  if (exec.kind == "ENVELOPE") {
+    detectFreezeViolation(exec, event.block.timestamp);
+  }
+
   if (exec.kind == "EVALUATION") {
     updateHarnessRollup(exec, event.block.timestamp, op.id);
   }

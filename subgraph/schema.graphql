@@ -409,3 +409,72 @@ type LanguageRollup @entity(immutable: false) {
   scoreSum: BigInt!
   meanResolved: BigDecimal!
 }
+
+# ── FreezeViolation (cross-envelope codeDigest consistency detector) ──────────
+
+"""
+Mutable state entity tracking the last-seen codeDigest for a signing key
+while it is in frozen mode. Used by the cross-envelope consistency detector
+to compare consecutive frozen-mode envelopes from the same operator.
+
+STUB NOTE (2026-05-07): This entity is always null for now because
+Execution.codeDigest is never populated until payload v2 ships. The
+freeze-violation detector reads this entity but its early-return guard
+(codeDigest == null) means SigningKeyFrozenState rows are never written yet.
+Activates automatically when payload v2 lands and populates codeDigest.
+
+Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.2
+DR: log/decisions/2026-05-06-trust-stack-composition.md (layer 2)
+"""
+type SigningKeyFrozenState @entity(immutable: false) {
+  "Operator.id (agentId as decimal string) — one row per signing key"
+  id: ID!
+
+  "The codeDigest seen on the most recent frozen-mode envelope from this key"
+  lastFrozenCodeDigest: String!
+
+  "Block timestamp of the envelope that set lastFrozenCodeDigest"
+  lastFrozenAt: BigInt!
+
+  "Execution.id of the envelope that set lastFrozenCodeDigest"
+  lastFrozenExecutionId: String!
+}
+
+"""
+Immutable record of a codeDigest mutation detected within a frozen-mode
+window for a single signing key. Two consecutive frozen-mode envelopes from
+the same operator that carry different codeDigest values are flagged here.
+Mode boundaries (frozen → train → frozen) reset the consistency requirement
+so violations are not raised across separate frozen windows.
+
+STUB NOTE (2026-05-07): No FreezeViolation rows will be written until
+payload v2 carries codeDigest in the on-chain Execution payload. The handler
+is wired and the schema is registered — activation requires only the
+removal of the early-return guard in freeze-violation-detector.ts once
+payload v2 data flows are live.
+
+Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.2
+DR: log/decisions/2026-05-06-trust-stack-composition.md (layer 2)
+"""
+type FreezeViolation @entity(immutable: true) {
+  "Composite: \"<signingKey>|<envelopeId>\""
+  id: ID!
+
+  "Operator.id (agentId decimal) of the operator that published the violating envelope"
+  signingKey: String!
+
+  "Execution.id of the envelope that triggered the violation"
+  envelopeId: String!
+
+  "Block timestamp of the violating envelope"
+  detectedAt: BigInt!
+
+  "Human-readable reason, e.g. \"codeDigest changed within frozen window\""
+  reason: String!
+
+  "codeDigest seen on the prior frozen-mode envelope from this signing key"
+  priorCodeDigest: String!
+
+  "codeDigest seen on the current (violating) frozen-mode envelope"
+  envelopeCodeDigest: String!
+}
