@@ -21,7 +21,13 @@ vi.mock('./api/client.js', () => ({
     solvernets: {
       listDrafts: async () => ({ drafts: [] }),
       getDraft: async () => ({}),
-      createDraft: async () => ({}),
+      createDraft: async () => ({
+        schemaVersion: 'solvernet.draft.v1',
+        draftId: 'd-routing-test',
+        completedSteps: [],
+        createdAt: '2026-05-05T00:00:00Z',
+        updatedAt: '2026-05-05T00:00:00Z',
+      }),
       updateDraft: async () => ({}),
       deleteDraft: async () => ({ ok: true }),
       launch: async () => ({ solverNetId: '', status: 'launching', pollUrl: '' }),
@@ -93,12 +99,12 @@ describe('App routes', () => {
     );
   });
 
-  // ── New SolverNet creation/launch routes (Task 16 scaffolding) ──
-  // These routes render placeholder components until Tasks 18 + 19 fill them
-  // in. We assert the routes match and the placeholders render so the SPA
-  // doesn't crash when an operator navigates to them.
+  // ── New SolverNet creation/launch routes ──
+  // /launcher/create renders the 5-step wizard (Task 18); /launcher/launched/:id
+  // renders the Task 19 placeholder for now. The routing test asserts the route
+  // matches and the wizard shell renders without crashing.
 
-  it('renders LauncherCreatePage placeholder on /launcher/create', () => {
+  it('renders LauncherCreatePage wizard on /launcher/create', async () => {
     render(
       withProviders(
         <Switch>
@@ -109,7 +115,12 @@ describe('App routes', () => {
         '/launcher/create',
       ),
     );
-    expect(screen.getByTestId('launcher-create-placeholder')).toBeTruthy();
+    // The wizard shows a loading state while the draft is created on mount,
+    // then advances to Step 1.
+    expect(screen.getByTestId('launcher-create-loading')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('launcher-create-step-1')).toBeTruthy(),
+    );
   });
 
   it('renders LauncherLaunchedPage placeholder on /launcher/launched/:solverNetId and exposes the param', () => {
