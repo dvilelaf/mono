@@ -38,7 +38,7 @@ import { FleetStateStore } from '../../src/earning/store.js';
 import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../src/earning/wallet.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
-import { TaskEngine } from '../../src/harnesses/engine/engine.js';
+import { TaskEngine, joinedSolverNetsViewFromConfig } from '../../src/harnesses/engine/engine.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
@@ -2101,6 +2101,12 @@ export interface ForkSolverNetCreationResult {
   lifecycleSequence: Array<'launched' | 'paused' | 'retired'>;
   /** Number of `setMetadata` writes the publisher observed across the run. */
   setMetadataCalls: number;
+  /**
+   * Outcomes from the operator-join eligibility filter exercised against the
+   * real chain-emitted task. Each label captures whether the engine accepted
+   * or rejected the configured task/role pair.
+   */
+  filterAssertions: Array<'accept' | 'reject-cid' | 'reject-role'>;
 }
 
 /**
@@ -2118,7 +2124,13 @@ export interface ForkSolverNetCreationResult {
  *      the on-chain Task is bound to the launched manifest.
  *   7. Reuse the claim/submit/verdict/finalize sequence from the legacy fork
  *      loop — the manifestDigest binding does not change the lifecycle.
- *   8. `LifecycleTransition.transition` → paused → launched (resume) →
+ *   8. Drive the operator-join eligibility filter (Task 28's
+ *      `evaluateJoinedEligibility`) against the real chain-emitted task:
+ *      a) accept — joined CID + solver role,
+ *      b) reject-cid — non-joined manifestCid,
+ *      c) reject-role — joined CID but evaluation role the operator did
+ *         not opt into.
+ *   9. `LifecycleTransition.transition` → paused → launched (resume) →
  *      retired. Each transition fires a real `setMetadata` write.
  */
 export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSolverNetCreationResult> {
@@ -2471,7 +2483,125 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const submittedCount = Number(tupleField<bigint>(taskRecordPostFinalize, 'submittedCount', 6));
     assert(submittedCount === 1, `submittedCount=${submittedCount}, expected 1`);
 
-    // Step 8 — exercise lifecycle transitions: paused → launched → retired.
+    // Step 8 — drive the operator-join eligibility filter (Task 28's
+    // `evaluateJoinedEligibility`) against the real chain-emitted task. The
+    // filter is unit-tested against synthetic fixtures; this step proves
+    // it works with a Task object that mirrors the on-chain record built
+    // by a real LaunchAction-driven flow. We construct the engine with
+    // only the deps the eligibility path touches:
+    //   - joinedSolverNets: the launcher's CID joined as 'solver'
+    //   - manifestResolver: reuses the registry client (cache hit, no IPFS)
+    //   - implRegistry: a no-op stub so the manifest-backed validation can
+    //     reach the canAttempt gate without dispatching real harnesses
+    const filterAssertions: Array<'accept' | 'reject-cid' | 'reject-role'> = [];
+    const filterStoreDir = await mkdtemp(join(tmpdir(), 'jinn-solvernet-filter-e2e-'));
+    let filterStore: Store | null = null;
+    try {
+      filterStore = new Store(join(filterStoreDir, 'jinn.db'));
+      const joinedView = joinedSolverNetsViewFromConfig({
+        [launched.manifestCid]: {
+          manifestCid: launched.manifestCid,
+          roles: ['solver'],
+        },
+      });
+      assert(joinedView !== undefined, 'joinedSolverNetsViewFromConfig returned undefined');
+
+      const filterEngine = new TaskEngine({
+        store: filterStore,
+        paths: {
+          workingDirRoot: join(filterStoreDir, 'work'),
+          implStateDirRoot: join(filterStoreDir, 'impl-state'),
+        },
+        joinedSolverNets: joinedView,
+        // The registry client cached the manifest at publish-time
+        // (`verifiedCids` set in `setMetadata`). The filter's positive case
+        // reaches manifestBackedValidation which calls getManifest — this
+        // is a cache hit, no IPFS round-trip.
+        manifestResolver: registry,
+        implRegistry: {
+          findFor: () => ({
+            name: 'prediction-v1-noop',
+            version: '0.0.0',
+            supports: ({ solverType }) => solverType === 'prediction.v1',
+            run: async (): Promise<Solution> => ({ venueRef: { name: 'noop' }, gating: {} }),
+          }),
+        },
+      });
+
+      // 8a) Positive: build a Task object mirroring the real chain-emitted
+      // task. The on-chain record carries `manifestDigest` only; the runtime
+      // Task carries the off-chain CID (resolved by the watcher in production).
+      const acceptedTask: Task = {
+        ...task,
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: launched.manifestCid,
+      };
+      const acceptResult = await filterEngine.canAcceptTask({
+        taskRole: 'restoration',
+        task: acceptedTask,
+      });
+      assert(
+        acceptResult.ok === true,
+        `eligibility filter rejected the joined task: ${acceptResult.ok ? '<unreachable>' : acceptResult.reason}`,
+      );
+      filterAssertions.push('accept');
+
+      // 8b) Negative — different cid: synthesize a CID the operator did NOT
+      // join. The eligibility check short-circuits before the manifest
+      // resolver is consulted, so the unknown CID is fine.
+      const unjoinedCid = 'bafyfake-unjoined-launcher-cid-not-in-config';
+      const rejectCidTask: Task = {
+        ...task,
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: unjoinedCid,
+      };
+      const rejectCidResult = await filterEngine.canAcceptTask({
+        taskRole: 'restoration',
+        task: rejectCidTask,
+      });
+      assert(
+        rejectCidResult.ok === false,
+        'eligibility filter accepted a task whose manifestCid was not joined',
+      );
+      assert(
+        /has not joined that SolverNet/.test(rejectCidResult.reason),
+        `expected reject-cid reason to mention "has not joined that SolverNet", got: ${rejectCidResult.reason}`,
+      );
+      assert(
+        rejectCidResult.reason.includes(unjoinedCid),
+        `expected reject-cid reason to include the un-joined cid '${unjoinedCid}', got: ${rejectCidResult.reason}`,
+      );
+      filterAssertions.push('reject-cid');
+
+      // 8c) Negative — same cid but evaluation role the operator did not
+      // join. The on-chain task is the same one the launcher posted, but
+      // the engine refuses to claim as 'evaluator' because the operator
+      // joined as 'solver' only.
+      const rejectRoleTask: Task = {
+        ...acceptedTask,
+        role: 'evaluation',
+      };
+      const rejectRoleResult = await filterEngine.canAcceptTask({
+        taskRole: 'evaluation',
+        task: rejectRoleTask,
+      });
+      assert(
+        rejectRoleResult.ok === false,
+        'eligibility filter accepted an evaluation task the operator did not opt into',
+      );
+      assert(
+        /did not opt into role 'evaluator'/.test(rejectRoleResult.reason),
+        `expected reject-role reason to mention evaluator role mismatch, got: ${rejectRoleResult.reason}`,
+      );
+      filterAssertions.push('reject-role');
+    } finally {
+      filterStore?.close();
+      await rm(filterStoreDir, { recursive: true, force: true });
+    }
+
+    // Step 9 — exercise lifecycle transitions: paused → launched → retired.
     let stopGeneratorCalls = 0;
     let startGeneratorCalls = 0;
     const lifecycle = new LifecycleTransition({
@@ -2531,6 +2661,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       submittedCount,
       lifecycleSequence,
       setMetadataCalls: publisher.calls.length,
+      filterAssertions,
     };
   } finally {
     stopMiningPulse();
