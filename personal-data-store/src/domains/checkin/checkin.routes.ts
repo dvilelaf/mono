@@ -7,6 +7,8 @@ import {
   recordSupplementCheckin,
   todaySupplementStatus,
   recordMeasurement,
+  recordBloodPressure,
+  recordNote,
   recordNutrition,
   checkinSummary,
   listMisses,
@@ -122,6 +124,65 @@ checkinRouter.post("/measurement", async (req, res, next) => {
     }
     const row = await recordMeasurement(body);
     res.status(201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+checkinRouter.post("/blood-pressure", async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    const sys = Number(body.systolic);
+    const dia = Number(body.diastolic);
+    if (!Number.isFinite(sys) || sys <= 0) {
+      res.status(400).json({ error: "systolic must be a positive number" });
+      return;
+    }
+    if (!Number.isFinite(dia) || dia <= 0) {
+      res.status(400).json({ error: "diastolic must be a positive number" });
+      return;
+    }
+    const pulseRaw = body.pulse;
+    const pulse =
+      pulseRaw === undefined || pulseRaw === null || pulseRaw === ""
+        ? null
+        : Number(pulseRaw);
+    if (pulse !== null && (!Number.isFinite(pulse) || pulse <= 0)) {
+      res.status(400).json({ error: "pulse must be a positive number" });
+      return;
+    }
+    const rows = await recordBloodPressure({
+      systolic: sys,
+      diastolic: dia,
+      pulse,
+      recordedAt: typeof body.recordedAt === "string" ? body.recordedAt : undefined,
+      notes: typeof body.notes === "string" ? body.notes : null,
+    });
+    res.status(201).json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+checkinRouter.post("/note", async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    if (!body.content || typeof body.content !== "string" || !body.content.trim()) {
+      res.status(400).json({ error: "content is required" });
+      return;
+    }
+    const tags = Array.isArray(body.tags)
+      ? body.tags.filter((t: unknown): t is string => typeof t === "string")
+      : typeof body.tags === "string"
+        ? body.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
+        : [];
+    const doc = await recordNote({
+      content: body.content,
+      title: typeof body.title === "string" ? body.title : null,
+      tags,
+      recordedAt: typeof body.recordedAt === "string" ? body.recordedAt : undefined,
+    });
+    res.status(201).json(doc);
   } catch (err) {
     next(err);
   }
