@@ -21,5 +21,6 @@ export const config = {
     checkin_evening: { enabled: true, schedule: process.env.CHECKIN_EVENING_SCHEDULE ?? "0 21 * * *" },
     morning_briefing: { enabled: true, schedule: process.env.BRIEFING_SCHEDULE ?? "30 6 * * *" },
     watchdog: { enabled: true, schedule: process.env.WATCHDOG_SCHEDULE ?? "0 */4 * * *" },
+    correlations: { enabled: true, schedule: process.env.CORRELATIONS_SCHEDULE ?? "0 4 * * 1" },
   },
 } as const;
