@@ -6,6 +6,9 @@ import {
   getCanonicalDocuments,
   semanticSearch,
 } from "../domains/documents/documents.service.js";
+import { profileGraphSummary } from "../domains/genomics/graph.service.js";
+import { db } from "../db/index.js";
+import { sql } from "drizzle-orm";
 
 export interface DecideInput {
   question: string;
@@ -48,12 +51,14 @@ export async function runDecide(input: DecideInput): Promise<DecideResult> {
   const semDocsPromise = semanticSearch(question, 8).catch(
     () => [] as unknown[],
   );
-  const [allGoals, openAlerts, activeInterventions, semDocsRaw] =
+  const graphSummaryPromise = loadLatestProfileGraphSummary().catch(() => null);
+  const [allGoals, openAlerts, activeInterventions, semDocsRaw, graphSummary] =
     await Promise.all([
       listGoals(),
       listAlerts({ resolved: false, limit: 50 }),
       listInterventions({ status: "active" }),
       semDocsPromise,
+      graphSummaryPromise,
     ]);
 
   const semDocs = semDocsRaw as Array<Record<string, unknown>>;
@@ -81,6 +86,7 @@ export async function runDecide(input: DecideInput): Promise<DecideResult> {
     interventions: activeInterventions,
     semDocs,
     canonicalDocs,
+    graphSummary,
   });
 
   const sources = {
@@ -168,6 +174,45 @@ interface PromptArgs {
   interventions: Array<Record<string, unknown>>;
   semDocs: Array<Record<string, unknown>>;
   canonicalDocs: Array<Record<string, unknown>>;
+  graphSummary: GraphSummary | null;
+}
+
+interface GraphSummary {
+  profileId: string | null;
+  variantSlugs: string[];
+  constraints: Array<{ constraint_slug: string; constraint_label: string; variant_slug: string; evidence: string | null }>;
+  contraindications: Array<{ constraint_slug: string; intervention_slug: string; intervention_label: string; evidence: string | null }>;
+  recommendations: Array<{ constraint_slug: string; intervention_slug: string; intervention_label: string; evidence: string | null }>;
+}
+
+async function loadLatestProfileGraphSummary(): Promise<GraphSummary | null> {
+  const [latest] = await db.execute<{ id: string }>(sql`
+    SELECT id FROM genomics_profiles ORDER BY imported_at DESC LIMIT 1
+  `);
+  if (!latest) return null;
+  const summary = await profileGraphSummary(latest.id);
+  return {
+    profileId: latest.id,
+    variantSlugs: summary.variantSlugs,
+    constraints: summary.constraints.map((c) => ({
+      constraint_slug: c.constraint_slug,
+      constraint_label: c.constraint_label,
+      variant_slug: c.variant_slug,
+      evidence: c.evidence,
+    })),
+    contraindications: summary.contraindications.map((c) => ({
+      constraint_slug: c.constraint_slug,
+      intervention_slug: c.intervention_slug,
+      intervention_label: c.intervention_label,
+      evidence: c.evidence,
+    })),
+    recommendations: summary.recommendations.map((c) => ({
+      constraint_slug: c.constraint_slug,
+      intervention_slug: c.intervention_slug,
+      intervention_label: c.intervention_label,
+      evidence: c.evidence,
+    })),
+  };
 }
 
 function buildPrompt(a: PromptArgs): string {
@@ -241,6 +286,8 @@ function buildPrompt(a: PromptArgs): string {
         .join("\n\n")
     : "(none)";
 
+  const graphBlock = formatGraphSummary(a.graphSummary);
+
   return `You are the Personal Data Store decision oracle for Oak. You answer questions using ONLY the data and canonical guidance supplied below. If the data is insufficient, say so plainly.
 
 USER QUESTION:
@@ -261,14 +308,47 @@ ${docsBlock}
 CANONICAL GUIDANCE (authoritative; treat as Oak's own decided positions):
 ${canonicalBlock}
 
+GENOMIC CONSTRAINTS (from variant → constraint → intervention graph; treat contraindications as hard rules):
+${graphBlock}
+
 Rules:
 - British English. Direct, no filler.
 - Ground every claim in the data above. Do not invent metrics.
+- If your suggestion would touch any contraindicated intervention above, refuse and explain which constraint blocks it.
 - If a recommendation conflicts with an active goal, list that goal's slug under "conflicts".
 - Keep "answer" under 350 words.
 
 Respond with ONLY a single JSON object on stdout, no markdown fence, no preamble:
 {"answer": "<short grounded recommendation>", "conflicts": ["<goal slug or title>", ...]}`;
+}
+
+function formatGraphSummary(s: GraphSummary | null): string {
+  if (!s || (!s.contraindications.length && !s.recommendations.length && !s.constraints.length)) {
+    return "(no genomics graph data)";
+  }
+  const lines: string[] = [];
+  if (s.contraindications.length) {
+    lines.push("Contraindications:");
+    for (const c of s.contraindications) {
+      lines.push(`- AVOID [${c.intervention_slug}] ${c.intervention_label} — constraint=${c.constraint_slug}${c.evidence ? ` (${truncate(c.evidence, 160)})` : ""}`);
+    }
+  }
+  if (s.recommendations.length) {
+    lines.push("Recommended (constraint-driven):");
+    for (const r of s.recommendations) {
+      lines.push(`- TRY [${r.intervention_slug}] ${r.intervention_label} — constraint=${r.constraint_slug}${r.evidence ? ` (${truncate(r.evidence, 160)})` : ""}`);
+    }
+  }
+  if (s.constraints.length) {
+    lines.push("Active constraints:");
+    const seen = new Set<string>();
+    for (const c of s.constraints) {
+      if (seen.has(c.constraint_slug)) continue;
+      seen.add(c.constraint_slug);
+      lines.push(`- ${c.constraint_slug} (${c.constraint_label})${c.evidence ? ` — ${truncate(c.evidence, 160)}` : ""}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function formatGoalTarget(g: Record<string, unknown>): string {
