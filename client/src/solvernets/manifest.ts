@@ -61,11 +61,14 @@ export interface IdentityRegistryReader {
   ): Promise<`0x${string}` | null>;
 }
 
-export interface VerifyManifestSignatureResult {
-  valid: boolean;
-  signer?: `0x${string}`;
-  reason?: string;
-}
+/**
+ * Discriminated union: when `valid` is true, `signer` is guaranteed
+ * present; when false, `reason` is guaranteed present and `signer` is
+ * optional (set when recovery succeeded but mismatched the claim).
+ */
+export type VerifyManifestSignatureResult =
+  | { valid: true; signer: `0x${string}` }
+  | { valid: false; signer?: `0x${string}`; reason: string };
 
 export interface VerifyManifestAgainstChainResult {
   valid: boolean;
@@ -106,6 +109,12 @@ export function manifestHash(
 /**
  * Sign an unsigned manifest with the launcher's agent EOA private key.
  *
+ * Precondition: the address derived from `agentEoaPrivateKey` MUST equal
+ * `unsigned.launcher.agentEoa` (case-insensitive). If it does not, this
+ * throws immediately — failing here gives a clear "wrong key for the declared
+ * agent EOA" error rather than producing a manifest that fails downstream
+ * verification with a confusing recovered-vs-claimed signer mismatch.
+ *
  * Steps (per §6.3 + §7):
  *   1. canonicalManifestJson(unsigned)     // RFC 8785 JCS, signature stripped
  *   2. sha256(canonical)                    // bytes32 hash
@@ -118,6 +127,13 @@ export async function signManifest(
   agentEoaPrivateKey: `0x${string}`,
 ): Promise<SolverNetManifestV1> {
   const account = privateKeyToAccount(agentEoaPrivateKey);
+
+  if (account.address.toLowerCase() !== unsigned.launcher.agentEoa.toLowerCase()) {
+    throw new Error(
+      `agentEoaPrivateKey derives address ${account.address} but manifest.launcher.agentEoa is ${unsigned.launcher.agentEoa}`,
+    );
+  }
+
   const hash = manifestHash(unsigned);
 
   // EIP-191 personal_sign over the raw 32-byte hash. viem prepends the
@@ -200,8 +216,8 @@ export async function verifyManifestAgainstChain(
   atBlock?: bigint,
 ): Promise<VerifyManifestAgainstChainResult> {
   const sigResult = await verifyManifestSignature(manifest);
-  if (!sigResult.valid || !sigResult.signer) {
-    return { valid: false, reason: sigResult.reason ?? 'invalid signature' };
+  if (!sigResult.valid) {
+    return { valid: false, reason: sigResult.reason };
   }
 
   const signer = sigResult.signer;

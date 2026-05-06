@@ -98,7 +98,7 @@ describe('canonicalManifestJson', () => {
     const acct = privateKeyToAccount(pk);
     const unsigned = buildUnsignedManifest({ agentEoa: acct.address });
 
-    const a = canonicalManifestJson(unsigned as SolverNetManifestV1);
+    const a = canonicalManifestJson(unsigned);
     const withFakeSig: SolverNetManifestV1 = {
       ...unsigned,
       signature: {
@@ -118,7 +118,7 @@ describe('canonicalManifestJson', () => {
     const acct = privateKeyToAccount(pk);
     const unsigned = buildUnsignedManifest({ agentEoa: acct.address });
 
-    const out = canonicalManifestJson(unsigned as SolverNetManifestV1);
+    const out = canonicalManifestJson(unsigned);
     // `description` should appear before `launcher` (alphabetical).
     expect(out.indexOf('"description"')).toBeLessThan(out.indexOf('"launcher"'));
     // `name` should appear before `network`.
@@ -133,7 +133,7 @@ describe('manifestHash', () => {
     const pk = generatePrivateKey();
     const acct = privateKeyToAccount(pk);
     const unsigned = buildUnsignedManifest({ agentEoa: acct.address });
-    const h = manifestHash(unsigned as SolverNetManifestV1);
+    const h = manifestHash(unsigned);
     expect(h).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
@@ -141,8 +141,8 @@ describe('manifestHash', () => {
     const pk = generatePrivateKey();
     const acct = privateKeyToAccount(pk);
     const unsigned = buildUnsignedManifest({ agentEoa: acct.address });
-    const h1 = manifestHash(unsigned as SolverNetManifestV1);
-    const h2 = manifestHash(unsigned as SolverNetManifestV1);
+    const h1 = manifestHash(unsigned);
+    const h2 = manifestHash(unsigned);
     expect(h1).toEqual(h2);
   });
 
@@ -151,16 +151,14 @@ describe('manifestHash', () => {
     const acct = privateKeyToAccount(pk);
     const a = buildUnsignedManifest({ agentEoa: acct.address, name: 'Alpha' });
     const b = buildUnsignedManifest({ agentEoa: acct.address, name: 'Beta' });
-    expect(manifestHash(a as SolverNetManifestV1)).not.toEqual(
-      manifestHash(b as SolverNetManifestV1),
-    );
+    expect(manifestHash(a)).not.toEqual(manifestHash(b));
   });
 
   it('is independent of the signature field', async () => {
     const pk = generatePrivateKey();
     const acct = privateKeyToAccount(pk);
     const unsigned = buildUnsignedManifest({ agentEoa: acct.address });
-    const hUnsigned = manifestHash(unsigned as SolverNetManifestV1);
+    const hUnsigned = manifestHash(unsigned);
 
     const signed = await signManifest(unsigned, pk);
     const hSigned = manifestHash(signed);
@@ -207,20 +205,35 @@ describe('signManifest + verifyManifestSignature', () => {
     const pkA = generatePrivateKey();
     const pkB = generatePrivateKey();
     const acctA = privateKeyToAccount(pkA);
+    const acctB = privateKeyToAccount(pkB);
 
-    // Build a manifest that names acctA as the agent EOA, but sign with pkB.
-    const unsigned = buildUnsignedManifest({ agentEoa: acctA.address });
-    const signed = await signManifest(unsigned, pkB);
+    // Sign a manifest legitimately with pkB (signManifest now requires the
+    // private key to derive launcher.agentEoa). We then forge a lying body
+    // that names acctA in `launcher.agentEoa` and `signature.signer` while
+    // re-using pkB's signature value — the recovered signer (acctB) won't
+    // match the claim (acctA), so verification must fail.
+    const unsignedB = buildUnsignedManifest({ agentEoa: acctB.address });
+    const signedB = await signManifest(unsignedB, pkB);
 
-    // Force the `signature.signer` claim to point at acctA so verification
-    // can't trivially short-circuit on signer-claim mismatch.
     const lying: SolverNetManifestV1 = {
-      ...signed,
-      signature: { ...signed.signature, signer: acctA.address },
+      ...signedB,
+      launcher: { ...signedB.launcher, agentEoa: acctA.address },
+      signature: { ...signedB.signature, signer: acctA.address },
     };
 
     const result = await verifyManifestSignature(lying);
     expect(result.valid).toBe(false);
+  });
+
+  it('throws when the private key derives a different address than launcher.agentEoa', async () => {
+    const pkA = generatePrivateKey();
+    const pkB = generatePrivateKey();
+    const acctA = privateKeyToAccount(pkA);
+
+    // Manifest declares acctA as the agent EOA, but we hand sign a different key.
+    const unsigned = buildUnsignedManifest({ agentEoa: acctA.address });
+
+    await expect(signManifest(unsigned, pkB)).rejects.toThrow(/agentEoaPrivateKey derives/);
   });
 
   it('rejects manifests with non-eip-191 signatures', async () => {
