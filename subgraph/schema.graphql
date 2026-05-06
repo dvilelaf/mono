@@ -107,6 +107,18 @@ type Execution @entity(immutable: false) {
   "Payload schema version (always 1 for now, null if not decoded)"
   payloadVersion: Int
 
+  """
+  Harness execution mode declared by the operator on this envelope.
+  "train" — Improve + Memory phases active; implStateDir mutates across Tasks.
+  "frozen" — writes to implStateDir disabled; codeDigest stable across the window.
+
+  Back-compat default: envelopes published before Plan 1 (2026-05-06) do not
+  carry mode in the on-chain payload and are indexed as "train". New envelopes
+  populate this field when the payload v2 encoding ships. See
+  docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+  """
+  mode: String!
+
   "True iff payload bytes parsed cleanly into the v1 envelope/evaluation tuple"
   payloadDecoded: Boolean!
 

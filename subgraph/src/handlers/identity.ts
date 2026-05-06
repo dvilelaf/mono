@@ -138,6 +138,11 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     if (sm.length > 0 && !isAllZero(sm)) {
       exec.sourceMeasurement = sm;
     }
+    // Index Executor.mode. Back-compat: v1 payload ABI tuple does not encode
+    // mode; decodeExecutionPayload defaults to "train". When payload v2 ships,
+    // decoded.mode will carry the actual operator-declared value.
+    // See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+    exec.mode = decoded.mode;
 
     // NOTE: Execution.routerJob and Execution.deliveredAt are intentionally
     // NOT populated here. The previous code compared manifestHash (an operator-
@@ -152,6 +157,8 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     // See: docs/superpowers/specs — "subgraph routerJob join gap".
   } else {
     exec.tier = "UNKNOWN";
+    // Payload did not decode; default mode to "train" for back-compat.
+    exec.mode = "train";
   }
 
   exec.save();

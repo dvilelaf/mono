@@ -119,6 +119,13 @@ export class DecodedPayload {
   manifestHash: Bytes;
   attestationQuoteCid: Bytes; // raw multibase-decoded CID bytes (g7h §4)
   sourceMeasurement: Bytes;
+  /**
+   * Executor mode decoded from the payload. "train" | "frozen".
+   * v1 payload ABI tuple does not include mode — reserved for v2.
+   * Always "train" for v1 payloads; updated when v2 encoding ships.
+   * See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+   */
+  mode: string;
 
   constructor() {
     this.ok = false;
@@ -128,6 +135,7 @@ export class DecodedPayload {
     this.manifestHash = Bytes.empty();
     this.attestationQuoteCid = Bytes.empty();
     this.sourceMeasurement = Bytes.empty();
+    this.mode = "train"; // default; v1 payload does not encode mode
   }
 }
 
@@ -201,6 +209,11 @@ export function decodeExecutionPayload(payload: Bytes): DecodedPayload {
   // verbatim; consumers reconstruct the textual CID at read time.
   result.attestationQuoteCid = attestationQuoteBytes;
   result.sourceMeasurement = sourceMeasurement;
+  // mode is not encoded in the v1 payload ABI tuple; defaults to "train".
+  // When payload v2 ships it will add a uint8 mode field (0=train, 1=frozen)
+  // and this decoder will be extended to read it. Back-compat: all v1
+  // envelopes are treated as train mode.
+  result.mode = "train";
   return result;
 }
 
