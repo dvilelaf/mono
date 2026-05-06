@@ -9,6 +9,7 @@
 
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { keccak256, toBytes } from 'viem';
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -94,6 +95,59 @@ export interface SolverNetRegistryLike {
 }
 
 /**
+ * Read-only view of the operator config's `joinedSolverNets` map.
+ *
+ * Per spec §14 of `spec/2026-05-05-solvernet-creation-and-launch.md`,
+ * operator claim eligibility is per-launch via `manifestDigest`
+ * (= keccak256(manifestCid)) — an operator who joined Launcher A's
+ * Prediction net is not automatically eligible for Launcher B's
+ * Prediction tasks even though both share the same SolverNet contract.
+ *
+ * Keys are the manifest CID (CIDv0 / CIDv1) the operator joined under.
+ * Values declare which roles ('solver' / 'evaluator') the operator
+ * agreed to fulfil for that net.
+ *
+ * Wired by `main.ts` from `config.joinedSolverNets` (Task 21). Tests and
+ * legacy paths that don't exercise per-launch attribution can omit it; the
+ * engine then falls back to its prior solverType-driven eligibility check.
+ */
+export interface JoinedSolverNetsView {
+  /** Returns the joined-net entry for the given manifest CID, or undefined. */
+  get(manifestCid: string): { roles: Array<'solver' | 'evaluator'> } | undefined;
+  /** Enumerate all joined manifest CIDs (used for digest-based filtering). */
+  manifestCids(): string[];
+}
+
+/** Map task role to the operator role it requires in `joinedSolverNets`. */
+function joinedRoleForTaskRole(taskRole: 'restoration' | 'evaluation'): 'solver' | 'evaluator' {
+  return taskRole === 'evaluation' ? 'evaluator' : 'solver';
+}
+
+/**
+ * Build a `JoinedSolverNetsView` from the raw operator-config block.
+ *
+ * The config carries the full `JoinedSolverNetEntry` shape (manifestCid,
+ * name, roles, harness, model, plugins, ...). The engine only needs
+ * `roles` and the CID-keyed lookup, so this helper narrows it.
+ */
+export function joinedSolverNetsViewFromConfig(
+  joined: Record<string, { manifestCid: string; roles: Array<'solver' | 'evaluator'> }> | undefined,
+): JoinedSolverNetsView | undefined {
+  if (!joined) return undefined;
+  const map = new Map<string, { roles: Array<'solver' | 'evaluator'> }>();
+  for (const [key, entry] of Object.entries(joined)) {
+    // The config keys joined nets by `manifestCid`. We accept either the key
+    // or the entry's `manifestCid` field; in practice they're identical.
+    const cid = entry.manifestCid ?? key;
+    map.set(cid, { roles: entry.roles });
+  }
+  return {
+    get: (cid: string) => map.get(cid),
+    manifestCids: () => [...map.keys()],
+  };
+}
+
+/**
  * Resolves a launched SolverNet manifest by IPFS CID.
  *
  * Engine-internal contract; the production wiring passes
@@ -150,6 +204,24 @@ export interface TaskEngineOptions {
    */
   implRegistry?: ImplRegistry;
   solverNetRegistry?: SolverNetRegistryLike;
+  /**
+   * Per-launch operator eligibility filter (Task 28 of
+   * `spec/2026-05-05-solvernet-creation-and-launch.md`).
+   *
+   * When wired, `canAcceptTask` filters incoming tasks by
+   * `manifestDigest = keccak256(task.solverNetManifestCid)` against the set
+   * of CIDs the operator has joined, plus a role gate
+   * (restoration → 'solver', evaluation → 'evaluator'). Tasks whose
+   * `manifestDigest` doesn't match any joined CID are rejected before any
+   * harness is consulted — this disambiguates "Launcher A's Prediction" from
+   * "Launcher B's Prediction" even when they share the same SolverNet
+   * contract.
+   *
+   * Optional — engines without it (legacy unit tests, in-memory adapter)
+   * fall back to the prior solverType-keyed eligibility path on the
+   * SolverNet registry.
+   */
+  joinedSolverNets?: JoinedSolverNetsView;
   /**
    * Resolves a launched SolverNet manifest by `solverNetManifestCid`.
    * Required for production wiring; tests that don't exercise schema
@@ -245,6 +317,7 @@ export class TaskEngine {
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
+  protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
@@ -296,6 +369,7 @@ export class TaskEngine {
     this.deliveryDeps = opts.deliveryDeps;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
+    this.joinedSolverNets = opts.joinedSolverNets;
     this.manifestResolver = opts.manifestResolver;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
@@ -631,11 +705,102 @@ export class TaskEngine {
     return null;
   }
 
+  /**
+   * Returns a human-readable failure reason when the task is NOT eligible
+   * for this operator under the manifest-bound per-launch attribution
+   * model (spec §14, Task 28), or `null` when the task passes the filter.
+   *
+   * Eligibility logic:
+   *   - The operator must have an entry in `joinedSolverNets` whose
+   *     `manifestCid` matches `task.solverNetManifestCid` (or whose
+   *     `keccak256(manifestCid)` matches the task's on-chain
+   *     `manifestDigest` when only the digest is available).
+   *   - The entry's `roles` must include the role required by this task
+   *     ('solver' for restoration, 'evaluator' for evaluation).
+   *
+   * Caller must have already guarded `this.joinedSolverNets` non-null and
+   * `task` non-null.
+   */
+  private evaluateJoinedEligibility(
+    task: Task,
+    role: 'restoration' | 'evaluation',
+  ): string | null {
+    const view = this.joinedSolverNets!;
+    const requiredRole = joinedRoleForTaskRole(role);
+
+    // Preferred path: the task body carries the manifest CID directly.
+    const cid = task.solverNetManifestCid;
+    if (cid) {
+      const entry = view.get(cid);
+      if (!entry) {
+        return (
+          `task carries solverNetManifestCid '${cid}' but operator has not joined that SolverNet ` +
+          `(joinedSolverNets keys: [${view.manifestCids().join(', ') || '<empty>'}])`
+        );
+      }
+      if (!entry.roles.includes(requiredRole)) {
+        return (
+          `operator joined SolverNet '${cid}' but did not opt into role '${requiredRole}' ` +
+          `(roles: [${entry.roles.join(', ')}])`
+        );
+      }
+      return null;
+    }
+
+    // Fallback path: task carries an on-chain `manifestDigest` (bytes32
+    // hex) without an off-chain CID. Compute keccak256 of every joined CID
+    // and compare. Used when the daemon discovers a task via on-chain
+    // event before fetching its IPFS body.
+    const taskRecord = task as Task & { manifestDigest?: string };
+    const taskDigest = taskRecord.manifestDigest;
+    if (taskDigest) {
+      const wantHex = taskDigest.toLowerCase();
+      for (const joinedCid of view.manifestCids()) {
+        const joinedDigest = keccak256(toBytes(joinedCid)).toLowerCase();
+        if (joinedDigest === wantHex) {
+          const entry = view.get(joinedCid)!;
+          if (!entry.roles.includes(requiredRole)) {
+            return (
+              `operator joined SolverNet '${joinedCid}' but did not opt into role '${requiredRole}' ` +
+              `(roles: [${entry.roles.join(', ')}])`
+            );
+          }
+          return null;
+        }
+      }
+      return (
+        `task manifestDigest '${taskDigest}' does not match any joined SolverNet ` +
+        `(joinedSolverNets keys: [${view.manifestCids().join(', ') || '<empty>'}])`
+      );
+    }
+
+    // Task has neither solverNetManifestCid nor manifestDigest. Per spec §14,
+    // post-Task-24 task documents always carry a CID; absence here means a
+    // pre-migration / health-check / legacy task. We don't fail those — the
+    // legacy solverType-keyed gate downstream still runs.
+    return null;
+  }
+
   private async runnableFailureReason(
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
   ): Promise<string | null> {
+    // Per-launch operator-eligibility filter (Task 28 of
+    // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
+    // operator has explicitly joined a set of SolverNets — keyed by the
+    // launched manifest's `manifestCid` — the engine refuses to accept any
+    // task whose on-chain `manifestDigest = keccak256(manifestCid)` doesn't
+    // match a joined entry, plus a role gate (restoration → 'solver',
+    // evaluation → 'evaluator'). This replaces the old protocol-level
+    // solverType filter and disambiguates Launcher A's Prediction from
+    // Launcher B's Prediction. The check is skipped when the engine has no
+    // `joinedSolverNets` view wired (legacy unit tests, in-memory adapter).
+    if (this.joinedSolverNets && task) {
+      const eligibility = this.evaluateJoinedEligibility(task, role);
+      if (eligibility) return eligibility;
+    }
+
     // Prefer the contract-derived routing alias when the task carries
     // `contractId`/`contractVersion` (Task 24); fall back to the explicit
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
