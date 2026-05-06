@@ -22,6 +22,8 @@ import {
   metadataEntryId,
 } from "../utils";
 
+import { updateHarnessRollup } from "./harness-rollup";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Registered(uint256 indexed agentId, string agentURI, address indexed owner)
 // ────────────────────────────────────────────────────────────────────────────
@@ -163,6 +165,14 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
 
   exec.save();
   op.save();
+
+  // ── HarnessRollup aggregation ────────────────────────────────────────────
+  // Called for every Execution save, but the handler short-circuits early for
+  // ENVELOPE kind and for any execution where implName/codeDigest are absent
+  // (all v1 payloads). EVALUATION kind with payload v2 will populate rollups.
+  if (exec.kind == "EVALUATION") {
+    updateHarnessRollup(exec, event.block.timestamp, op.id);
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

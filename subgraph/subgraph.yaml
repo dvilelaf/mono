@@ -26,6 +26,8 @@ dataSources:
         - Execution
         - MetadataEntry
         - URIUpdate
+        - HarnessRollup
+        - LanguageRollup
       abis:
         - name: IdentityRegistry
           file: ./abis/IdentityRegistry.json
