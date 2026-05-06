@@ -1495,10 +1495,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
     );
   }
-  // Reference the subsystem to avoid an unused-locals error on builds where
-  // Task 12 hasn't yet wired the spawn loop. The catalog cache and
-  // pending-generators set will be consumed by Tasks 12, 14, and 15.
-  void solverNetSubsystem;
+  // The catalog cache will be consumed by the API server in Tasks 14/15.
+  // The `pendingGenerators` set is iterated below to wire generators per
+  // launched record (Task 12).
 
   // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
   const autoTasksDisabled =
@@ -1548,6 +1547,51 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
     // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
   }
+  // ── SolverNet launched-record generators (Task 12 of
+  //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
+  //
+  // For each owned launched record where `status === 'launched'` and
+  // `generatorEnabled === true`, construct a prediction.v1 Polymarket
+  // generator wired to the live `recordRef` and `configRef` exposed by
+  // `initSolverNetSubsystem`. Lifecycle transitions (pause/resume/retire)
+  // and the SolverNet config API endpoint (Task 14) mutate these refs at
+  // runtime; the per-tick gate inside the generator picks the change up
+  // within one cadence — no daemon restart, no recreation.
+  //
+  // This path coexists with the legacy `collectTestnetAutoTaskGenerators`
+  // block above. Task 22 of the SolverNet plan drops the legacy block; for
+  // now both paths can spawn generators (the launched-record path is gated
+  // on the SolverNet subsystem being initialised at all, which is testnet +
+  // agent_id + identity_registry — same precondition the SolverNet APIs
+  // need).
+  const launchedRecordGenerators: Array<{
+    solverType: string;
+    generator: import('./tasks/sources.js').TaskGenerator;
+  }> = [];
+  if (solverNetSubsystem) {
+    const { makePredictionV1GeneratorForLaunchedRecord } = await import(
+      './solver-types/prediction-v1-auto.js'
+    );
+    for (const pending of solverNetSubsystem.pendingGenerators) {
+      // Static deps (agent identity + Polymarket transport) are construction-
+      // time-fixed; runtime-editable settings flow through `configRef`.
+      const generator = makePredictionV1GeneratorForLaunchedRecord({
+        recordRef: pending.recordRef,
+        configRef: pending.configRef,
+        staticConfig: {
+          agentEoa: agentEoaAddress,
+          safeAddress,
+          agentPrivateKey,
+        },
+      });
+      launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
+      console.log(
+        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
+          `(prediction.v1, status=${pending.record.status})`,
+      );
+    }
+  }
+
   const taskSources = [
     new StaticConfiguredTaskSource(config.tasks),
     ...autoTaskGenerators
@@ -1555,6 +1599,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         solverNetRegistry.forSolverType(solverType, 'restoration')?.taskGenerator.enabled,
       )
       .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
+    ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
+      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
+    ),
   ];
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
