@@ -222,7 +222,7 @@ export class MechAdapter implements ExecutionAdapter {
 
     const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
-    const solverTypeDigest = keccak256(toBytes(signedTask.solverType));
+    const manifestDigest = keccak256(toBytes(signedTask.solverType));
     const policy = this.contractPolicyForTask(restorationState);
 
     const taskSubmission = await submitTask(
@@ -231,7 +231,7 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.safeAddress,
       this.config.routerAddress,
       restorationDataHex,
-      solverTypeDigest,
+      manifestDigest,
       policy,
       deliveryRate,
       deliveryRate,
