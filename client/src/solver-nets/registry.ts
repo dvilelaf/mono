@@ -162,7 +162,13 @@ export async function loadSolverNets(
       seenNames.add(plugin.name);
     }
 
-    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN, ...contract.defaultRuntimePlugins]) {
+    // jinn-mono-qwdc.6 / .8 — `defaultRuntimePlugins` was removed from
+    // SolverNetContract in Task 6, so spreading it here would throw at
+    // startup. Operator-configurable plugins flow through `net.plugins`
+    // (iterated immediately below); Task 8 will fully reconcile plugin
+    // defaults out of the contract when migrating the rest of
+    // solverType-keyed dispatch.
+    for (const entry of [JINN_NETWORK_TOOLS_PLUGIN]) {
       await addRuntimePlugin(entry, 'default');
     }
     for (const entry of net.plugins ?? []) {
