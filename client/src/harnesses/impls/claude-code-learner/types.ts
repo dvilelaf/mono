@@ -3,7 +3,7 @@
  * process. Adding a new key requires an explicit update here.
  */
 export type KnownAdapterEnvKey =
-  | 'JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE';
+  | 'LEARNER_PHASE_RANGE';
 
 /**
  * Inputs the shim derives from HarnessContext and hands to the
@@ -53,7 +53,7 @@ export interface TaskSessionInputs {
   /**
    * Optional env vars the adapter should propagate to the harness child
    * process IN ADDITION to its own ENV_ALLOWLIST. Used to thread
-   * phase-range hints (e.g. JINN_CLAUDE_CODE_LEARNER_PHASE_RANGE) to
+   * phase-range hints (e.g. LEARNER_PHASE_RANGE) to
    * the coordinator skill running inside the spawned harness.
    *
    * Restricted to the {@link KnownAdapterEnvKey} allowlist. Pass-through only;
