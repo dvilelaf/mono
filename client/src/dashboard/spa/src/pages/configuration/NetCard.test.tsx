@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NetCard } from './NetCard.js';
+import type { SolverNetManifestV1 } from '../../api/types.js';
 
 const apiMock = vi.hoisted(() => ({
   updateSolverNet: vi.fn(),
+  operatorLeave: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({
   api: {
     updateSolverNet: apiMock.updateSolverNet,
+    operator: {
+      leave: (cid: string) => apiMock.operatorLeave(cid),
+    },
   },
 }));
 
@@ -353,5 +358,181 @@ describe('NetCard', () => {
     );
     expect(screen.getByText(/no plugins available for this solvernet/i)).toBeTruthy();
     expect(screen.queryByLabelText('Add plugin')).toBeNull();
+  });
+});
+
+// ── NetCard manifest-keyed (joined) variant (Task 21) ──────────────────────
+
+const baseManifest: SolverNetManifestV1 = {
+  schemaVersion: 'solvernet.manifest.v1',
+  solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
+  network: 'base-sepolia',
+  name: 'Prediction Markets',
+  description: 'Forecast resolved outcomes; rewarded by Brier score.',
+  launcher: {
+    safeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+    agentEoa: '0x1111111111111111111111111111111111111111',
+    agentId: '5474',
+  },
+  contract: {
+    id: 'prediction',
+    version: 'v1',
+    schemas: { task: {}, solution: {}, verdict: {} },
+    claimPolicyDefaults: {
+      mode: 'parallel',
+      maxClaims: 5,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 600,
+    },
+    credentialRequirements: { creator: [], solver: [], evaluator: [] },
+    evaluationFunction: {
+      id: 'predictionV1Eval',
+      deterministic: true,
+      inputs: ['solution.predictionPbool'],
+      output: 'verdict.brierScore',
+      implementation: 'jinn-builtin/prediction-v1-eval@1.0',
+    },
+    aggregationFunction: {
+      id: 'predictionV1Agg',
+      deterministic: true,
+      inputs: ['verdict.brierScore'],
+      output: 'aggregate.score',
+    },
+  },
+  solutionPriceWei: '1000000000000000',
+  verdictPriceWei: '500000000000000',
+  openRoles: ['solver', 'evaluator'],
+  createdAt: '2026-05-05T00:00:00Z',
+  launchedAt: '2026-05-05T00:01:00Z',
+  signature: {
+    alg: 'eip-191',
+    signer: '0x1111111111111111111111111111111111111111',
+    value: '0xdeadbeef',
+  },
+};
+
+describe('NetCard — manifest-keyed (joined) variant', () => {
+  beforeEach(() => {
+    apiMock.operatorLeave.mockClear();
+    apiMock.operatorLeave.mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders the manifest summary with current roles, harness, and Joined state', () => {
+    render(
+      <NetCard
+        manifestCid="bafybeiaaa"
+        manifest={baseManifest}
+        joined={{
+          roles: ['solver'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: ['jinn-prediction-plugin'],
+        }}
+        onLeft={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('netcard-joined')).toBeTruthy();
+    expect(screen.getByText('Prediction Markets')).toBeTruthy();
+    expect(screen.getByTestId('netcard-joined-state').textContent).toMatch(/joined/i);
+    expect(screen.getByTestId('netcard-joined-roles').textContent).toBe('solver');
+    expect(screen.getByTestId('netcard-joined-harness').textContent).toBe(
+      'claude-code-learner',
+    );
+    expect(screen.getByTestId('netcard-joined-manifest-cid').textContent).toBe(
+      'bafybeiaaa',
+    );
+  });
+
+  it('shows the manifest evaluator binding when evaluator role is joined', () => {
+    render(
+      <NetCard
+        manifestCid="bafybeiaaa"
+        manifest={baseManifest}
+        joined={{ roles: ['evaluator'] }}
+        onLeft={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByTestId('netcard-joined-evaluator-binding').textContent,
+    ).toMatch(/jinn-builtin\/prediction-v1-eval@1\.0/);
+    // Solver-only fields hidden when only evaluator is joined.
+    expect(screen.queryByTestId('netcard-joined-harness')).toBeNull();
+  });
+
+  it('Leave button calls api.operator.leave and notifies onLeft on success', async () => {
+    const onLeft = vi.fn();
+    const onRestartPending = vi.fn();
+    render(
+      <NetCard
+        manifestCid="bafybeiaaa"
+        manifest={baseManifest}
+        joined={{ roles: ['solver'], harness: 'claude-code-learner' }}
+        onLeft={onLeft}
+        onRestartPending={onRestartPending}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('netcard-joined-leave'));
+    fireEvent.click(screen.getByTestId('netcard-joined-leave-confirm'));
+
+    await waitFor(() => expect(apiMock.operatorLeave).toHaveBeenCalledWith('bafybeiaaa'));
+    await waitFor(() => expect(onLeft).toHaveBeenCalled());
+    expect(onRestartPending).toHaveBeenCalled();
+  });
+
+  it('surfaces an error from leave without calling onLeft', async () => {
+    apiMock.operatorLeave.mockRejectedValue(new Error('config_write_failed'));
+    const onLeft = vi.fn();
+    render(
+      <NetCard
+        manifestCid="bafybeiaaa"
+        manifest={baseManifest}
+        joined={{ roles: ['solver'] }}
+        onLeft={onLeft}
+        onRestartPending={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('netcard-joined-leave'));
+    fireEvent.click(screen.getByTestId('netcard-joined-leave-confirm'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toMatch(/config_write_failed/),
+    );
+    expect(onLeft).not.toHaveBeenCalled();
+  });
+});
+
+// ── NetCard legacy props still work (regression) ─────────────────────────────
+
+describe('NetCard — legacy mode regression', () => {
+  it('still renders the legacy catalog row when {catalog, config} props are passed', () => {
+    render(
+      <NetCard
+        catalog={baseCatalog}
+        config={{
+          enabled: true,
+          roles: ['solving'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        }}
+        onSaved={vi.fn()}
+        onRestartPending={vi.fn()}
+      />,
+    );
+    // Legacy state pill says "Live" / "Available", not "Joined".
+    expect(screen.queryByTestId('netcard-joined')).toBeNull();
+    expect(screen.getByText(/live/i)).toBeTruthy();
   });
 });

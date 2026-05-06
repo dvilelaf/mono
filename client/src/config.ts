@@ -445,6 +445,37 @@ export const JinnConfigSchema = z.object({
   )).default(DEFAULT_SOLVER_NETS),
 
   /**
+   * Manifest-keyed joined SolverNets (Task 21).
+   *
+   * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
+   *
+   * Populated by `POST /v1/operator/join/:cid` when an operator joins a
+   * launched SolverNet from the registry catalog. Keys are `manifestCid`
+   * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
+   * launched-instance authority across launchers.
+   *
+   * Kept structurally separate from `solverNets` for now — Task 22 collapses
+   * the two branches into a single manifest-keyed shape. The daemon-side
+   * runtime does not consume this block yet; it is round-trip-only at this
+   * stage so the SPA's join/leave actions persist correctly across restarts.
+   */
+  joinedSolverNets: z
+    .record(
+      z.string(),
+      z.object({
+        manifestCid: z.string().min(1),
+        name: z.string().optional(),
+        roles: z
+          .array(z.enum(['solver', 'evaluator']))
+          .min(1, 'each joined SolverNet must enable at least one role'),
+        harness: z.string().optional(),
+        model: z.string().optional(),
+        plugins: z.array(z.string()).default([]),
+      }),
+    )
+    .optional(),
+
+  /**
    * Trusted ed25519 publishers for external harness impls. The daemon
    * refuses to load any external impl whose manifest signature is not
    * verifiable against one of these public keys.

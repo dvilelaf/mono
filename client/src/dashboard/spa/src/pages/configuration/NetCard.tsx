@@ -1,15 +1,28 @@
 import { useState } from 'react';
-import type { SolverNetCatalogEntry } from '../../api/types.js';
+import type {
+  SolverNetCatalogEntry,
+  SolverNetManifestV1,
+} from '../../api/types.js';
 import { ConfigField } from '../../components/ConfigField.js';
 import { api } from '../../api/client.js';
 import { SolverNetSigil } from './solverNetSigils.js';
 import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
 
 /**
- * Per-SolverNet card inside the Configuration > SolverNets section. Shows
- * the catalog name + description + state pill + enable toggle. When
- * enabled, expands a body with role / harness / model / plugins fields and
- * a per-net save lifecycle (Cancel + Save changes).
+ * Per-SolverNet card inside the Configuration > SolverNets section.
+ *
+ * Two modes, distinguished by props (Task 21 introduces the manifest-keyed
+ * mode; the legacy mode lingers until Task 22 drops the legacy schema):
+ *
+ *   1. Legacy mode — `{catalog, config}`. Shows the bundled catalog row +
+ *      enable toggle + role/harness/model/plugins editor. Persists through
+ *      `POST /v1/setup/solvernets/:name`.
+ *
+ *   2. Manifest-keyed mode — `{manifest, manifestCid, joined}`. Shows the
+ *      manifest summary + current roles + Leave button. Persists through
+ *      `DELETE /v1/operator/join/:cid`. The full edit form lives in the
+ *      `JoinFlow` page; this card surfaces the resulting state and
+ *      provides the Leave affordance.
  *
  * Disabling a net while edits are pending opens an in-card confirm prompt
  * before discarding the edits.
@@ -39,14 +52,42 @@ function rolesEqual(a: NetCardRole[], b: NetCardRole[]): boolean {
   return b.every((r) => aset.has(r));
 }
 
-export interface NetCardProps {
+/** Legacy / built-in catalog-row mode (`/v1/setup/solvernets/:name`). */
+export interface NetCardLegacyProps {
   catalog: SolverNetCatalogEntry;
   config: NetCardConfig;
   onSaved: () => void;
   onRestartPending: () => void;
 }
 
-export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardProps): JSX.Element {
+/** Manifest-keyed joined-instance mode (`/v1/operator/join/:cid`). */
+export interface NetCardJoinedProps {
+  manifestCid: string;
+  manifest: SolverNetManifestV1;
+  joined: {
+    roles: Array<'solver' | 'evaluator'>;
+    harness?: string;
+    model?: string;
+    plugins?: string[];
+  };
+  onLeft: () => void;
+  onRestartPending: () => void;
+}
+
+export type NetCardProps = NetCardLegacyProps | NetCardJoinedProps;
+
+function isJoinedProps(props: NetCardProps): props is NetCardJoinedProps {
+  return (props as NetCardJoinedProps).manifest !== undefined;
+}
+
+export function NetCard(props: NetCardProps): JSX.Element {
+  if (isJoinedProps(props)) {
+    return <JoinedNetCard {...props} />;
+  }
+  return <LegacyNetCard {...props} />;
+}
+
+function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLegacyProps): JSX.Element {
   const [draft, setDraft] = useState<NetCardConfig>(config);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -544,6 +585,271 @@ export function NetCard({ catalog, config, onSaved, onRestartPending }: NetCardP
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Manifest-keyed (joined) variant ─────────────────────────────────────────
+
+function formatEthFromWei(wei: string | undefined): string {
+  if (!wei || !/^\d+$/.test(wei)) return '—';
+  try {
+    const n = BigInt(wei);
+    const eth = Number(n) / 1e18;
+    if (eth === 0) return '0 ETH';
+    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
+    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
+  } catch {
+    return '—';
+  }
+}
+
+function JoinedNetCard({
+  manifestCid,
+  manifest,
+  joined,
+  onLeft,
+  onRestartPending,
+}: NetCardJoinedProps): JSX.Element {
+  const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState(false);
+
+  const leave = async (): Promise<void> => {
+    setLeaving(true);
+    setError(null);
+    try {
+      const res = await api.operator.leave(manifestCid);
+      if (res.restartRequired) onRestartPending();
+      onLeft();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLeaving(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="netcard-joined"
+      data-manifest-cid={manifestCid}
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: '6px',
+        background: 'var(--bg)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr auto',
+          gap: '16px',
+          alignItems: 'center',
+          padding: '14px 18px',
+        }}
+      >
+        <SolverNetSigil name={manifest.contract.id} />
+        <span>
+          <span
+            style={{ fontSize: '15px', fontWeight: 500, color: 'var(--fg)' }}
+          >
+            {manifest.name}
+          </span>
+          <span
+            style={{
+              display: 'block',
+              fontSize: '12px',
+              color: 'var(--fg-muted)',
+              marginTop: '2px',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            {manifest.contract.id}@{manifest.contract.version} · launched by{' '}
+            agentId {manifest.launcher.agentId}
+          </span>
+        </span>
+        <span
+          data-testid="netcard-joined-state"
+          style={{
+            fontSize: '11px',
+            fontWeight: 500,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--vow-green)',
+            border: '1px solid var(--vow-green)',
+            borderRadius: '999px',
+            padding: '2px 10px',
+          }}
+        >
+          Joined
+        </span>
+      </div>
+
+      <div
+        style={{
+          borderTop: '1px solid var(--border)',
+          padding: '14px 20px',
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
+          gap: '6px 12px',
+          background: 'var(--bg-sunken)',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '12px',
+          color: 'var(--fg-muted)',
+        }}
+      >
+        <span>Roles</span>
+        <span data-testid="netcard-joined-roles" style={{ color: 'var(--fg)' }}>
+          {joined.roles.length === 0 ? '—' : joined.roles.join(', ')}
+        </span>
+        <span>Solution price</span>
+        <span style={{ color: 'var(--fg)' }}>
+          {formatEthFromWei(manifest.solutionPriceWei)}
+        </span>
+        <span>Verdict price</span>
+        <span style={{ color: 'var(--fg)' }}>
+          {formatEthFromWei(manifest.verdictPriceWei)}
+        </span>
+        {joined.roles.includes('solver') && joined.harness && (
+          <>
+            <span>Harness</span>
+            <span
+              data-testid="netcard-joined-harness"
+              style={{ color: 'var(--fg)' }}
+            >
+              {joined.harness}
+            </span>
+          </>
+        )}
+        {joined.roles.includes('solver') && joined.model && (
+          <>
+            <span>Model</span>
+            <span style={{ color: 'var(--fg)' }}>{joined.model}</span>
+          </>
+        )}
+        {joined.roles.includes('solver') && (joined.plugins?.length ?? 0) > 0 && (
+          <>
+            <span>Plugins</span>
+            <span style={{ color: 'var(--fg)' }}>
+              {joined.plugins!.join(', ')}
+            </span>
+          </>
+        )}
+        {joined.roles.includes('evaluator') && (
+          <>
+            <span>Evaluator harness</span>
+            <span
+              data-testid="netcard-joined-evaluator-binding"
+              style={{ color: 'var(--fg-dim)' }}
+            >
+              {manifest.contract.evaluationFunction.implementation} (manifest-bound)
+            </span>
+          </>
+        )}
+        <span>Manifest CID</span>
+        <span
+          data-testid="netcard-joined-manifest-cid"
+          style={{
+            color: 'var(--fg-dim)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {manifestCid}
+        </span>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: '10px 18px',
+            borderTop: '1px solid var(--border)',
+            color: 'var(--break-red)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '12px',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div
+        style={{
+          padding: '12px 20px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '8px',
+          fontFamily: "'JetBrains Mono', monospace",
+        }}
+      >
+        {confirm ? (
+          <>
+            <span
+              style={{ color: 'var(--fg)', fontSize: '12px', marginRight: 'auto' }}
+            >
+              Leave {manifest.name}? Restart required.
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfirm(false)}
+              disabled={leaving}
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: '6px',
+                padding: '6px 14px',
+                background: 'transparent',
+                color: 'var(--fg)',
+                fontFamily: 'inherit',
+                fontSize: '12px',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="netcard-joined-leave-confirm"
+              onClick={() => {
+                void leave();
+              }}
+              disabled={leaving}
+              style={{
+                border: '1px solid var(--break-red)',
+                borderRadius: '6px',
+                padding: '6px 14px',
+                background: 'var(--break-red)',
+                color: 'var(--fg)',
+                fontFamily: 'inherit',
+                fontSize: '12px',
+              }}
+            >
+              {leaving ? 'Leaving…' : 'Leave'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            data-testid="netcard-joined-leave"
+            onClick={() => setConfirm(true)}
+            style={{
+              border: '1px solid var(--border)',
+              borderRadius: '6px',
+              padding: '8px 16px',
+              background: 'transparent',
+              color: 'var(--fg)',
+              fontFamily: 'inherit',
+              fontSize: '13px',
+              cursor: 'pointer',
+            }}
+          >
+            Leave
+          </button>
+        )}
+      </div>
     </div>
   );
 }

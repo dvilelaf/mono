@@ -253,6 +253,45 @@ export const api = {
         `/v1/solvernets/registry/${encodeURIComponent(cid)}`,
       ),
   },
+
+  // ---- Operator participation flow (Task 21) ----
+  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
+  // manifest-keyed entry to `config.solverNets[<cid>]`; restart-required
+  // — the daemon does not hot-reload SolverNet config.
+  operator: {
+    join: (
+      manifestCid: string,
+      body: {
+        name?: string;
+        roles: Array<'solver' | 'evaluator'>;
+        harness?: string;
+        model?: string;
+        plugins?: string[];
+      },
+    ) =>
+      jfetch<{
+        ok: boolean;
+        restartRequired: boolean;
+        manifestCid: string;
+        config: {
+          manifestCid: string;
+          name?: string;
+          roles: Array<'solver' | 'evaluator'>;
+          harness?: string;
+          model?: string;
+          plugins?: string[];
+        };
+      }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    leave: (manifestCid: string) =>
+      jfetch<{ ok: boolean; restartRequired: boolean; manifestCid: string }>(
+        `/v1/operator/join/${encodeURIComponent(manifestCid)}`,
+        { method: 'DELETE' },
+      ),
+  },
 };
 
 /**
