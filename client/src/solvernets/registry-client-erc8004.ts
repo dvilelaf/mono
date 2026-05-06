@@ -213,6 +213,17 @@ export class IdentityRegistryBackedSolverNetRegistryClient
    */
   private readonly manifestCache = new Map<string, SolverNetManifestV1>();
 
+  /**
+   * Set of cids whose cached manifest body has been verified against the
+   * on-chain advertised hash (or where we ourselves were the publisher and
+   * therefore know the body is canonical). Once a cid lands here,
+   * `getManifest` short-circuits the subgraph round-trip on subsequent
+   * cache hits — without this set, every cache hit re-verified by hitting
+   * the subgraph, silently doubling subgraph load in catalog refresh ticks
+   * (daemon polling scenarios).
+   */
+  private readonly verifiedCids = new Set<string>();
+
   constructor(config: IdentityRegistryBackedSolverNetRegistryClientConfig) {
     this.ipfs = config.ipfs;
     this.publisher = config.publisher;
@@ -245,8 +256,11 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     const manifestCid = await this.ipfs.upload(manifest);
 
     // Cache the manifest so listLaunched can populate row fields without an
-    // IPFS round-trip.
+    // IPFS round-trip. We're the publisher here, so the body is canonical
+    // by construction — mark the cid as verified so subsequent getManifest
+    // calls skip the subgraph re-verification round-trip.
     this.manifestCache.set(manifestCid, manifest);
+    this.verifiedCids.add(manifestCid);
 
     const lifecycle: SetMetadataLifecyclePayload = {
       schemaVersion: LIFECYCLE_PAYLOAD_SCHEMA_VERSION,
@@ -288,9 +302,15 @@ export class IdentityRegistryBackedSolverNetRegistryClient
 
     // Look up the original manifest hash if we have it cached so the
     // lifecycle payload re-asserts the canonical hash. If we don't have it
-    // (stateless re-launch from another process), we can attempt to recover
-    // by fetching IPFS and canonicalizing — but that's a heavier path. For
-    // day-1, require either a cached manifest OR an IPFS fetch.
+    // (stateless re-launch from another process), recover by fetching IPFS
+    // and canonicalizing — fetchAndValidateManifest also verifies against
+    // the on-chain advertised hash so we don't sign over a tampered body.
+    //
+    // The cache-hit path skips both the subgraph round-trip and the IPFS
+    // fetch: the cached manifest was either published by us (canonical by
+    // construction) or already verified on a prior read (recorded in
+    // `verifiedCids`). Hashing the cached body locally is sufficient to
+    // populate the lifecycle payload.
     const cached = this.manifestCache.get(manifestCid);
     let hash: `0x${string}`;
     if (cached !== undefined) {
@@ -384,11 +404,21 @@ export class IdentityRegistryBackedSolverNetRegistryClient
 
   async getManifest(args: { manifestCid: string }): Promise<SolverNetManifestV1> {
     const cached = this.manifestCache.get(args.manifestCid);
+
+    // Fast path: cid was verified in this process — either we published it
+    // (canonical by construction) or we previously verified its hash
+    // against the on-chain advertised hash. Trust the cached body without
+    // hitting the subgraph. Skipping this re-verification is what keeps
+    // catalog refresh ticks from doubling subgraph load.
+    if (cached !== undefined && this.verifiedCids.has(args.manifestCid)) {
+      return cached;
+    }
+
     if (cached !== undefined) {
-      // Cache populated only by our own publishes / verified fetches, so
-      // cached entries are trusted. Verify hash against on-chain advertised
-      // hash if any setMetadata events exist for this cid; if they don't,
-      // we still return the cached body (we put it there ourselves).
+      // Cached but not yet marked verified (shouldn't happen with the
+      // current cache-population paths, which always mark verified, but
+      // we keep this branch defensive). Verify hash against on-chain
+      // advertised hash if any setMetadata events exist for this cid.
       const events = await this.subgraph.fetchSetMetadataEventsForCid({
         manifestCid: args.manifestCid,
       });
@@ -401,6 +431,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
           );
         }
       }
+      this.verifiedCids.add(args.manifestCid);
       return cached;
     }
 
@@ -431,10 +462,15 @@ export class IdentityRegistryBackedSolverNetRegistryClient
 
     // For a single cid, all resolved rows share the cid. If multiple
     // launchers wrote under the same cid (unusual but legal), pick the
-    // most recent across all of them by anchorBlock.
-    const latest = resolved.reduce((acc, cur) =>
-      cur.anchorBlock > acc.anchorBlock ? cur : acc,
-    );
+    // most recent across all of them by (anchorBlock, anchorTransactionIndex)
+    // lexicographic order — without the secondary key, same-block ties
+    // would resolve in Map insertion order (non-deterministic).
+    const latest = resolved.reduce((acc, cur) => {
+      if (cur.anchorBlock !== acc.anchorBlock) {
+        return cur.anchorBlock > acc.anchorBlock ? cur : acc;
+      }
+      return cur.anchorTransactionIndex > acc.anchorTransactionIndex ? cur : acc;
+    });
 
     return {
       status: latest.status,
@@ -497,20 +533,32 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     void canonicalManifestJson(manifest);
 
     this.manifestCache.set(manifestCid, manifest);
+    // Mark the cid verified iff we cross-checked the canonical hash
+    // against an on-chain advertised hash. Without an on-chain reference
+    // (no events for this cid yet) we still cache for performance, but
+    // refrain from short-circuiting future hash checks.
+    if (hash !== null) {
+      this.verifiedCids.add(manifestCid);
+    }
     return manifest;
   }
 
   /**
    * Pick the manifest hash advertised by the most recent setMetadata event
    * for a cid. Returns null if no events match.
+   *
+   * Cross-launcher ties on the same block are broken by the higher
+   * `anchorTransactionIndex` — same lexicographic rule as `getLifecycleStatus`.
    */
   private latestAdvertisedHash(events: SetMetadataEvent[]): `0x${string}` | null {
     const resolved = resolveMostRecentWins(events);
     if (resolved.length === 0) return null;
-    // For a single cid, all resolved rows share the cid; pick by anchorBlock.
-    const latest = resolved.reduce((acc, cur) =>
-      cur.anchorBlock > acc.anchorBlock ? cur : acc,
-    );
+    const latest = resolved.reduce((acc, cur) => {
+      if (cur.anchorBlock !== acc.anchorBlock) {
+        return cur.anchorBlock > acc.anchorBlock ? cur : acc;
+      }
+      return cur.anchorTransactionIndex > acc.anchorTransactionIndex ? cur : acc;
+    });
     return latest.manifestHash;
   }
 }

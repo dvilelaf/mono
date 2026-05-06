@@ -56,6 +56,12 @@ export interface SetMetadataEvent {
 
 /**
  * One row of resolved current-state-per-(agentId, cid).
+ *
+ * `anchorTransactionIndex` is the in-block transaction index of the winning
+ * setMetadata event — required as a secondary sort key when callers compare
+ * across multiple resolved rows (e.g. cross-launcher tiebreaks for the same
+ * cid, where two launchers wrote in the same block). Without it, the
+ * cross-row comparison would be non-deterministic (Map insertion order).
  */
 export interface ResolvedLifecycle {
   manifestCid: string;
@@ -64,6 +70,7 @@ export interface ResolvedLifecycle {
   statusUpdatedAt: string;
   manifestHash: `0x${string}`;
   anchorBlock: number;
+  anchorTransactionIndex: number;
 }
 
 /**
@@ -117,6 +124,7 @@ export function resolveMostRecentWins(events: SetMetadataEvent[]): ResolvedLifec
       statusUpdatedAt: event.payload.at,
       manifestHash: event.payload.hash,
       anchorBlock: event.blockNumber,
+      anchorTransactionIndex: event.transactionIndex,
     });
   }
   return out;
