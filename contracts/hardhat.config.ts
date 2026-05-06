@@ -51,6 +51,19 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 8453,
+      // Chain-knowledge-only entries so `hardhat_reset` with a Base Sepolia
+      // fork (RUN_FORK_TESTS=1, see test/jinn/upgrade/) doesn't error with
+      // "no known hardfork activation history" for chain 84532. We do NOT
+      // configure a `forking` block at the network level — that would
+      // attach a fork to every test in the suite. Activation is conservative:
+      // Base Sepolia launched on Cancun (deployed mid-2024).
+      chains: {
+        84532: {
+          hardforkHistory: {
+            cancun: 0,
+          },
+        },
+      },
     },
     localhost: {
       url: process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545",
