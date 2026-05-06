@@ -78,8 +78,14 @@ describe('App routes', () => {
       ),
     );
     // Configuration is composed of three section cards; the SolverNets head
-    // is the most stable assertion since it never collapses to nothing.
-    expect(screen.getByText(/solvernets/i)).toBeTruthy();
+    // is the most stable assertion since it never collapses to nothing. Match
+    // the exact heading rather than `/solvernets/i` because the section body
+    // also contains "SolverNets" copy (e.g. "Discover launched SolverNets…").
+    expect(
+      screen.getByText((_, el) =>
+        el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
+      ),
+    ).toBeTruthy();
   });
 
   it('renders LauncherPage on /launcher', async () => {

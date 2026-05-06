@@ -5,15 +5,23 @@ import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 /**
- * Overview's empty-state gating depends on the prediction operator
- * payload. We mock `api.getStatus` per-test so the page receives the
- * shape we want to assert against. (jinn-mono-l2zl.15.4.12)
+ * Overview's empty-state gating depends on two payloads now: the
+ * `predictionV1` operator status and the `bootstrap.solverNets` map
+ * (spec §12, the operator's joined-SolverNets dictionary). We mock both
+ * per-test so the page receives the shape we want to assert against.
+ *
+ * `detectJoinedSolverNet` accepts:
+ *   1. the new manifestCid-keyed shape (`solverNets[<cid>].roles`) — wins
+ *   2. the legacy short-name shape (`solverNets.prediction.enabled`)
+ *   3. the predictionV1 status flag as a last-resort signal
  */
 const getStatusMock = vi.fn();
+const getBootstrapMock = vi.fn();
 
 vi.mock('../api/client.js', () => ({
   api: {
     getStatus: () => getStatusMock(),
+    getBootstrap: () => getBootstrapMock(),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
   },
@@ -39,7 +47,7 @@ function operatorEyebrow(name: string): (_: string, el: Element | null) => boole
 }
 
 describe('OverviewPage empty-state gating', () => {
-  it('shows the "Pick a SolverNet" prompt when no SolverNet is opted in', async () => {
+  it('shows the "Pick a SolverNet" prompt when the operator has joined nothing', async () => {
     getStatusMock.mockResolvedValue({
       predictionV1: {
         operator: {
@@ -51,6 +59,7 @@ describe('OverviewPage empty-state gating', () => {
       },
       fleet: { services: [] },
     });
+    getBootstrapMock.mockResolvedValue({ solverNets: {} });
     render(withProviders(<OverviewPage />));
 
     expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
@@ -58,7 +67,7 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
   });
 
-  it('shows the OperatorCard (and hides the prompt) when the SolverNet is enabled', async () => {
+  it('shows the OperatorCard from the legacy `enabled` flag (predecessor compat)', async () => {
     getStatusMock.mockResolvedValue({
       predictionV1: {
         operator: {
@@ -71,20 +80,57 @@ describe('OverviewPage empty-state gating', () => {
       },
       fleet: { services: [] },
     });
+    getBootstrapMock.mockResolvedValue({
+      solverNets: {
+        prediction: { enabled: true, roles: ['solving'] },
+      },
+    });
     render(withProviders(<OverviewPage />));
 
-    // useQuery resolves on the next microtask; wait for the operator-card
-    // eyebrow to materialize before asserting the empty-state is gone.
     await waitFor(() =>
       expect(screen.getByText(operatorEyebrow('prediction'))).toBeTruthy(),
     );
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
+    expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
   });
 
-  it('shows the OperatorCard for an opted-in operator without a role field', async () => {
-    // The operator-status payload does not currently expose role. Until
-    // jinn-mono-l2zl.15.4.8 lands, any enabled SolverNet must light up
-    // the OperatorCard regardless of the role configured in the daemon.
+  it('shows the OperatorCard for the new manifestCid-keyed shape (spec §12)', async () => {
+    getStatusMock.mockResolvedValue({
+      predictionV1: {
+        operator: {
+          ok: true,
+          // Crucially: the predictionV1 flag is `false` — the new shape
+          // must light up the card on its own.
+          solverNet: { name: 'prediction', enabled: false },
+          diagnostics: [],
+        },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+      fleet: { services: [] },
+    });
+    getBootstrapMock.mockResolvedValue({
+      solverNets: {
+        bafybeiaaa: {
+          name: 'Prediction Markets',
+          manifestCid: 'bafybeiaaa',
+          roles: ['solver'],
+        },
+      },
+    });
+    render(withProviders(<OverviewPage />));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(operatorEyebrow('Prediction Markets')),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
+    // Solver pill (the new schema's 'solver' maps to OperatorCard's 'solving').
+    expect(screen.getByText(/^solver$/i)).toBeTruthy();
+  });
+
+  it('shows the OperatorCard from the predictionV1 status as a back-compat signal', async () => {
+    // No bootstrap.solverNets at all; predictionV1.solverNet.enabled wins.
     getStatusMock.mockResolvedValue({
       predictionV1: {
         operator: {
@@ -96,6 +142,7 @@ describe('OverviewPage empty-state gating', () => {
       },
       fleet: { services: [] },
     });
+    getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     await waitFor(() =>
@@ -104,11 +151,23 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(/pick a solvernet to participate in/i)).toBeNull();
   });
 
-  it('shows the prompt when the operator payload is missing entirely', async () => {
+  it('shows the prompt when both payloads are empty', async () => {
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
+    getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     expect(await screen.findByText(/pick a solvernet to participate in/i)).toBeTruthy();
     expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
+  });
+
+  it('CTA on empty-state deep-links into /configuration#solvernets', async () => {
+    getStatusMock.mockResolvedValue({ fleet: { services: [] } });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    const cta = await screen.findByText(/configure\s*→/i);
+    expect(cta.closest('a')?.getAttribute('href')).toBe(
+      '/configuration#solvernets',
+    );
   });
 });
