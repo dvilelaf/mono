@@ -61,6 +61,29 @@ const RegistrySchema = z.object({
 });
 
 /**
+ * Identifier characters safe for use as on-disk filenames across POSIX and
+ * Windows. Rejects path separators (`/`, `\`), path-traversal segments
+ * (`..`), control chars, and shell metacharacters. Alphanumeric + dash +
+ * underscore + dot are allowed.
+ *
+ * Without this guard, an id like `'launcher-1/prediction-001'` creates
+ * subdirectories that `listJsonFiles` cannot recurse into — records vanish
+ * from `loadOwnedRecords` after daemon restart even though their files
+ * exist on disk (jinn-mono-qwdc.34).
+ */
+const SafeIdChar = /^[A-Za-z0-9._-]+$/u;
+const SafeId = z
+  .string()
+  .min(1)
+  .regex(SafeIdChar, {
+    message:
+      'must contain only alphanumeric, dash, underscore, or dot (no path separators or shell metachars)',
+  })
+  .refine((s) => s !== '.' && s !== '..', {
+    message: 'must not be "." or ".."',
+  });
+
+/**
  * Local persistent record for a SolverNet the launcher daemon owns. Mirrors
  * the spec §6.2 shape exactly.
  *
@@ -73,7 +96,7 @@ const RegistrySchema = z.object({
  */
 export const LaunchedSolverNetRecordSchema = z.object({
   schemaVersion: z.literal('solvernet.launched.v1'),
-  solverNetId: z.string().min(1),
+  solverNetId: SafeId,
   manifestCid: z.string().min(1),
   manifestPath: z.string().optional(),
   manifestHash: HexString,
@@ -105,7 +128,7 @@ export type LaunchedSolverNetRecord = z.infer<typeof LaunchedSolverNetRecordSche
  */
 export const DraftSolverNetRecordSchema = z.object({
   schemaVersion: z.literal('solvernet.draft.v1'),
-  draftId: z.string().min(1),
+  draftId: SafeId,
 
   templateContractId: z.string().optional(),
   templateContractVersion: z.string().optional(),
@@ -275,10 +298,19 @@ export function createSolverNetStore(opts: SolverNetStoreOptions = {}): SolverNe
   const launchedDir = resolveLaunchedDir(baseDir);
   const draftsDir = resolveDraftsDir(baseDir);
 
+  function assertSafeId(id: string, kind: 'solverNetId' | 'draftId'): void {
+    const result = SafeId.safeParse(id);
+    if (!result.success) {
+      const message = result.error.issues[0]?.message ?? 'invalid id';
+      throw new Error(`Invalid ${kind} ${JSON.stringify(id)}: ${message}`);
+    }
+  }
   function launchedPath(solverNetId: string): string {
+    assertSafeId(solverNetId, 'solverNetId');
     return path.join(launchedDir, `${solverNetId}.json`);
   }
   function draftPath(draftId: string): string {
+    assertSafeId(draftId, 'draftId');
     return path.join(draftsDir, `${draftId}.json`);
   }
 
