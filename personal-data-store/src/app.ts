@@ -18,6 +18,7 @@ import { interventionsRouter } from "./domains/interventions/interventions.route
 import { briefingsRouter } from "./domains/briefings/briefings.routes.js";
 import { watchdogRouter } from "./domains/watchdog/watchdog.routes.js";
 import { correlationsRouter } from "./domains/correlations/correlations.routes.js";
+import { tasksRouter } from "./domains/tasks/tasks.routes.js";
 import { appleHealthWebhook } from "./webhooks/apple-health.webhook.js";
 
 export const app = express();
@@ -57,6 +58,7 @@ app.use("/api/goals", goalsRouter);
 app.use("/api/interventions", interventionsRouter);
 app.use("/api/briefings", briefingsRouter);
 app.use("/api/watchdog", watchdogRouter);
+app.use("/api/tasks", tasksRouter);
 app.use("/api/about", aboutRouter);
 app.use("/api/decide", decideRouter);
 app.use("/api/correlations", correlationsRouter);
