@@ -146,8 +146,40 @@ export const SOLVER_NET_CONTRACTS: SolverNetContractMap = {
   'prediction.v1': PREDICTION_V1_SOLVER_NET_CONTRACT,
 };
 
-export function getSolverNetContract(solverType: string): SolverNetContract | undefined {
+/**
+ * @deprecated Use `getSolverNetContract({ id, version })` instead. The
+ * string-keyed signature exists only for the duration of the SolverNet
+ * creation-and-launch migration (Task 8 of
+ * `spec/2026-05-05-solvernet-creation-and-launch.md`) and is removed in
+ * Task 30 alongside the legacy `solverType` field on `SolverNetContract`.
+ */
+export function getSolverNetContract(solverType: string): SolverNetContract | undefined;
+/**
+ * Look up a SolverNet contract template by stable identity. Replaces the
+ * legacy string-keyed signature; preferred shape from Task 7 onward.
+ */
+export function getSolverNetContract(ref: { id: string; version: string }): SolverNetContract | undefined;
+export function getSolverNetContract(
+  arg: string | { id: string; version: string },
+): SolverNetContract | undefined {
+  const solverType = typeof arg === 'string' ? arg : `${arg.id}.${arg.version}`;
   return SOLVER_NET_CONTRACTS[solverType as SupportedSolverType];
+}
+
+/**
+ * Internal helper: derives the legacy `solverType` string (`${id}.${version}`)
+ * from a contract id and version.
+ *
+ * @internal Used only by daemon-internal harness dispatch's compatibility
+ * layer during the Task 8 migration of
+ * `spec/2026-05-05-solvernet-creation-and-launch.md`. NOT re-exported from
+ * the `@jinn-network/sdk/solvernets` barrel and not part of the SDK's
+ * public surface; removed in Task 30 alongside the string-keyed
+ * `getSolverNetContract` signature and the legacy `solverType` field on
+ * `SolverNetContract`.
+ */
+export function solverTypeAlias(ref: { id: string; version: string }): string {
+  return `${ref.id}.${ref.version}`;
 }
 
 export interface PayloadValidationIssue {
