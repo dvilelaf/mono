@@ -153,14 +153,12 @@ export interface LauncherTasksResponse {
 }
 
 /**
- * Body shape for `PATCH /v1/launcher/solvernets/:name`. Owns the `'launching'`
- * role flip and the top-level `predictionV1*` generator-config keys. Operator
- * mode owns `'solving'` / `'evaluating'` via `POST /v1/setup/solvernets/:name`
- * — strict separation per spec §3.
- *
- * Generator-config keys here mirror the daemon-side `mapGeneratorPatch` table
- * in `client/src/api/launcher-endpoints.ts`; keep in sync with the
- * `predictionV1*` fields in `JinnConfigSchema`.
+ * Legacy body shape for `PATCH /v1/launcher/solvernets/:name`. The endpoint
+ * was retired by Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md
+ * (the operator-config `'launching'` role + top-level `predictionV1*` keys
+ * were dropped from the schema). The daemon now returns 410 Gone for any
+ * call against this route. SPA callers should drive launcher-mode SolverNet
+ * edits through the launched-record subsystem instead.
  */
 export interface LauncherSolverNetPatch {
   launching?: boolean;

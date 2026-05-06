@@ -413,7 +413,7 @@ export async function buildPredictionOperatorStatus({
     if (Array.isArray(candidate) && candidate.length > 0) {
       return Array.from(new Set(candidate.filter(
         (r): r is SolverNetOperatorRole =>
-          r === 'solving' || r === 'evaluating' || r === 'launching',
+          r === 'solving' || r === 'evaluating',
       )));
     }
     const legacy = (net as { role?: unknown }).role;

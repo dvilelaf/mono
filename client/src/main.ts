@@ -68,7 +68,6 @@ import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import type { Harness } from './harnesses/types.js';
 import { createClients } from './adapters/mech/safe.js';
-import { collectTestnetAutoTaskGenerators } from './solver-types/index.js';
 import { loadSolverNets } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { BASE_FEEDS } from './venues/chainlink/feeds.js';
@@ -840,11 +839,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
-        // Hot-apply for the PATCH endpoint (Task 8): mirror the operator-mode
-        // setup hook so subsequent /v1/launcher/status reads see the post-edit
-        // roles snapshot without a daemon restart. Mutates `config.solverNets`
-        // in place so the per-tick `roles.includes('launching')` gate flips on
-        // the very next launcher tick.
+        // Cache-invalidation hook retained for the operator-mode
+        // setup-endpoints flow; the launcher-mode PATCH route was retired
+        // by Task 22, so this currently fires only when operator mode
+        // mutates `solverNets`.
         onSolverNetsUpdated: (solverNets) => {
           config.solverNets = solverNets as typeof config.solverNets;
           invalidatePredictionOperatorStatusCache(config);
@@ -1499,54 +1497,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // The `pendingGenerators` set is iterated below to wire generators per
   // launched record (Task 12).
 
-  // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
-  const autoTasksDisabled =
-    process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
+  // ── Auto Task generators (launched-record-driven) ────────────────────────
+  //
+  // Per spec/2026-05-05-solvernet-creation-and-launch.md §11 + Task 22 of the
+  // implementation plan, generator construction is wholly driven by the
+  // SolverNet launched-record subsystem. The legacy
+  // `collectTestnetAutoTaskGenerators` path (config-block-keyed Polymarket
+  // generator + role-based hot-spawn gate) is retired — SolverNet ownership
+  // is determined by which launched records the daemon owns, not by the
+  // operator-config role enum.
+  const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
   const { privateKeyToAccount: _pkToAccount } = await import('viem/accounts');
   const agentEoaAddress = _pkToAccount(agentPrivateKey).address as `0x${string}`;
-  const { generators: autoTaskGenerators, logLines: autoTaskLogLines } = collectTestnetAutoTaskGenerators({
-    network: config.network,
-    rpcUrl: config.rpcUrl,
-    autoTasksDisabled,
-    env: process.env,
-    agentEoa: agentEoaAddress,
-    safeAddress,
-    agentPrivateKey,
-    // spec/2026-05-05-launcher-role-and-mode.md §5.2 — hot-spawn: the
-    // Polymarket prediction.v1 generator is always created on testnet, but
-    // each tick early-returns unless `solverNets.prediction.roles` includes
-    // `'launching'`. The closure below reads the live `config` reference (in
-    // the same JS object that `onSolverNetsUpdated` mutates), so toggling
-    // launcher mode in/out via the operator UX takes effect within one
-    // generator cadence — no daemon restart required.
-    getPredictionRoles: () => config.solverNets?.prediction?.roles ?? [],
-    predictionV1WindowMs: config.predictionV1WindowMs,
-    predictionV1CadenceMs: config.predictionV1CadenceMs,
-    predictionV1MaxNewRoundsPerPoll: config.predictionV1MaxNewRoundsPerPoll,
-    predictionV1MaxNewRoundsPerDay: config.predictionV1MaxNewRoundsPerDay,
-    predictionV1MaxOpenRounds: config.predictionV1MaxOpenRounds,
-    predictionV1AllowlistConditionIds: config.predictionV1AllowlistConditionIds,
-    predictionV1BlocklistConditionIds: config.predictionV1BlocklistConditionIds,
-    predictionV1ResolveGapMs: config.predictionV1ResolveGapMs,
-  });
-  for (const line of autoTaskLogLines) {
-    console.log(line);
-  }
-  // Stash the prediction.v1 generator's state accessor for the Launcher mode
-  // status endpoint (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
-  // `makePredictionV1Generator` returns a callable whose extra `getState()`
-  // method survives the `TaskGenerator` widening; we do a runtime check before
-  // taking the reference so non-generator entries stay decoupled.
-  for (const entry of autoTaskGenerators) {
-    if (entry.solverType !== 'prediction.v1') continue;
-    const gen = entry.generator as unknown;
-    if (typeof gen === 'function' && typeof (gen as { getState?: unknown }).getState === 'function') {
-      predictionGeneratorRef = gen as unknown as typeof predictionGeneratorRef;
-    }
-  }
-  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
-  }
   // ── SolverNet launched-record generators (Task 12 of
   //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
   //
@@ -1557,18 +1519,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // and the SolverNet config API endpoint (Task 14) mutate these refs at
   // runtime; the per-tick gate inside the generator picks the change up
   // within one cadence — no daemon restart, no recreation.
-  //
-  // This path coexists with the legacy `collectTestnetAutoTaskGenerators`
-  // block above. Task 22 of the SolverNet plan drops the legacy block; for
-  // now both paths can spawn generators (the launched-record path is gated
-  // on the SolverNet subsystem being initialised at all, which is testnet +
-  // agent_id + identity_registry — same precondition the SolverNet APIs
-  // need).
   const launchedRecordGenerators: Array<{
     solverType: string;
     generator: import('./tasks/sources.js').TaskGenerator;
   }> = [];
-  if (solverNetSubsystem) {
+  if (solverNetSubsystem && !autoTasksDisabled) {
     const { makePredictionV1GeneratorForLaunchedRecord } = await import(
       './solver-types/prediction-v1-auto.js'
     );
@@ -1585,20 +1540,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         },
       });
       launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
+      // First launched prediction.v1 generator becomes the legacy
+      // `predictionGeneratorRef` source for the launcher status endpoint
+      // (kept thin; multi-record launcher status lives in the launched-record
+      // surface — see spec §11/Task 14).
+      if (
+        !predictionGeneratorRef &&
+        typeof generator === 'function' &&
+        typeof (generator as { getState?: unknown }).getState === 'function'
+      ) {
+        predictionGeneratorRef =
+          generator as unknown as typeof predictionGeneratorRef;
+      }
       console.log(
         `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
           `(prediction.v1, status=${pending.record.status})`,
       );
     }
   }
+  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
+    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
+  }
 
   const taskSources = [
     new StaticConfiguredTaskSource(config.tasks),
-    ...autoTaskGenerators
-      .filter(({ solverType }) =>
-        solverNetRegistry.forSolverType(solverType, 'restoration')?.taskGenerator.enabled,
-      )
-      .map(({ solverType, generator }) => new GeneratedTaskSource(`generated:${solverType}`, generator)),
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
       new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator),
     ),

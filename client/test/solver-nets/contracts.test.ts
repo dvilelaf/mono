@@ -263,37 +263,8 @@ describe('SolverNet contracts', () => {
     ).rejects.toThrow(/runtime plugin .* solverType mismatch/);
   });
 
-  // Direct coverage for the launching-role guard added in a86f075f.
-  // 'launching' is an operator-side launcher loop, not a Task-claiming role,
-  // so it must not map to a SolverNetTaskRole and must not satisfy any
-  // taskRole filter on `forSolverType`. Once Task 4 wires the launcher
-  // runtime gate, a misread here could accidentally enable or suppress
-  // solver loops — so pin both sides of the boundary explicitly.
-  it("taskRoleForOperatorRole('launching') returns undefined", () => {
-    expect(taskRoleForOperatorRole('launching')).toBeUndefined();
-  });
-
   it("taskRoleForOperatorRole maps solving/evaluating to their task roles", () => {
     expect(taskRoleForOperatorRole('solving')).toBe('restoration');
     expect(taskRoleForOperatorRole('evaluating')).toBe('evaluation');
-  });
-
-  it('forSolverType returns undefined for a launching-only SolverNet when filtering by restoration', async () => {
-    const registry = await loadSolverNets({
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['launching'],
-          harness: 'prediction-v1-baseline',
-          plugins: ['bundled:jinn-prediction-plugin'],
-          taskGenerator: { enabled: true },
-        },
-      },
-    });
-    expect(registry.forSolverType('prediction.v1', 'restoration')).toBeUndefined();
-    expect(registry.forSolverType('prediction.v1', 'evaluation')).toBeUndefined();
-    // The net is still registered — it just doesn't match Task-claiming filters.
-    expect(registry.forSolverType('prediction.v1')?.roles).toEqual(['launching']);
   });
 });

@@ -538,13 +538,19 @@ describe('loadConfig solverNets roles migration', () => {
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'evaluating']);
   });
 
-  it('default config seeds prediction with roles: [solving] when no file is provided', () => {
-    const cfg = loadConfig();
-    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+  it('default config has empty solverNets when the on-disk config omits the field', async () => {
+    // Per Decision 5 of spec/2026-05-05-solvernet-creation-and-launch.md
+    // (Task 22), the prediction default block was removed. Fresh installs
+    // start with `solverNets: {}` and join SolverNets via the registry.
+    // We point the loader at an empty config file so the assertion is
+    // independent of any `~/.jinn-client/config.json` on the dev machine.
+    const configPath = await writeConfigFile({ network: 'testnet' });
+    const cfg = loadConfig(configPath);
+    expect(cfg.solverNets).toEqual({});
   });
 });
 
-describe('config: launching role', () => {
+describe('config: legacy launching role removal', () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
@@ -559,26 +565,11 @@ describe('config: launching role', () => {
     return configPath;
   }
 
-  it('accepts roles: ["launching"] for a SolverNet', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      rpcUrl: 'https://example/rpc',
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['launching'],
-          harness: 'claude-code-learner',
-          model: 'claude-haiku-4-5-20251001',
-          plugins: [],
-        },
-      },
-    });
-    const cfg = loadConfig(configPath);
-    expect(cfg.solverNets['prediction']?.roles).toEqual(['launching']);
-  });
-
-  it('accepts roles: ["solving", "launching"] (multi-role)', async () => {
+  it('strips legacy "launching" entries when paired with a valid role', async () => {
+    // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md dropped
+    // `'launching'` from the operator role enum. Configs that still carry
+    // it alongside a valid role are accepted (with `'launching'` stripped)
+    // so existing operator config files keep loading.
     const configPath = await writeConfigFile({
       network: 'testnet',
       rpcUrl: 'https://example/rpc',
@@ -594,7 +585,25 @@ describe('config: launching role', () => {
       },
     });
     const cfg = loadConfig(configPath);
-    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving', 'launching']);
+    expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+  });
+
+  it('rejects roles: ["launching"] standalone (now invalid — leaves no roles)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: true,
+          solverType: 'prediction.v1',
+          roles: ['launching'],
+          harness: 'claude-code-learner',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+        },
+      },
+    });
+    expect(() => loadConfig(configPath)).toThrow();
   });
 
   it('rejects empty roles array', async () => {

@@ -28,39 +28,35 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
   solverType: string;
   /**
    * Operator-selected roles for this SolverNet. A non-empty subset of
-   * `['solving', 'evaluating', 'launching']`. Multiple roles can run
-   * concurrently — the daemon enforces `disallowSolverSelfEvaluation`
-   * on-chain so the operator never evaluates its own Solutions, and the
-   * on-chain TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
+   * `['solving', 'evaluating']`. Multiple roles can run concurrently — the
+   * daemon enforces `disallowSolverSelfEvaluation` on-chain so the operator
+   * never evaluates its own Solutions, and the on-chain
+   * TaskActivityCheckerV3 keeps `solutionDeliveryWeight` and
    * `verdictDeliveryWeight` as independent additive counters.
    *
-   * `'launching'` gates the SolverNet's launcher loop (e.g. prediction.v1
-   * Polymarket Task generator) — replaces the legacy startup-time
-   * launcher boolean with a per-SolverNet role gate evaluated at every
-   * generator tick, so toggling launcher mode in/out takes effect within
-   * one cadence (no daemon restart). See
-   * spec/2026-05-05-launcher-role-and-mode.md §5.2.
+   * Launcher-side flagging is no longer expressed as an operator role —
+   * launcher ownership is determined by the launched-record subsystem
+   * (spec/2026-05-05-solvernet-creation-and-launch.md §11). Operator config
+   * carries only the participation roles.
    *
    * Legacy `role: 'solving' | 'evaluating'` configs are auto-migrated to
    * `roles: [<role>]` by the loader (zod preprocessor on solverNets[*]).
    */
-  roles?: Array<'solving' | 'evaluating' | 'launching'>;
+  roles?: Array<'solving' | 'evaluating'>;
   harness?: string;
   model?: string;
   plugins?: Array<string | { name?: string; source: string; version?: string }>;
   taskGenerator?: { enabled?: boolean };
 }
 
-export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
-  prediction: {
-    enabled: true,
-    solverType: 'prediction.v1',
-    roles: ['solving'],
-    harness: 'claude-code-learner',
-    plugins: [],
-    taskGenerator: { enabled: true },
-  },
-};
+/**
+ * Default `solverNets` is empty per Decision 5 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md — pre-release, no
+ * migration burden. Fresh installs no longer seed the `prediction` entry;
+ * the operator joins SolverNets through the registry (Task 21's
+ * `joinedSolverNets` block).
+ */
+export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
 
 export const JinnConfigSchema = z.object({
   /**
@@ -304,50 +300,6 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * prediction.v1 auto-generator submission window (ms). Default 600000 (10 min).
-   * Docker acceptance gate sets 120000 to keep cycles tight.
-   * Env: JINN_PREDICTION_V1_WINDOW_MS
-   */
-  predictionV1WindowMs: z.number().int().positive().optional(),
-
-  /**
-   * prediction.v1 auto-generator gap from window end → resolveTs (ms).
-   * Default 300000 (5 min). Docker acceptance gate sets 60000.
-   * Env: JINN_PREDICTION_V1_RESOLVE_GAP_MS
-   */
-  predictionV1ResolveGapMs: z.number().int().positive().optional(),
-
-  /**
-   * prediction.v1 Polymarket generator cadence (ms). Default 21600000 (6h).
-   * Set to 0 only for launcher/test loops that intentionally poll every tick.
-   * Env: JINN_PREDICTION_V1_CADENCE_MS
-   */
-  predictionV1CadenceMs: z.number().int().nonnegative().optional(),
-
-  /**
-   * prediction.v1 Polymarket generator safety caps.
-   * Defaults live in the generator: per-poll 25, per-day 100, open 250.
-   * Env:
-   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL
-   *   JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY
-   *   JINN_PREDICTION_V1_MAX_OPEN_ROUNDS
-   */
-  predictionV1MaxNewRoundsPerPoll: z.number().int().nonnegative().optional(),
-  predictionV1MaxNewRoundsPerDay: z.number().int().nonnegative().optional(),
-  predictionV1MaxOpenRounds: z.number().int().nonnegative().optional(),
-
-  /**
-   * Manual prediction.v1 Polymarket conditionId controls.
-   * Allowlist prioritizes consideration but never bypasses eligibility checks;
-   * blocklist always wins.
-   * Env:
-   *   JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS
-   *   JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS
-   */
-  predictionV1AllowlistConditionIds: z.array(z.string()).optional(),
-  predictionV1BlocklistConditionIds: z.array(z.string()).optional(),
-
-  /**
    * Operator-controlled Harness inventory.
    */
   harnesses: z
@@ -388,15 +340,18 @@ export const JinnConfigSchema = z.object({
   /**
    * SolverNet activation, Harness selection, and operator-configured runtime plugins.
    *
-   * Each entry's `roles` is a non-empty subset of
-   * `['solving', 'evaluating', 'launching']`. Multiple roles can run
-   * concurrently for the same SolverNet; the protocol-level
-   * `disallowSolverSelfEvaluation` flag prevents the operator from evaluating
-   * its own Solutions and the on-chain TaskActivityCheckerV3 tracks
-   * Solution and Verdict counters independently (additive into
-   * `eligibleActivityWeight`). `'launching'` gates the SolverNet's launcher
-   * loop (e.g. prediction.v1 Polymarket Task generator) — see
-   * spec/2026-05-05-launcher-role-and-mode.md.
+   * Each entry's `roles` is a non-empty subset of `['solving', 'evaluating']`.
+   * Multiple roles can run concurrently for the same SolverNet; the
+   * protocol-level `disallowSolverSelfEvaluation` flag prevents the operator
+   * from evaluating its own Solutions and the on-chain
+   * TaskActivityCheckerV3 tracks Solution and Verdict counters independently
+   * (additive into `eligibleActivityWeight`).
+   *
+   * Launcher ownership lives in the launched-record subsystem
+   * (spec/2026-05-05-solvernet-creation-and-launch.md §11), not in operator
+   * config — there is no `'launching'` operator role. Legacy entries that
+   * include `'launching'` in `roles` have it stripped by the preprocessor so
+   * older config files keep loading.
    *
    * Backwards-compat: a legacy `role: 'solving' | 'evaluating'` field is
    * auto-promoted to `roles: [<role>]` by the zod preprocessor below so
@@ -411,8 +366,13 @@ export const JinnConfigSchema = z.object({
       // is provided. If both are present (mid-migration third-party config),
       // `roles` wins and `role` is dropped.
       if (Array.isArray(obj['roles']) && obj['roles'].length > 0) {
+        // Drop legacy `'launching'` entries — operator config no longer
+        // carries the launcher role; ownership is via launched records.
+        const filteredRoles = (obj['roles'] as unknown[]).filter(
+          (r) => r !== 'launching',
+        );
         const { role: _legacyRole, ...rest } = obj;
-        return rest;
+        return { ...rest, roles: filteredRoles };
       }
       if (typeof obj['role'] === 'string' && (obj['role'] === 'solving' || obj['role'] === 'evaluating')) {
         const { role, ...rest } = obj;
@@ -423,7 +383,7 @@ export const JinnConfigSchema = z.object({
     z.object({
       enabled: z.boolean().default(true),
       solverType: z.string(),
-      roles: z.array(z.enum(['solving', 'evaluating', 'launching']))
+      roles: z.array(z.enum(['solving', 'evaluating']))
         .min(1, 'each SolverNet must enable at least one role')
         .default(['solving'])
         // Deduplicate to keep downstream consumers simple.
@@ -726,42 +686,10 @@ export function loadConfig(configPath?: string): JinnConfig {
   if (env['JINN_MIN_SAFE_ETH_WEI']) {
     merged.minSafeEthWei = env['JINN_MIN_SAFE_ETH_WEI'].trim();
   }
-  if (env['JINN_PREDICTION_V1_WINDOW_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_WINDOW_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1WindowMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_RESOLVE_GAP_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_RESOLVE_GAP_MS'].trim());
-    if (Number.isFinite(parsed) && parsed > 0) merged.predictionV1ResolveGapMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_CADENCE_MS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_CADENCE_MS'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1CadenceMs = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerPoll = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxNewRoundsPerDay = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS']) {
-    const parsed = Number(env['JINN_PREDICTION_V1_MAX_OPEN_ROUNDS'].trim());
-    if (Number.isFinite(parsed) && parsed >= 0) merged.predictionV1MaxOpenRounds = parsed;
-  }
-  if (env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS'] !== undefined) {
-    merged.predictionV1AllowlistConditionIds = env['JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS']
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-  if (env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS'] !== undefined) {
-    merged.predictionV1BlocklistConditionIds = env['JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS']
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
+  // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
+  // values now live in the launched-record's generator-config block per
+  // spec/2026-05-05-solvernet-creation-and-launch.md (Decision 5 + Task 14)
+  // — set them through the SolverNet config API instead.
 
   if (env['JINN_IDENTITY_REGISTRY_ADDRESS'])   merged.identityRegistryAddress = env['JINN_IDENTITY_REGISTRY_ADDRESS'];
   if (env['JINN_VALIDATION_REGISTRY_ADDRESS']) merged.validationRegistryAddress = env['JINN_VALIDATION_REGISTRY_ADDRESS'];
@@ -949,14 +877,6 @@ const TRACKED_ENV_VARS = [
   'JINN_MASTER_ETH_DAILY_WEI',
   'JINN_MIN_EOA_GAS_WEI',
   'JINN_MIN_SAFE_ETH_WEI',
-  'JINN_PREDICTION_V1_WINDOW_MS',
-  'JINN_PREDICTION_V1_RESOLVE_GAP_MS',
-  'JINN_PREDICTION_V1_CADENCE_MS',
-  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_POLL',
-  'JINN_PREDICTION_V1_MAX_NEW_ROUNDS_PER_DAY',
-  'JINN_PREDICTION_V1_MAX_OPEN_ROUNDS',
-  'JINN_PREDICTION_V1_ALLOWLIST_CONDITION_IDS',
-  'JINN_PREDICTION_V1_BLOCKLIST_CONDITION_IDS',
   'JINN_IDENTITY_REGISTRY_ADDRESS',
   'JINN_VALIDATION_REGISTRY_ADDRESS',
   'JINN_REPUTATION_ENABLED',
