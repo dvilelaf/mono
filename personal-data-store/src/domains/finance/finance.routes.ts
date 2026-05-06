@@ -237,12 +237,52 @@ financeRouter.get("/balances", async (req, res, next) => {
 
 // --- Spending Analysis ---
 
+// Categories excluded from "discretionary" spending totals — these are
+// transfers, income, taxes, property/vehicle/investment moves, or already
+// excluded from the £19K/mo lifestyle target.
+const SPEND_EXCLUDED_CATEGORIES = [
+  "self_transfer",
+  "other",
+  "income",
+  "property",
+  "tax",
+  "investment",
+  "vehicle",
+] as const;
+
+function monthRange(month: string): { from: string; to: string; daysInMonth: number } {
+  // month: "YYYY-MM"
+  const [yStr, mStr] = month.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) {
+    throw new Error("month must be in YYYY-MM format");
+  }
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end = new Date(Date.UTC(y, m, 0));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    from: `${y}-${pad(m)}-01`,
+    to: `${y}-${pad(m)}-${pad(end.getUTCDate())}`,
+    daysInMonth: end.getUTCDate(),
+  };
+}
+
 financeRouter.get("/spending", async (req, res, next) => {
   try {
-    // sql imported at top level
     const accountId = req.query.account_id as string | undefined;
-    const from = req.query.from as string || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const to = req.query.to as string || new Date().toISOString().slice(0, 10);
+    const month = req.query.month as string | undefined;
+
+    let from: string;
+    let to: string;
+    if (month) {
+      const r = monthRange(month);
+      from = r.from;
+      to = r.to;
+    } else {
+      from = (req.query.from as string) || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
+    }
 
     const accountFilter = accountId ? sql`AND t.account_id = ${accountId}` : sql``;
 
@@ -316,6 +356,161 @@ financeRouter.get("/spending", async (req, res, next) => {
 
     res.json({ monthly, topMerchants, monthlyTotals, byCategory });
   } catch (err) { next(err); }
+});
+
+// --- Spending Burn (monthly target tracker) ---
+
+// Default monthly spending target in GBP. Mirrors the `monthly-spend-19k-gbp` goal.
+const MONTHLY_SPEND_TARGET_GBP = 19000;
+
+financeRouter.get("/spending/burn", async (req, res, next) => {
+  try {
+    const now = new Date();
+    const defaultMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const month = (req.query.month as string) || defaultMonth;
+    const currency = ((req.query.currency as string) || "GBP").toUpperCase();
+    const targetParam = req.query.target ? Number(req.query.target) : undefined;
+    const target = Number.isFinite(targetParam) && targetParam ? (targetParam as number) : MONTHLY_SPEND_TARGET_GBP;
+
+    const { from, to, daysInMonth } = monthRange(month);
+
+    // Days elapsed within the month (clamped to [1, daysInMonth])
+    const today = new Date();
+    let daysElapsed: number;
+    const todayIso = today.toISOString().slice(0, 10);
+    if (todayIso < from) {
+      daysElapsed = 0;
+    } else if (todayIso > to) {
+      daysElapsed = daysInMonth;
+    } else {
+      daysElapsed = Number(todayIso.slice(8, 10));
+    }
+
+    const excluded = sql.raw(
+      "(" + SPEND_EXCLUDED_CATEGORIES.map((c) => `'${c}'`).join(",") + ")",
+    );
+
+    const mtdRows = (await db.execute(sql`
+      SELECT
+        round(coalesce(sum(abs(t.amount::numeric)), 0)::numeric, 2) AS total,
+        count(*)::int AS txns
+      FROM transactions t
+      WHERE t.amount::numeric < 0
+        AND t.currency = ${currency}
+        AND t.date >= ${from} AND t.date <= ${to}
+        AND (t.category IS NULL OR t.category NOT IN ${excluded})
+    `)) as unknown as Array<{ total: string; txns: number }>;
+    const mtdTotal = Number(mtdRows[0]?.total ?? 0);
+    const mtdTxns = Number(mtdRows[0]?.txns ?? 0);
+
+    const byCategory = (await db.execute(sql`
+      SELECT
+        coalesce(t.category, 'uncategorised') AS category,
+        round(sum(abs(t.amount::numeric))::numeric, 2) AS total,
+        count(*)::int AS txns
+      FROM transactions t
+      WHERE t.amount::numeric < 0
+        AND t.currency = ${currency}
+        AND t.date >= ${from} AND t.date <= ${to}
+        AND (t.category IS NULL OR t.category NOT IN ${excluded})
+      GROUP BY coalesce(t.category, 'uncategorised')
+      ORDER BY total DESC
+    `)) as unknown as Array<{ category: string; total: string; txns: number }>;
+
+    const topMerchants = (await db.execute(sql`
+      SELECT
+        t.description,
+        coalesce(t.category, 'uncategorised') AS category,
+        round(sum(abs(t.amount::numeric))::numeric, 2) AS total,
+        count(*)::int AS txns
+      FROM transactions t
+      WHERE t.amount::numeric < 0
+        AND t.currency = ${currency}
+        AND t.date >= ${from} AND t.date <= ${to}
+        AND (t.category IS NULL OR t.category NOT IN ${excluded})
+      GROUP BY t.description, coalesce(t.category, 'uncategorised')
+      ORDER BY total DESC
+      LIMIT 15
+    `)) as unknown as Array<{ description: string; category: string; total: string; txns: number }>;
+
+    // Subscriptions due within the remaining month — convert frequency to a
+    // monthly-equivalent amount where dates are unknown.
+    const upcomingSubs = (await db.execute(sql`
+      SELECT name, description, amount, currency, frequency, next_expected, category
+      FROM subscriptions
+      WHERE status = 'active'
+        AND currency = ${currency}
+        AND next_expected IS NOT NULL
+        AND next_expected >= ${from}
+        AND next_expected <= ${to}
+        AND next_expected > current_date
+      ORDER BY next_expected ASC
+    `)) as unknown as Array<{
+      name: string;
+      description: string;
+      amount: string;
+      currency: string;
+      frequency: string;
+      next_expected: string;
+      category: string | null;
+    }>;
+    const forecastSubsTotal = upcomingSubs.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+    const dailyAvg = daysElapsed > 0 ? mtdTotal / daysElapsed : 0;
+    const projectedTotal = dailyAvg * daysInMonth;
+    const projectedTotalWithSubs = mtdTotal + forecastSubsTotal + dailyAvg * Math.max(0, daysInMonth - daysElapsed);
+    const remainingBudget = target - mtdTotal;
+    const dailyBudgetRemaining = daysInMonth - daysElapsed > 0
+      ? remainingBudget / (daysInMonth - daysElapsed)
+      : 0;
+
+    res.json({
+      month,
+      currency,
+      target,
+      from,
+      to,
+      daysInMonth,
+      daysElapsed,
+      mtd: {
+        total: mtdTotal,
+        txns: mtdTxns,
+      },
+      pace: {
+        dailyAvg: Number(dailyAvg.toFixed(2)),
+        projectedTotal: Number(projectedTotal.toFixed(2)),
+        projectedTotalWithSubs: Number(projectedTotalWithSubs.toFixed(2)),
+        remainingBudget: Number(remainingBudget.toFixed(2)),
+        dailyBudgetRemaining: Number(dailyBudgetRemaining.toFixed(2)),
+        percentUsed: target > 0 ? Number(((mtdTotal / target) * 100).toFixed(1)) : 0,
+        onTrack: projectedTotalWithSubs <= target,
+      },
+      byCategory: byCategory.map((c) => ({
+        category: c.category,
+        total: Number(c.total),
+        txns: Number(c.txns),
+      })),
+      topMerchants: topMerchants.map((m) => ({
+        description: m.description,
+        category: m.category,
+        total: Number(m.total),
+        txns: Number(m.txns),
+      })),
+      forecastSubscriptions: {
+        total: Number(forecastSubsTotal.toFixed(2)),
+        items: upcomingSubs.map((s) => ({
+          name: s.name,
+          description: s.description,
+          amount: Number(s.amount),
+          frequency: s.frequency,
+          nextExpected: s.next_expected,
+          category: s.category,
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // --- Income Statement ---
