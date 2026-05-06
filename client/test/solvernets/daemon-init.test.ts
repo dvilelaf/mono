@@ -268,7 +268,12 @@ describe('initSolverNetSubsystem — record loading + filtering', () => {
     try {
       expect(subsystem.records).toHaveLength(4);
       expect(subsystem.pendingGenerators).toHaveLength(1);
-      expect(subsystem.pendingGenerators[0]?.solverNetId).toBe('net-launched-enabled');
+      expect(subsystem.pendingGenerators[0]?.record.solverNetId).toBe('net-launched-enabled');
+      // Refs are populated and seeded with sensible defaults so the
+      // generator factory and Task 14's API endpoint share a single source
+      // of truth.
+      expect(subsystem.pendingGenerators[0]?.recordRef.current.solverNetId).toBe('net-launched-enabled');
+      expect(subsystem.pendingGenerators[0]?.configRef.current).toEqual({});
     } finally {
       subsystem.stop();
     }
@@ -308,7 +313,7 @@ describe('initSolverNetSubsystem — in-flight recovery', () => {
 
       // And it shows up in pendingGenerators (Task 12 will spawn it).
       expect(subsystem.pendingGenerators).toHaveLength(1);
-      expect(subsystem.pendingGenerators[0]?.solverNetId).toBe('net-resuming');
+      expect(subsystem.pendingGenerators[0]?.record.solverNetId).toBe('net-resuming');
     } finally {
       subsystem.stop();
     }

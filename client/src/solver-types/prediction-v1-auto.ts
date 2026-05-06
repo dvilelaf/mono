@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { Task } from '../types/task.js';
 import type { TaskV1, SignedTaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
+import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import {
   getResolution,
   getOrderbook,
@@ -387,5 +388,240 @@ function prioritizeAllowlisted(markets: MarketCandidate[], allowlist: Set<string
       Number(allowlist.has(normalizeConditionId(b.conditionId))) -
       Number(allowlist.has(normalizeConditionId(a.conditionId)));
     return allowDelta;
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Launched-record generator (Task 12 of
+// spec/2026-05-05-solvernet-creation-and-launch.md §11).
+//
+// `makePredictionV1GeneratorForLaunchedRecord` is the new entry point used by
+// the SolverNet subsystem (`daemon-init.ts`) to spawn a generator per local
+// launched record the daemon owns. It replaces the predecessor's
+// `getRoles().includes('launching')` startup-time gate with two tick-time
+// references the daemon (and the API) update at runtime:
+//
+//   - `recordRef.current` — the live `LaunchedSolverNetRecord` mirror. The
+//     daemon updates this when it writes a status flip (`launched ↔ paused
+//     ↔ retired/failed`) or toggles `generatorEnabled`. The per-tick gate
+//     reads `record.status === 'launched' && record.generatorEnabled` and
+//     early-returns otherwise. No daemon restart, no generator recreation.
+//
+//   - `configRef.current` — the hot-applyable subset of
+//     `PredictionV1AutoConfig` (the fields the operator can edit at runtime
+//     via the SolverNet config API endpoint in Task 14: cadence, allow/block
+//     lists, max caps, submission window). The static deps (agentEoa, safe
+//     address, agent private key, polymarket fetchImpl) stay captured at
+//     construction time — those don't move once a SolverNet has launched.
+//
+// The OLD `makePredictionV1Generator` factory is intentionally left in place
+// for the legacy `collectTestnetAutoTaskGenerators` path (and its tests).
+// Task 22 of the SolverNet plan drops the legacy config block; at that
+// point the old factory becomes unreachable and can be removed.
+//
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Hot-applyable subset of `PredictionV1AutoConfig`. Anything in here can be
+ * edited at runtime through the SolverNet config API endpoint (Task 14) and
+ * picked up within one generator cadence — the daemon updates
+ * `configRef.current` and persists to disk; the next tick reads the new
+ * value through the closure.
+ *
+ * Kept narrow on purpose: agent identity (EOA / Safe / private key) and the
+ * polymarket transport (`fetchImpl`, base URLs) are captured once at
+ * construction time and live in `staticConfig` below.
+ */
+export interface PredictionV1GeneratorRuntimeConfig {
+  cadenceMs?: number;
+  maxNewRoundsPerPoll?: number;
+  maxNewRoundsPerDay?: number;
+  maxOpenRounds?: number;
+  submissionWindowMs?: number;
+  allowlistConditionIds?: string[];
+  blocklistConditionIds?: string[];
+  // Eligibility tuning — also runtime-editable per the launcher edit form
+  // (spec §17, Task 14 surfaces).
+  minTimeToResolutionHours?: number;
+  maxTimeToResolutionHours?: number;
+  minLiquidityUsd?: string;
+  minVolume24hUsd?: string;
+  maxYesSpread?: string;
+  maxOrderbookAgeSeconds?: number;
+}
+
+/**
+ * Static-at-construction-time portion of the generator config — set once when
+ * the daemon spawns the generator from a launched record and never read from
+ * the configRef after that. Polymarket transport plus the agent's signing
+ * material.
+ */
+export interface PredictionV1GeneratorStaticConfig extends PolymarketClientConfig {
+  agentEoa?: `0x${string}`;
+  safeAddress?: `0x${string}`;
+  agentPrivateKey?: `0x${string}`;
+}
+
+export interface MakePredictionV1GeneratorForLaunchedRecordOpts {
+  /**
+   * Live mirror of the launched record. The daemon flips status / toggles
+   * generatorEnabled by mutating `current` after persisting to disk; the
+   * generator's per-tick gate reads `current.status` and
+   * `current.generatorEnabled` directly.
+   */
+  recordRef: { current: LaunchedSolverNetRecord };
+  /**
+   * Live mirror of the hot-applyable config. The SolverNet config API
+   * endpoint (Task 14) mutates `current` after persisting to disk; the next
+   * tick reads cadence/allow-block-lists/max-caps from
+   * `current.<field>`.
+   */
+  configRef: { current: PredictionV1GeneratorRuntimeConfig };
+  /** Construction-time-fixed deps (transport + agent identity). */
+  staticConfig?: PredictionV1GeneratorStaticConfig;
+}
+
+/**
+ * Factory that builds a `prediction.v1` Polymarket auto-generator gated on a
+ * locally owned launched record + a hot-applyable runtime config. Used by
+ * the SolverNet subsystem (`daemon-init.ts`) to spawn one generator per
+ * `pendingGenerators` entry.
+ *
+ * The returned callable retains the existing `getState()` extension (the
+ * launcher-status endpoint reads it). Cadence in the snapshot reflects the
+ * LIVE configRef value, not the construction-time one — operators editing
+ * cadence through the API see the change in `/v1/launcher/status` on the
+ * next status read.
+ */
+export function makePredictionV1GeneratorForLaunchedRecord(
+  opts: MakePredictionV1GeneratorForLaunchedRecordOpts,
+): PredictionV1GeneratorTick {
+  const { recordRef, configRef, staticConfig = {} } = opts;
+  const postedAtByCondition = new Map<string, number>();
+  const postedCountByDay = new Map<string, number>();
+  let lastPollStartedAt = 0;
+  const state: PredictionV1GeneratorState = {};
+
+  const tick = async (): Promise<Task[] | null> => {
+    // Launched-record gate (Task 12, spec §11). Two conditions:
+    //   1. record.status === 'launched' (not paused / retired / failed /
+    //      launching).
+    //   2. record.generatorEnabled === true (operator's per-record toggle).
+    // Either failing means the daemon has paused or shut off this generator
+    // — do nothing this tick. Cadence bookkeeping is intentionally not
+    // touched: when the gate re-opens we want the very first tick to poll.
+    const record = recordRef.current;
+    if (record.status !== 'launched') return null;
+    if (!record.generatorEnabled) return null;
+
+    const runtime = configRef.current;
+    const now = Date.now();
+    const cadenceMs = runtime.cadenceMs ?? DEFAULTS.cadenceMs;
+    if (cadenceMs > 0 && lastPollStartedAt > 0 && now - lastPollStartedAt < cadenceMs) {
+      return null;
+    }
+    lastPollStartedAt = now;
+    state.lastPollAt = new Date(now).toISOString();
+
+    pruneOpenRounds(postedAtByCondition, now);
+    const allowlist = conditionIdSet(runtime.allowlistConditionIds);
+    const blocklist = conditionIdSet(runtime.blocklistConditionIds);
+    const dayKey = new Date(now).toISOString().slice(0, 10);
+    const todayCount = postedCountByDay.get(dayKey) ?? 0;
+    const dailyRemaining = Math.max(0, (runtime.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay) - todayCount);
+    const openRemaining = Math.max(0, (runtime.maxOpenRounds ?? DEFAULTS.maxOpenRounds) - postedAtByCondition.size);
+    const pollLimit = Math.min(runtime.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll, dailyRemaining, openRemaining);
+    if (pollLimit <= 0) {
+      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
+      state.lastError = undefined;
+      return null;
+    }
+
+    // Compose the per-call config the eligibility helpers expect — they
+    // already accept `PredictionV1AutoConfig`, so we project the runtime
+    // ref + static deps into that shape.
+    const callConfig: PredictionV1AutoConfig = {
+      ...staticConfig,
+      cadenceMs: runtime.cadenceMs,
+      maxNewRoundsPerPoll: runtime.maxNewRoundsPerPoll,
+      maxNewRoundsPerDay: runtime.maxNewRoundsPerDay,
+      maxOpenRounds: runtime.maxOpenRounds,
+      submissionWindowMs: runtime.submissionWindowMs,
+      allowlistConditionIds: runtime.allowlistConditionIds,
+      blocklistConditionIds: runtime.blocklistConditionIds,
+      minTimeToResolutionHours: runtime.minTimeToResolutionHours,
+      maxTimeToResolutionHours: runtime.maxTimeToResolutionHours,
+      minLiquidityUsd: runtime.minLiquidityUsd,
+      minVolume24hUsd: runtime.minVolume24hUsd,
+      maxYesSpread: runtime.maxYesSpread,
+      maxOrderbookAgeSeconds: runtime.maxOrderbookAgeSeconds,
+    };
+
+    let candidates: MarketCandidate[];
+    try {
+      candidates = await listMarketCandidates({ ...callConfig, limit: 250 });
+    } catch (err) {
+      state.lastError = {
+        message: err instanceof Error ? err.message : String(err),
+        at: new Date().toISOString(),
+      };
+      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
+      return null;
+    }
+
+    const eligible: EligibleMarket[] = [];
+    let evaluatedCount = 0;
+    for (const market of prioritizeAllowlisted(candidates, allowlist)) {
+      if (eligible.length >= pollLimit * 3) break;
+      const conditionId = normalizeConditionId(market.conditionId);
+      if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
+      evaluatedCount += 1;
+      const checked = await checkMarketEligibility(market, callConfig, now);
+      if (checked) eligible.push(checked);
+    }
+
+    eligible.sort((a, b) => {
+      const allowDelta =
+        Number(allowlist.has(normalizeConditionId(b.market.conditionId))) -
+        Number(allowlist.has(normalizeConditionId(a.market.conditionId)));
+      if (allowDelta !== 0) return allowDelta;
+      const liquidityDelta = Number(b.market.liquidityUsd) - Number(a.market.liquidityUsd);
+      if (Number.isFinite(liquidityDelta) && liquidityDelta !== 0) return liquidityDelta;
+      const spreadDelta = Number(a.orderbook.spread) - Number(b.orderbook.spread);
+      if (Number.isFinite(spreadDelta) && spreadDelta !== 0) return spreadDelta;
+      return a.timeToResolutionHours - b.timeToResolutionHours;
+    });
+
+    const selected = eligible.slice(0, pollLimit);
+    const tasks: Task[] = [];
+    for (const entry of selected) {
+      const task = await buildTask(entry, callConfig, now);
+      postedAtByCondition.set(normalizeConditionId(entry.market.conditionId), Date.parse(entry.market.endTime));
+      tasks.push(task);
+    }
+    if (tasks.length > 0) {
+      postedCountByDay.set(dayKey, todayCount + tasks.length);
+    }
+    const evaluated = evaluatedCount;
+    const posted = tasks.length;
+    const skipped = Math.max(0, evaluated - posted);
+    state.lastPollSummary = { evaluated, posted, skipped };
+    state.lastError = undefined;
+    return tasks.length > 0 ? tasks : null;
+  };
+
+  return Object.assign(tick, {
+    getState(): PredictionV1GeneratorStateSnapshot {
+      return {
+        lastPollAt: state.lastPollAt,
+        lastPollSummary: state.lastPollSummary ? { ...state.lastPollSummary } : undefined,
+        lastError: state.lastError ? { ...state.lastError } : undefined,
+        // Reflect the LIVE cadence from the runtime ref so launcher-status
+        // shows what the generator will use on its next tick, not what was
+        // captured at construction.
+        cadenceMs: configRef.current.cadenceMs ?? DEFAULTS.cadenceMs,
+      };
+    },
   });
 }
