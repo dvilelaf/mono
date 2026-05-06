@@ -1170,6 +1170,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     manifestResolver: async (cid) => adapterManifestResolverHolder.current?.(cid) ?? null,
+    preconditionRegistry: (await import('./harnesses/engine/precondition-resolver.js'))
+      .createDefaultPreconditionRegistry(),
   });
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────

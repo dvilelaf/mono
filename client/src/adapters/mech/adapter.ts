@@ -410,6 +410,31 @@ export class MechAdapter implements ExecutionAdapter {
     return signTaskV1(taskDoc, this.config.agentEoaPrivateKey);
   }
 
+  /**
+   * Resolve the evaluator preconditions declared in the Task's manifest
+   * against the live world (e.g. polymarket resolution status). Returns
+   * `{ok}` on success, `{ok:false, reason}` on first failure. If the
+   * registry isn't wired or the manifest can't be loaded, returns ok —
+   * the on-chain `policyHook` + `evaluationOpensAt` are the backstop.
+   */
+  private async checkEvaluatorPreconditions(
+    task: Task,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const registry = this.config.preconditionRegistry;
+    const resolver = this.config.manifestResolver;
+    if (!registry || !resolver || !task.solverNetManifestCid) return { ok: true };
+    let manifest: import('@jinn-network/sdk/solvernets').SolverNetManifestV1 | null;
+    try {
+      manifest = await resolver(task.solverNetManifestCid);
+    } catch {
+      return { ok: true };
+    }
+    if (!manifest) return { ok: true };
+    const preconditions = manifest.contract.claimPolicy.evaluator.preconditions;
+    if (!preconditions || preconditions.length === 0) return { ok: true };
+    return registry.checkAll(preconditions, { task });
+  }
+
   private async contractPolicyForTask(state: Task): Promise<RouterTaskPolicy> {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const claimPolicy = state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY;
@@ -702,6 +727,18 @@ export class MechAdapter implements ExecutionAdapter {
   async claimTask(taskId: string): Promise<TaskRequest> {
     const evaluationOpportunity = this.evaluationOpportunities.get(taskId);
     if (evaluationOpportunity) {
+      // Off-chain prefilter: if the manifest declares evaluator
+      // preconditions (e.g. `oracle.polymarket.resolution: resolved`)
+      // and one fails, defer the opportunity. The on-chain `policyHook`
+      // + `evaluationOpensAt` are the safety net; this filter just
+      // saves a doomed claim transaction.
+      const prefilter = await this.checkEvaluatorPreconditions(evaluationOpportunity.task);
+      if (!prefilter.ok) {
+        // Leave the opportunity in the queue so the next poll retries.
+        throw new TransientError(
+          `evaluator precondition not met for task ${evaluationOpportunity.taskId}: ${prefilter.reason}`,
+        );
+      }
       const signedEvaluationTask = await this.signTaskDocument(evaluationOpportunity.task);
       const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, signedEvaluationTask);
       const evaluationTaskCidDigest = cidToDigestHex(evaluationCid);

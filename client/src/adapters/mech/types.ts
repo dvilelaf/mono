@@ -33,6 +33,15 @@ export interface MechAdapterConfig {
    */
   manifestResolver?: (manifestCid: string) =>
     Promise<import('@jinn-network/sdk/solvernets').SolverNetManifestV1 | null>;
+  /**
+   * Optional precondition registry used to gate `claimEvaluation` against
+   * the manifest's `evaluator.preconditions[]` (e.g. polymarket
+   * resolution status). When unset, the prefilter is skipped — the chain's
+   * `policyHook` + `evaluationOpensAt` checks are still in force as the
+   * safety net.
+   */
+  preconditionRegistry?:
+    import('../../harnesses/engine/precondition-resolver.js').PreconditionResolverRegistry;
 }
 
 export const MECH_MARKETPLACE_ABI = [
