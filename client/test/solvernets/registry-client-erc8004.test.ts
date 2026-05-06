@@ -28,7 +28,24 @@ import {
   canonicalManifestJson,
   type UnsignedSolverNetManifestV1,
 } from '../../src/solvernets/manifest.js';
+import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import type { SetMetadataEvent } from '../../src/solvernets/most-recent-wins.js';
+
+/**
+ * Heuristic for "this object looks like a SolverNetManifestV1". We only
+ * need it inside the IPFS double's `cidOf` to decide whether to strip the
+ * `signature` field via `canonicalManifestJson` (matching production) or
+ * fall back to plain `canonicalJson` (for negative-path tests that
+ * pre-seed malformed bodies). Doesn't need to be a full validator.
+ */
+function isManifestLike(data: unknown): data is SolverNetManifestV1 | UnsignedSolverNetManifestV1 {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    typeof (data as { schemaVersion?: unknown }).schemaVersion === 'string' &&
+    (data as { schemaVersion: string }).schemaVersion === 'solvernet.manifest.v1'
+  );
+}
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -137,9 +154,12 @@ function makeMockIpfs(): IpfsClient & {
   let fetchCalls = 0;
 
   function cidOf(data: unknown): string {
-    // Stable content-addressed cid derived from JSON.stringify with sorted keys.
-    const json = JSON.stringify(data, Object.keys(data as object).sort());
-    // Simple base32-like prefix to look like a CID.
+    // Stable content-addressed cid. Derive from the SAME canonicalization
+    // the production code uses for hashing/canonicalizing manifests so
+    // nested-key ordering matches real implementation behavior. The
+    // previous `JSON.stringify(data, Object.keys(...).sort())` trick only
+    // sorted top-level keys and silently broke for nested objects.
+    const json = isManifestLike(data) ? canonicalManifestJson(data) : canonicalJson(data);
     let h = 0;
     for (const ch of json) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return `bafy-test-${h.toString(16).padStart(8, '0')}`;
@@ -367,6 +387,78 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
       }),
     ).rejects.toThrow(/agentId/i);
   });
+
+  it('cold path: cache miss → IPFS fallback fetches and validates the manifest', async () => {
+    // Coverage for the path where publishLifecycleTransition is called by
+    // a fresh client instance that did NOT publish the manifest itself —
+    // it must fall back to IPFS, validate the body, hash it, and emit the
+    // lifecycle event. Previously uncovered: both prior tests publish on
+    // the same client first, which seeds the cache.
+    //
+    // We share IPFS + subgraph across two clients so the second instance
+    // can find the manifest body, but its in-process manifestCache and
+    // verifiedCids start empty.
+    const sharedIpfs = makeMockIpfs();
+    const sharedSubgraph = makeMockSubgraph();
+
+    const publisherA = makeMockPublisher();
+    const clientA = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: publisherA,
+      subgraph: sharedSubgraph,
+      network: 'base-sepolia',
+    });
+
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await clientA.publishManifest({ manifest, signer });
+
+    // The launched event isn't auto-injected by the publisher mock — push
+    // one in so the IPFS-fallback path's subsequent hash cross-check (via
+    // fetchAndValidateManifest's own subgraph lookup) finds it.
+    sharedSubgraph.events.push({
+      agentId: signer.agentId,
+      key: `solvernet-manifest:${manifestCid}`,
+      payload: {
+        schemaVersion: 'solvernet.lifecycle.v1',
+        status: 'launched',
+        at: '2026-05-06T00:00:00Z',
+        hash: manifestHash(manifest),
+      },
+      blockNumber: 100,
+      transactionIndex: 0,
+    });
+
+    // Second client instance — fresh in-process state, but shares IPFS
+    // and subgraph with the publisher.
+    const publisherB = makeMockPublisher();
+    const clientB = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: publisherB,
+      subgraph: sharedSubgraph,
+      network: 'base-sepolia',
+    });
+
+    const result = await clientB.publishLifecycleTransition({
+      manifestCid,
+      launcherAgentId: signer.agentId,
+      target: 'paused',
+      signer,
+    });
+
+    expect(result.metadataTxHash).toMatch(/^0x[0-9a-f]+$/);
+
+    // The cold path must fetch from IPFS to recover the canonical hash.
+    expect(sharedIpfs.fetchCalls).toBeGreaterThanOrEqual(1);
+
+    // The lifecycle setMetadata went out under the right key + status.
+    expect(publisherB.calls).toHaveLength(1);
+    const call = publisherB.calls[0]!;
+    expect(call.key).toBe(`solvernet-manifest:${manifestCid}`);
+    const json = JSON.parse(new TextDecoder().decode(call.value)) as Record<string, unknown>;
+    expect(json.status).toBe('paused');
+    // Asserted hash matches the original canonical hash (cold-path correctness).
+    expect(json.hash).toBe(manifestHash(manifest));
+  });
 });
 
 // ── Tests: listLaunched ─────────────────────────────────────────────────────
@@ -573,24 +665,30 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
   });
 
   it('rejects when the canonical hash of fetched IPFS content differs from the on-chain advertised hash', async () => {
-    const ipfs = makeMockIpfs();
-    const publisher = makeMockPublisher();
-    const subgraph = makeMockSubgraph();
-    const client = new IdentityRegistryBackedSolverNetRegistryClient({
-      ipfs,
-      publisher,
-      subgraph,
+    // Cold-path scenario: the client did NOT publish the manifest itself,
+    // so verifiedCids is empty. getManifest falls through to
+    // fetchAndValidateManifest, which cross-checks the canonical hash of
+    // the IPFS body against the on-chain advertised hash and rejects on
+    // mismatch.
+    //
+    // We share IPFS + subgraph between the publisher and the reader, but
+    // the reader is a fresh client (no verifiedCids fast-path).
+    const sharedIpfs = makeMockIpfs();
+    const sharedSubgraph = makeMockSubgraph();
+
+    const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
-
     const { manifest, signer } = await buildSignedManifest();
-    const { manifestCid } = await client.publishManifest({ manifest, signer });
+    const { manifestCid } = await publisherClient.publishManifest({ manifest, signer });
 
-    // The on-chain payload advertises manifestHash(manifest). Push an event
-    // claiming the cid carries a *different* hash, then tamper the IPFS
-    // content too — verify we reject.
+    // Inject an on-chain event that advertises a DIFFERENT hash than the
+    // canonical hash of the IPFS body — simulating a tampered pinner.
     const wrongHash = ('0x' + 'cd'.repeat(32)) as `0x${string}`;
-    subgraph.events.push({
+    sharedSubgraph.events.push({
       agentId: signer.agentId,
       key: `solvernet-manifest:${manifestCid}`,
       payload: {
@@ -603,7 +701,15 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
       transactionIndex: 0,
     });
 
-    await expect(client.getManifest({ manifestCid })).rejects.toThrow(/hash/i);
+    // Fresh reader — no in-process trust state.
+    const reader = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs: sharedIpfs,
+      publisher: makeMockPublisher(),
+      subgraph: sharedSubgraph,
+      network: 'base-sepolia',
+    });
+
+    await expect(reader.getManifest({ manifestCid })).rejects.toThrow(/hash/i);
   });
 
   it('rejects when fetched IPFS content does not match the SolverNetManifestV1 schema', async () => {
@@ -620,6 +726,39 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     // Pre-seed the IPFS double with a malformed body under a known cid.
     const cid = await ipfs.upload({ wrong: 'shape' });
     await expect(client.getManifest({ manifestCid: cid })).rejects.toThrow();
+  });
+
+  it('skips subgraph round-trip when cid is already verified (post-publish cache hit)', async () => {
+    // Regression: previously, a getManifest cache-hit still hit the
+    // subgraph to re-verify the advertised hash, silently doubling load
+    // in catalog refresh ticks. After the fix, publishManifest seeds
+    // both manifestCache and verifiedCids; subsequent getManifest for
+    // that cid returns immediately without touching the subgraph.
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    const { manifest, signer } = await buildSignedManifest();
+    const { manifestCid } = await client.publishManifest({ manifest, signer });
+
+    // publishManifest itself does not query the subgraph; baseline.
+    expect(subgraph.fetchByCidCalls).toHaveLength(0);
+
+    const fetched = await client.getManifest({ manifestCid });
+    expect(fetched.solverNetId).toBe(manifest.solverNetId);
+
+    // Critical: no subgraph round-trip on the cache-hit path.
+    expect(subgraph.fetchByCidCalls).toHaveLength(0);
+
+    // A second getManifest also stays cached.
+    await client.getManifest({ manifestCid });
+    expect(subgraph.fetchByCidCalls).toHaveLength(0);
   });
 });
 
@@ -685,5 +824,59 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     await expect(client.getLifecycleStatus({ manifestCid: 'bafyMissing' })).rejects.toThrow(
       /no setMetadata/i,
     );
+  });
+
+  it('cross-launcher same-block tie: higher transactionIndex wins deterministically', async () => {
+    // Two launchers wrote setMetadata under the same cid in the same
+    // block (unusual but legal). Without the transactionIndex secondary
+    // sort key, the winner across launchers depended on Map insertion
+    // order; with the fix it's deterministic.
+    const ipfs = makeMockIpfs();
+    const publisher = makeMockPublisher();
+    const subgraph = makeMockSubgraph();
+    const client = new IdentityRegistryBackedSolverNetRegistryClient({
+      ipfs,
+      publisher,
+      subgraph,
+      network: 'base-sepolia',
+    });
+
+    const cid = 'bafyShared';
+    const hash = ('0x' + 'aa'.repeat(32)) as `0x${string}`;
+
+    // Inject events in "wrong" order (lower-tx-index last) to make the
+    // bug visible if it regresses — Map insertion order would pick the
+    // last inserted, not the higher tx-index winner.
+    subgraph.events.push(
+      {
+        agentId: '8888',
+        key: `solvernet-manifest:${cid}`,
+        payload: {
+          schemaVersion: 'solvernet.lifecycle.v1',
+          status: 'paused',
+          at: '2026-05-06T00:00:00Z',
+          hash,
+        },
+        blockNumber: 100,
+        transactionIndex: 7,
+      },
+      {
+        agentId: '5474',
+        key: `solvernet-manifest:${cid}`,
+        payload: {
+          schemaVersion: 'solvernet.lifecycle.v1',
+          status: 'launched',
+          at: '2026-05-06T00:00:00Z',
+          hash,
+        },
+        blockNumber: 100,
+        transactionIndex: 2,
+      },
+    );
+
+    const result = await client.getLifecycleStatus({ manifestCid: cid });
+    // Higher transactionIndex (7) wins → status from launcher 8888.
+    expect(result.status).toBe('paused');
+    expect(result.sourceBlock).toBe(100);
   });
 });

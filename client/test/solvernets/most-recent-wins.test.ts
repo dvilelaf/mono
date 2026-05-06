@@ -72,7 +72,38 @@ describe('resolveMostRecentWins', () => {
       statusUpdatedAt: '2026-05-06T00:00:00Z',
       manifestHash: HASH_A,
       anchorBlock: 100,
+      anchorTransactionIndex: 0,
     });
+  });
+
+  it('populates anchorTransactionIndex from the winning event', () => {
+    // Two events tied on blockNumber — higher transactionIndex wins, and
+    // the resolved row's anchorTransactionIndex must reflect that winner
+    // so cross-launcher tiebreaks remain deterministic downstream.
+    const events = [
+      ev({
+        agentId: '5474',
+        cid: 'bafyA',
+        status: 'launched',
+        at: '2026-05-06T00:00:00Z',
+        blockNumber: 100,
+        transactionIndex: 2,
+      }),
+      ev({
+        agentId: '5474',
+        cid: 'bafyA',
+        status: 'paused',
+        at: '2026-05-06T00:00:00Z',
+        blockNumber: 100,
+        transactionIndex: 7,
+      }),
+    ];
+
+    const resolved = resolveMostRecentWins(events);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.status).toBe('paused');
+    expect(resolved[0]?.anchorBlock).toBe(100);
+    expect(resolved[0]?.anchorTransactionIndex).toBe(7);
   });
 
   it('picks the event with the highest blockNumber for the same (agentId, cid)', () => {
