@@ -30,6 +30,10 @@ describe('default prediction agent runtime plugins', () => {
   });
 
   it('routes prediction.v1 to the default learner with Network Tools and Prediction plugin surfaces', async () => {
+    // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9, the
+    // bundled prediction plugin is operator-configured (not contract-bound),
+    // so the launcher's quick-start defaults seed it into
+    // `solverNets.prediction.plugins`.
     const registry = await loadSolverNets({
       solverNets: {
         prediction: {
@@ -37,7 +41,7 @@ describe('default prediction agent runtime plugins', () => {
           solverType: 'prediction.v1',
           harness: 'claude-code-learner',
           model: 'claude-opus-test',
-          plugins: [],
+          plugins: ['bundled:jinn-prediction-plugin'],
           taskGenerator: { enabled: true },
         },
       },
@@ -81,7 +85,7 @@ describe('default prediction agent runtime plugins', () => {
       '@jinn-network/network-tools',
       '@jinn-network/prediction-plugin',
     ]);
-    expect(net!.runtimePlugins.map((plugin) => plugin.provenance)).toEqual(['default', 'default']);
+    expect(net!.runtimePlugins.map((plugin) => plugin.provenance)).toEqual(['default', 'configured']);
     expect(JSON.stringify(net!.runtimePlugins)).not.toMatch(/canonical/i);
 
     const networkTools = net!.runtimePlugins.find((plugin) => plugin.name === '@jinn-network/network-tools')!;
