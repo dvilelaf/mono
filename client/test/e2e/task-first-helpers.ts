@@ -133,7 +133,7 @@ export const JINN_ROUTER_V3_E2E_ABI = [
     outputs: [
       { name: 'creator', type: 'address' },
       { name: 'taskCidDigest', type: 'bytes32' },
-      { name: 'solverTypeDigest', type: 'bytes32' },
+      { name: 'manifestDigest', type: 'bytes32' },
       { name: 'solutionMaxDeliveryRate', type: 'uint256' },
       { name: 'verdictMaxDeliveryRate', type: 'uint256' },
       { name: 'responseTimeout', type: 'uint256' },
@@ -171,7 +171,7 @@ export const TASK_COORDINATOR_E2E_ABI = [
       components: [
         { name: 'creator', type: 'address' },
         { name: 'taskCidDigest', type: 'bytes32' },
-        { name: 'solverTypeDigest', type: 'bytes32' },
+        { name: 'manifestDigest', type: 'bytes32' },
         { name: 'status', type: 'uint8' },
         {
           name: 'policy',
@@ -1761,7 +1761,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
     const task = makePredictionV1Task();
     const predictionTask = PredictionV1TaskSchema.parse(task);
     const { digest: taskCidDigest, cid: taskCid } = taskCidDigestAndCid(task);
-    const solverTypeDigest = keccak256(toBytes('prediction.v1'));
+    const manifestDigest = keccak256(toBytes('prediction.v1'));
     const latestBlock = await publicClient.getBlock();
     const nowSec = Number(latestBlock.timestamp);
     const policy = {
@@ -1790,7 +1790,7 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
         address: deployment.router,
         abi: JINN_ROUTER_V3_E2E_ABI,
         functionName: 'createTask',
-        args: [taskCidDigest, solverTypeDigest, policy, deliveryRate, deliveryRate, responseTimeout],
+        args: [taskCidDigest, manifestDigest, policy, deliveryRate, deliveryRate, responseTimeout],
         value: deliveryRate * 4n,
         chain: baseSepolia,
       });
@@ -2111,7 +2111,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
     const predictionTask = PredictionV1TaskSchema.parse(task);
     const taskCidDigest = keccak256(toBytes(JSON.stringify(task)));
     const taskCid = `f01551220${taskCidDigest.slice(2)}`;
-    const solverTypeDigest = keccak256(toBytes('prediction.v1'));
+    const manifestDigest = keccak256(toBytes('prediction.v1'));
     const latestBlock = await publicClient.getBlock();
     const nowSec = Number(latestBlock.timestamp);
     const policy = {
@@ -2138,7 +2138,7 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       address: deployment.router,
       abi: artifacts.router.abi,
       functionName: 'createTask',
-      args: [taskCidDigest, solverTypeDigest, policy, rate, rate, 3600n],
+      args: [taskCidDigest, manifestDigest, policy, rate, rate, 3600n],
       value: rate * 6n,
     });
     const taskCreated = decodeFirstEvent(created.receipt, artifacts.router.abi, 'TaskCreated');
