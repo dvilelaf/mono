@@ -390,6 +390,7 @@ financeRouter.get("/spending/burn", async (req, res, next) => {
       "(" + SPEND_EXCLUDED_CATEGORIES.map((c) => `'${c}'`).join(",") + ")",
     );
 
+    // Counted spend: categorised, non-excluded outflows. Matches /spending.
     const mtdRows = (await db.execute(sql`
       SELECT
         round(coalesce(sum(abs(t.amount::numeric)), 0)::numeric, 2) AS total,
@@ -398,37 +399,55 @@ financeRouter.get("/spending/burn", async (req, res, next) => {
       WHERE t.amount::numeric < 0
         AND t.currency = ${currency}
         AND t.date >= ${from} AND t.date <= ${to}
-        AND (t.category IS NULL OR t.category NOT IN ${excluded})
+        AND t.category IS NOT NULL
+        AND t.category NOT IN ${excluded}
     `)) as unknown as Array<{ total: string; txns: number }>;
     const mtdTotal = Number(mtdRows[0]?.total ?? 0);
     const mtdTxns = Number(mtdRows[0]?.txns ?? 0);
 
+    // Uncategorised outflows in the same window — surfaced so the user
+    // knows what's missing from the guardrail.
+    const uncatRows = (await db.execute(sql`
+      SELECT
+        round(coalesce(sum(abs(t.amount::numeric)), 0)::numeric, 2) AS total,
+        count(*)::int AS txns
+      FROM transactions t
+      WHERE t.amount::numeric < 0
+        AND t.currency = ${currency}
+        AND t.date >= ${from} AND t.date <= ${to}
+        AND t.category IS NULL
+    `)) as unknown as Array<{ total: string; txns: number }>;
+    const uncategorisedTotal = Number(uncatRows[0]?.total ?? 0);
+    const uncategorisedTxns = Number(uncatRows[0]?.txns ?? 0);
+
     const byCategory = (await db.execute(sql`
       SELECT
-        coalesce(t.category, 'uncategorised') AS category,
+        t.category AS category,
         round(sum(abs(t.amount::numeric))::numeric, 2) AS total,
         count(*)::int AS txns
       FROM transactions t
       WHERE t.amount::numeric < 0
         AND t.currency = ${currency}
         AND t.date >= ${from} AND t.date <= ${to}
-        AND (t.category IS NULL OR t.category NOT IN ${excluded})
-      GROUP BY coalesce(t.category, 'uncategorised')
+        AND t.category IS NOT NULL
+        AND t.category NOT IN ${excluded}
+      GROUP BY t.category
       ORDER BY total DESC
     `)) as unknown as Array<{ category: string; total: string; txns: number }>;
 
     const topMerchants = (await db.execute(sql`
       SELECT
         t.description,
-        coalesce(t.category, 'uncategorised') AS category,
+        t.category AS category,
         round(sum(abs(t.amount::numeric))::numeric, 2) AS total,
         count(*)::int AS txns
       FROM transactions t
       WHERE t.amount::numeric < 0
         AND t.currency = ${currency}
         AND t.date >= ${from} AND t.date <= ${to}
-        AND (t.category IS NULL OR t.category NOT IN ${excluded})
-      GROUP BY t.description, coalesce(t.category, 'uncategorised')
+        AND t.category IS NOT NULL
+        AND t.category NOT IN ${excluded}
+      GROUP BY t.description, t.category
       ORDER BY total DESC
       LIMIT 15
     `)) as unknown as Array<{ description: string; category: string; total: string; txns: number }>;
@@ -475,6 +494,10 @@ financeRouter.get("/spending/burn", async (req, res, next) => {
       mtd: {
         total: mtdTotal,
         txns: mtdTxns,
+      },
+      uncategorised: {
+        total: Number(uncategorisedTotal.toFixed(2)),
+        txns: uncategorisedTxns,
       },
       pace: {
         dailyAvg: Number(dailyAvg.toFixed(2)),
