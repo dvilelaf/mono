@@ -15,7 +15,7 @@ You are a fresh-context info-gatherer. The dispatching section of `skills/learn/
 - `workingDir` — path; you write to `outputPath` only, which lives under `workingDir/.<phase>/`
 - `implStateDir` — path; read-only
 - `outputPath` — exact path to write your findings JSON to
-- `msUntilEndTs` — your time budget
+- `msUntilDeadline` — your time budget
 
 ## Topic conventions
 

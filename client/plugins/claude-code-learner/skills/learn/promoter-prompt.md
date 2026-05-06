@@ -15,7 +15,7 @@ Act on Debrief by mutating `implStateDir`. Each accepted change is one git commi
 - `policyPath` — read if non-null for operator policy
 - `implStateDir` — your write target; git repo with `claude-code-learner` author identity already configured
 - `outputDir` — write summary + promotion records here
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Action surface (in increasing risk order)
 

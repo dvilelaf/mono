@@ -15,7 +15,7 @@ You commit to one approach for this run. Your output is what Debrief later judge
 - `workingDir`, `implStateDir` (read-only)
 - `outputDir` — write strategy.json + constitution.json here
 - `skillBundleCid`, `implStateDirShaAtStart` — for the constitution
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Diverge
 

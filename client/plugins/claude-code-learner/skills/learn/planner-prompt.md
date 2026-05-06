@@ -17,7 +17,7 @@ Turn the strategy into concrete steps Execute can follow.
 - `priorPlanArchives` — array of paths to prior plan versions (`plan-v<N>.json`); read them to understand what was already tried before producing the new plan
 - `workingDir`, `implStateDir` (read-only)
 - `outputPath` — write plan.json here
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## Decompose
 

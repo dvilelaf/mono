@@ -12,7 +12,7 @@ You execute one plan step. Fresh context. Return when you've written the expecte
 - `stepSpec` — the entire step object from plan.json
 - `goal` — for context
 - `workingDir`, `implStateDir` (read-only)
-- `msUntilEndTs`
+- `msUntilDeadline`
 
 ## What you do
 
