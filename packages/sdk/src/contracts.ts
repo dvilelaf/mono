@@ -37,7 +37,7 @@ export interface SolverNetAggregationFunction {
 }
 
 export interface SolverNetClaimPolicyDefaults {
-  mode: 'exclusive' | 'parallel';
+  mode: 'parallel' | 'serial';
   maxClaims: number;
   maxClaimsPerOperator: number;
   claimLeaseTtlSeconds: number;

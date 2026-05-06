@@ -103,11 +103,8 @@ describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 
           solution: c.schemas.solution.json,
           verdict: c.schemas.verdict.json,
         },
-        // Manifest schema demands `'parallel' | 'serial'` — the SDK template
-        // currently uses `'parallel'`, which lines up. Other modes will need
-        // an SDK-side update before they can be projected into a manifest.
         claimPolicyDefaults: {
-          mode: c.claimPolicyDefaults.mode as 'parallel' | 'serial',
+          mode: c.claimPolicyDefaults.mode,
           maxClaims: c.claimPolicyDefaults.maxClaims,
           maxClaimsPerOperator: c.claimPolicyDefaults.maxClaimsPerOperator,
           claimLeaseTtlSeconds: c.claimPolicyDefaults.claimLeaseTtlSeconds,
