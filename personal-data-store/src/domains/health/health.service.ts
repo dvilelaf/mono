@@ -1,6 +1,6 @@
 import { db } from "../../db/index.js";
 import { healthMetrics, supplements, nutritionEntries, workouts } from "./health.schema.js";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, ilike, sql } from "drizzle-orm";
 
 interface CreateMetricInput {
   source: string;
@@ -45,6 +45,63 @@ export async function queryMetrics(filters: {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(healthMetrics.recordedAt))
     .limit(filters.limit ?? 1000);
+}
+
+export async function queryMetricsPaginated(filters: {
+  search?: string;
+  source?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.min(200, Math.max(1, filters.pageSize ?? 50));
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [];
+  if (filters.search) conditions.push(ilike(healthMetrics.metricType, `%${filters.search}%`));
+  if (filters.source) conditions.push(eq(healthMetrics.source, filters.source));
+  if (filters.from) conditions.push(gte(healthMetrics.recordedAt, new Date(filters.from)));
+  if (filters.to) conditions.push(lte(healthMetrics.recordedAt, new Date(filters.to)));
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  // Dedup display-side: collapse rows that share (source, metric_type, value, recorded_at).
+  const deduped = db
+    .selectDistinctOn(
+      [healthMetrics.source, healthMetrics.metricType, healthMetrics.value, healthMetrics.recordedAt],
+      {
+        id: healthMetrics.id,
+        source: healthMetrics.source,
+        metricType: healthMetrics.metricType,
+        value: healthMetrics.value,
+        unit: healthMetrics.unit,
+        recordedAt: healthMetrics.recordedAt,
+        metadata: healthMetrics.metadata,
+      },
+    )
+    .from(healthMetrics)
+    .where(where)
+    .orderBy(
+      healthMetrics.source,
+      healthMetrics.metricType,
+      healthMetrics.value,
+      healthMetrics.recordedAt,
+    )
+    .as("deduped");
+
+  const [rows, totalRow] = await Promise.all([
+    db
+      .select()
+      .from(deduped)
+      .orderBy(desc(deduped.recordedAt))
+      .limit(pageSize)
+      .offset(offset),
+    db.select({ count: sql<number>`count(*)::int` }).from(deduped),
+  ]);
+  const total = totalRow[0]?.count ?? 0;
+
+  return { rows, total, page, pageSize };
 }
 
 export async function latestMetric(type: string) {
