@@ -135,6 +135,9 @@ function makeMockRegistryClient(args: {
     async getManifest() {
       throw new Error('getManifest not used in init tests');
     },
+    async getManifestFromCache() {
+      return null;
+    },
     async getLifecycleStatus() {
       return {
         status: 'launched' as const,

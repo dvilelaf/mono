@@ -441,6 +441,22 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     return this.fetchAndValidateManifest(args.manifestCid);
   }
 
+  async getManifestFromCache(args: {
+    manifestCid: string;
+  }): Promise<SolverNetManifestV1 | null> {
+    // Cache-only: never falls through to IPFS. Used by hot-path callers
+    // (e.g. the daemon's `/v1/solvernets/launched` list endpoint) that
+    // would otherwise hit IPFS once per row. The cache is populated when
+    // we publish a manifest or successfully read one through `getManifest`,
+    // so for SolverNets the daemon launched itself the cache is always
+    // warm. For records observed only via subgraph (other launchers),
+    // callers see `null` here and fall back to whatever degraded surface
+    // they prefer — for the launched-list endpoint, omitting `summary`
+    // entirely.
+    const cached = this.manifestCache.get(args.manifestCid);
+    return cached ?? null;
+  }
+
   async getLifecycleStatus(args: { manifestCid: string }): Promise<{
     status: 'launched' | 'paused' | 'retired';
     statusUpdatedAt: string;

@@ -61,6 +61,12 @@ class NoOpSolverNetRegistryClient implements SolverNetRegistryClient {
     throw new Error('not implemented');
   }
 
+  async getManifestFromCache(_args: {
+    manifestCid: string;
+  }): Promise<SolverNetManifestV1 | null> {
+    return null;
+  }
+
   async getLifecycleStatus(_args: { manifestCid: string }): Promise<{
     status: 'launched' | 'paused' | 'retired';
     statusUpdatedAt: string;
@@ -80,6 +86,7 @@ describe('SolverNetRegistryClient interface', () => {
     expect(typeof client.publishLifecycleTransition).toBe('function');
     expect(typeof client.listLaunched).toBe('function');
     expect(typeof client.getManifest).toBe('function');
+    expect(typeof client.getManifestFromCache).toBe('function');
     expect(typeof client.getLifecycleStatus).toBe('function');
   });
 

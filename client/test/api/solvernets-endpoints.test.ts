@@ -565,6 +565,11 @@ function makeMockRegistry(): MockRegistry {
     async getManifest() {
       throw new Error('not used');
     },
+    async getManifestFromCache() {
+      // Default test registry behaves as a cold cache — Task 14 lifecycle
+      // and launch tests don't exercise the summary-enrichment path.
+      return null;
+    },
     async getLifecycleStatus() {
       throw new Error('not used');
     },
@@ -1229,6 +1234,55 @@ describe('GET /v1/solvernets/launched/:id (Task 14)', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  // ── Summary enrichment (follow-up .35) ──────────────────────────────────
+
+  it('embeds `summary` on the single-record response when the cache has the manifest', async () => {
+    const record = makeOwnedRecord({ solverNetId: 'rec-1', status: 'launched' });
+    const manifest = makeManifest({
+      solverNetId: 'rec-1',
+      manifestCid: record.manifestCid,
+    });
+    manifest.name = 'Single Net';
+    const registry = makeMockRegistryGet({
+      manifests: new Map([[record.manifestCid, manifest]]),
+    });
+    const { app } = buildTestApp({ store, registry });
+    await store.writeRecord(record);
+
+    const res = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as LaunchedSolverNetRecord & {
+      summary?: SolverNetManifestSummary;
+    };
+    expect(body.solverNetId).toBe('rec-1');
+    expect(body.summary).toBeDefined();
+    expect(body.summary?.name).toBe('Single Net');
+    expect(body.summary?.contractId).toBe('prediction');
+    expect(body.summary?.contractVersion).toBe('v1');
+    expect(body.summary?.openRoles).toEqual(['solver', 'evaluator']);
+  });
+
+  it('omits `summary` on the single-record response when the cache misses', async () => {
+    const record = makeOwnedRecord({ solverNetId: 'rec-cold', status: 'launched' });
+    const registry = makeMockRegistryGet({});
+    const { app } = buildTestApp({ store, registry });
+    await store.writeRecord(record);
+
+    const res = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as LaunchedSolverNetRecord & {
+      summary?: SolverNetManifestSummary;
+    };
+    expect(body.solverNetId).toBe('rec-cold');
+    expect(body.summary).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1425,6 +1479,12 @@ function makeMockRegistryGet(args: {
       }
       return found;
     },
+    async getManifestFromCache(arg) {
+      // Cache-only lookup. Mirrors the Map-backed cache shape from the
+      // production client: returns the cached body when present, else
+      // null — never throws.
+      return manifests.get(arg.manifestCid) ?? null;
+    },
     async getLifecycleStatus(arg) {
       if (args.getLifecycleError) throw args.getLifecycleError;
       const found = lifecycle.get(arg.manifestCid);
@@ -1526,6 +1586,130 @@ describe('GET /v1/solvernets/launched (Task 15)', () => {
       headers: {},
     });
     expect(res.status).toBe(401);
+  });
+
+  // ── Summary enrichment (follow-up .35) ──────────────────────────────────
+  //
+  // The endpoint enriches each row with a `summary?: SolverNetManifestSummary`
+  // when the registry client's manifest cache has the cid. Cache miss →
+  // `summary` omitted (operators see the bare record). Cache hit → the
+  // SPA renders manifest name / contract / prices.
+
+  it('embeds `summary` per row when the registry cache has the manifest', async () => {
+    const a = makeOwnedRecord({ solverNetId: 'a', status: 'launched' });
+    const b = makeOwnedRecord({ solverNetId: 'b', status: 'paused' });
+    const manifestA = makeManifest({
+      solverNetId: 'a',
+      manifestCid: a.manifestCid,
+    });
+    const manifestB = makeManifest({
+      solverNetId: 'b',
+      manifestCid: b.manifestCid,
+    });
+    manifestA.name = 'Net A';
+    manifestB.name = 'Net B';
+    const registry = makeMockRegistryGet({
+      manifests: new Map([
+        [a.manifestCid, manifestA],
+        [b.manifestCid, manifestB],
+      ]),
+    });
+    const { app } = buildTestApp({ store, registry });
+    await store.writeRecord(a);
+    await store.writeRecord(b);
+
+    const res = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      records: Array<LaunchedSolverNetRecord & { summary?: SolverNetManifestSummary }>;
+    };
+    expect(body.records).toHaveLength(2);
+    const byId = new Map(body.records.map((r) => [r.solverNetId, r]));
+    const rowA = byId.get('a')!;
+    const rowB = byId.get('b')!;
+    expect(rowA.summary).toBeDefined();
+    expect(rowA.summary?.name).toBe('Net A');
+    expect(rowA.summary?.contractId).toBe('prediction');
+    expect(rowA.summary?.contractVersion).toBe('v1');
+    expect(rowA.summary?.solutionPriceWei).toBe('1000000000000000');
+    expect(rowA.summary?.verdictPriceWei).toBe('500000000000000');
+    expect(rowA.summary?.openRoles).toEqual(['solver', 'evaluator']);
+    // Status comes from the local record, not the cached manifest body —
+    // the daemon owns the authoritative lifecycle view.
+    expect(rowA.summary?.status).toBe('launched');
+    expect(rowB.summary?.status).toBe('paused');
+  });
+
+  it('omits `summary` when the cache misses (other-launcher / pre-cache rows)', async () => {
+    const a = makeOwnedRecord({ solverNetId: 'a', status: 'launched' });
+    // Empty cache → getManifestFromCache returns null for every cid.
+    const registry = makeMockRegistryGet({});
+    const { app } = buildTestApp({ store, registry });
+    await store.writeRecord(a);
+
+    const res = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      records: Array<LaunchedSolverNetRecord & { summary?: SolverNetManifestSummary }>;
+    };
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.summary).toBeUndefined();
+    // Bare record fields are still present so the SPA can fall back.
+    expect(body.records[0]?.solverNetId).toBe('a');
+    expect(body.records[0]?.manifestCid).toBe(a.manifestCid);
+  });
+
+  it('omits `summary` when no registry client is configured', async () => {
+    const a = makeOwnedRecord({ solverNetId: 'a', status: 'launched' });
+    // No registry dep — endpoint should still return rows, just without
+    // summary enrichment.
+    const { app } = buildTestApp({ store });
+    await store.writeRecord(a);
+
+    const res = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      records: Array<LaunchedSolverNetRecord & { summary?: SolverNetManifestSummary }>;
+    };
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]?.summary).toBeUndefined();
+  });
+
+  it('mixes cache-hit and cache-miss rows: each row independently enriched or not', async () => {
+    const hit = makeOwnedRecord({ solverNetId: 'hit', status: 'launched' });
+    const miss = makeOwnedRecord({ solverNetId: 'miss', status: 'launched' });
+    const manifestHit = makeManifest({
+      solverNetId: 'hit',
+      manifestCid: hit.manifestCid,
+    });
+    manifestHit.name = 'Cached SolverNet';
+    const registry = makeMockRegistryGet({
+      manifests: new Map([[hit.manifestCid, manifestHit]]),
+    });
+    const { app } = buildTestApp({ store, registry });
+    await store.writeRecord(hit);
+    await store.writeRecord(miss);
+
+    const res = await app.request('/v1/solvernets/launched', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      records: Array<LaunchedSolverNetRecord & { summary?: SolverNetManifestSummary }>;
+    };
+    const byId = new Map(body.records.map((r) => [r.solverNetId, r]));
+    expect(byId.get('hit')?.summary?.name).toBe('Cached SolverNet');
+    expect(byId.get('miss')?.summary).toBeUndefined();
   });
 });
 

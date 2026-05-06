@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { api } from '../api/client.js';
 import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
+import { formatEthFromWei } from './launcher-create/draft-helpers.js';
 
 /**
  * Launcher mode > `/launcher`. Owned-SolverNets list page.
@@ -15,16 +16,14 @@ import type { LaunchedSolverNetRecord, LaunchedStatus } from '../api/types.js';
  *      (`/launcher/create`, Task 18).
  *
  *   2. Populated — one row per `LaunchedSolverNetRecord` returned by
- *      `api.solvernets.listLaunched()`. Each row shows status badge,
- *      `solverNetId`, truncated `manifestCid`, and `launchedAt` timestamp,
- *      and click-throughs to the post-launch dashboard
+ *      `api.solvernets.listLaunched()`. The daemon enriches each row with
+ *      `record.summary` (a `SolverNetManifestSummary` projected from the
+ *      manifest body) when its in-process manifest cache has the cid;
+ *      this page renders summary-driven identity (name, contract id /
+ *      version, prices, openRoles) when available and falls back to the
+ *      bare record fields (solverNetId, truncated manifestCid) on cache
+ *      miss. Rows click through to the post-launch dashboard
  *      (`/launcher/launched/:solverNetId`, Task 19).
- *
- * The wire shape (`LaunchedSolverNetRecord`) does not embed the manifest
- * body, so this page intentionally avoids name / contractId / pricing
- * fields; that summary fetches happen on the post-launch dashboard. A
- * follow-up may extend `/v1/solvernets/launched` with embedded manifest
- * summaries to avoid the click-through for catalog-y views.
  */
 
 const STATUS_TONE: Record<
@@ -79,14 +78,45 @@ interface RecordRowProps {
   record: LaunchedSolverNetRecord;
 }
 
+function RoleChip({ label }: { label: string }): JSX.Element {
+  return (
+    <span
+      data-testid="launcher-owned-row-role"
+      style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '11px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.12em',
+        color: 'var(--fg-muted)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-1)',
+        padding: '1px 6px',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function RecordRow({ record }: RecordRowProps): JSX.Element {
   const [, navigate] = useLocation();
   const href = `/launcher/launched/${encodeURIComponent(record.solverNetId)}`;
+  const summary = record.summary;
+  // Primary heading: manifest name when the summary is available, else the
+  // bare solverNetId. This mirrors the cache-warm vs cache-miss split on
+  // the daemon side — we want operators to see "Prediction Markets — V1"
+  // when we can, and the raw id is the safe fallback when we can't.
+  const primary = summary?.name ?? record.solverNetId;
+  const contractLabel =
+    summary !== undefined
+      ? `${summary.contractId}.${summary.contractVersion}`
+      : null;
   return (
     <a
       href={href}
       data-testid="launcher-owned-row"
       data-solvernet-id={record.solverNetId}
+      data-has-summary={summary !== undefined ? 'true' : 'false'}
       onClick={(e) => {
         e.preventDefault();
         navigate(href);
@@ -107,18 +137,64 @@ function RecordRow({ record }: RecordRowProps): JSX.Element {
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
         <div
+          data-testid="launcher-owned-row-primary"
           style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '14px',
-            fontWeight: 500,
+            fontFamily: summary !== undefined
+              ? "'Instrument Serif', 'Times New Roman', serif"
+              : "'JetBrains Mono', monospace",
+            fontSize: summary !== undefined ? '18px' : '14px',
+            fontWeight: summary !== undefined ? 400 : 500,
             color: 'var(--fg)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            letterSpacing: summary !== undefined ? '-0.01em' : undefined,
           }}
         >
-          {record.solverNetId}
+          {primary}
         </div>
+
+        {contractLabel !== null && (
+          <div
+            data-testid="launcher-owned-row-contract"
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: 'var(--fg-muted)',
+            }}
+          >
+            {contractLabel}
+          </div>
+        )}
+
+        {summary !== undefined && (
+          <div
+            data-testid="launcher-owned-row-prices"
+            style={{
+              display: 'flex',
+              gap: '14px',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: 'var(--fg-muted)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>solution {formatEthFromWei(summary.solutionPriceWei)}</span>
+            <span>verdict {formatEthFromWei(summary.verdictPriceWei)}</span>
+          </div>
+        )}
+
+        {summary !== undefined && summary.openRoles.length > 0 && (
+          <div
+            data-testid="launcher-owned-row-roles"
+            style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}
+          >
+            {summary.openRoles.map((role) => (
+              <RoleChip key={role} label={role} />
+            ))}
+          </div>
+        )}
+
         <div
           style={{
             display: 'flex',

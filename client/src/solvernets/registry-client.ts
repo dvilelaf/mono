@@ -107,6 +107,23 @@ export interface SolverNetRegistryClient {
     manifestCid: string;
   }): Promise<SolverNetManifestV1>;
 
+  /**
+   * Cache-only manifest lookup. Returns the cached manifest body if the
+   * client has previously seen this cid (via publish or read), or `null`
+   * otherwise. Never falls through to IPFS — the goal is server-side hot-
+   * path enrichment (e.g. embedding manifest summaries in list responses)
+   * where an IPFS round-trip per row would be unacceptable. Callers that
+   * need the full IPFS-validated body should use `getManifest`.
+   *
+   * Synchronous in spirit (the day-1 implementation reads a Map), but typed
+   * as `Promise` to keep the interface symmetric with the rest of the API
+   * and to allow future implementations to back the cache with async
+   * storage (e.g. SQLite) without a breaking change.
+   */
+  getManifestFromCache(args: {
+    manifestCid: string;
+  }): Promise<SolverNetManifestV1 | null>;
+
   getLifecycleStatus(args: {
     manifestCid: string;
   }): Promise<{

@@ -309,6 +309,14 @@ export interface LaunchedRegistryRefs {
 /**
  * Local persistent record for a SolverNet this daemon has launched. The SPA
  * polls this for launch progress and post-launch state.
+ *
+ * `summary` is enriched server-side from the daemon's in-process manifest
+ * cache (`SolverNetRegistryClient.getManifestFromCache`). Present for every
+ * SolverNet this daemon launched once the cache is warm; `undefined`
+ * during the brief pre-cache window of a launch in flight, or when the
+ * registry client is not wired. SPA list/detail surfaces should treat
+ * `summary` as the source of catalog identity (name, contract, prices,
+ * openRoles) and fall back to the bare record fields when it is absent.
  */
 export interface LaunchedSolverNetRecord {
   schemaVersion: 'solvernet.launched.v1';
@@ -332,6 +340,8 @@ export interface LaunchedSolverNetRecord {
   lifecycleProgress?: LifecycleProgress;
 
   registry: LaunchedRegistryRefs;
+
+  summary?: SolverNetManifestSummary;
 }
 
 /** Hot-applyable subset of the prediction-v1 generator runtime config. */
