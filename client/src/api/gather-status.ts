@@ -134,15 +134,12 @@ function predictionOperatorUnavailable(
 
   // Roles are best-effort: an unavailable status path means the daemon
   // could not load the SolverNet, so we surface whatever the operator has
-  // configured (post-migration) without trying to default further. Note that
-  // launcher filtering happens at the gather-status API boundary below
-  // (see narrowOperatorStatusForApi), so we keep the full role array here
-  // to match the source `PredictionOperatorStatus` shape.
+  // configured (post-migration) without trying to default further.
   const rawRoles = (net as { roles?: unknown } | undefined)?.roles;
   const netRoles = Array.isArray(rawRoles)
     ? rawRoles.filter(
-        (r): r is 'solving' | 'evaluating' | 'launching' =>
-          r === 'solving' || r === 'evaluating' || r === 'launching',
+        (r): r is 'solving' | 'evaluating' =>
+          r === 'solving' || r === 'evaluating',
       )
     : [];
 
@@ -165,11 +162,12 @@ function predictionOperatorUnavailable(
 }
 
 /**
- * Strict mode separation per spec §6.3: Operator mode never displays
- * launcher state. Filter `'launching'` out of `solverNet.roles` before
- * exposing to the operator-mode UI. Done here at the gather-status
- * boundary (not at the prediction-operator-ux source) so the CLI doctor
- * still sees the full role array. See plan task 3.
+ * Project the daemon-side `PredictionOperatorStatus` (full role typing) into
+ * the API-facing variant. With Task 22 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md the operator role enum
+ * is `'solving' | 'evaluating'` everywhere; this projection is structural
+ * (no narrowing required), retained as a thin boundary for clarity and to
+ * keep the `PredictionOperatorStatusForApi` type stable.
  */
 function narrowOperatorStatusForApi(
   status: PredictionOperatorStatus,

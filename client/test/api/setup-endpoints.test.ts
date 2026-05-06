@@ -471,7 +471,12 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(persisted.network).toBe('testnet');
   });
 
-  it('creates config.json from the default SolverNet when no config file exists', async () => {
+  it('returns 404 when the SolverNet has no on-disk config and no default block exists', async () => {
+    // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md dropped
+    // the `solverNets.prediction` default seed (Decision 5 — registry-only
+    // catalog). Operators join SolverNets through the launched-record
+    // surface; the legacy POST /v1/setup/solvernets seed-from-default
+    // behavior is gone.
     const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
     const configPath = join(dir, 'config.json');
 
@@ -484,23 +489,10 @@ describe('POST /v1/setup/solvernets/:name', () => {
       body: JSON.stringify({ enabled: false }),
     });
 
-    expect(res.status).toBe(200);
-    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.solverNets.prediction).toMatchObject({
-      enabled: false,
-      solverType: 'prediction.v1',
-      roles: ['solving'],
-      harness: 'claude-code-learner',
-      plugins: [],
-      taskGenerator: { enabled: true },
-    });
-    // The default seed must NOT carry the legacy singular `role` field —
-    // we want a clean `roles` shape on disk so future readers don't
-    // disagree about which one wins.
-    expect(persisted.solverNets.prediction.role).toBeUndefined();
+    expect(res.status).toBe(404);
   });
 
-  it('seeds the default SolverNet when a legacy config lacks solverNets', async () => {
+  it('returns 404 for a legacy config that omits solverNets (no default seed)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
     const configPath = join(dir, 'config.json');
     writeConfig(configPath, { network: 'testnet', rpcUrl: 'https://example/rpc' });
@@ -514,18 +506,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
       body: JSON.stringify({ role: 'evaluating' }),
     });
 
-    expect(res.status).toBe(200);
-    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.network).toBe('testnet');
-    // Legacy singular `role: 'evaluating'` body is promoted to the
-    // canonical `roles: ['evaluating']` shape on persist.
-    expect(persisted.solverNets.prediction).toMatchObject({
-      enabled: true,
-      solverType: 'prediction.v1',
-      roles: ['evaluating'],
-      harness: 'claude-code-learner',
-    });
-    expect(persisted.solverNets.prediction.role).toBeUndefined();
+    expect(res.status).toBe(404);
   });
 
   it('swaps solverType and accepts both enabled+solverType in one call', async () => {
@@ -711,11 +692,11 @@ describe('POST /v1/setup/solvernets/:name', () => {
     expect(res.status).toBe(400);
   });
 
-  it('preserves launching role when operator-mode patch only includes solving/evaluating', async () => {
-    // Operator-mode UI only knows 'solving' | 'evaluating'. Launcher mode
-    // may have set roles to ['solving', 'launching']. When the operator
-    // patches roles to ['evaluating'], the launching role must survive
-    // (strict mode separation per spec/2026-05-05-launcher-role-and-mode.md §3).
+  it('overwrites roles with the operator-supplied set (legacy launching dropped)', async () => {
+    // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md retired
+    // the `'launching'` operator role; the previous "preserve launching"
+    // semantic no longer applies — operator role patches are authoritative
+    // and the role array is overwritten with the supplied roles.
     const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
     const configPath = join(dir, 'config.json');
     writeConfig(configPath, {
@@ -725,7 +706,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
         prediction: {
           enabled: true,
           solverType: 'prediction.v0',
-          roles: ['solving', 'launching'],
+          roles: ['solving'],
           harness: 'claude-code-learner',
           plugins: [],
         },
@@ -743,7 +724,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
 
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect([...persisted.solverNets.prediction.roles].sort()).toEqual(['evaluating', 'launching']);
+    expect([...persisted.solverNets.prediction.roles].sort()).toEqual(['evaluating']);
   });
 });
 

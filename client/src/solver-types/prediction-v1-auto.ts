@@ -33,16 +33,6 @@ export interface PredictionV1AutoConfig extends PolymarketClientConfig {
   agentPrivateKey?: `0x${string}`;
   allowlistConditionIds?: string[];
   blocklistConditionIds?: string[];
-  /**
-   * Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
-   * The daemon always creates this generator; if `getRoles` is provided and
-   * the returned array does not include `'launching'`, each tick early-returns
-   * without polling Polymarket. Toggling `'launching'` in/out of
-   * `solverNets.prediction.roles` therefore takes effect within one cadence
-   * — no daemon restart. When `getRoles` is unset (e.g. direct test usage)
-   * the generator polls unconditionally, preserving the prior public API.
-   */
-  getRoles?: () => Array<'solving' | 'evaluating' | 'launching'>;
 }
 
 interface EligibleMarket {
@@ -89,122 +79,6 @@ const DEFAULTS = {
   maxOpenRounds: 250,
   submissionWindowMs: 6 * 60 * 60 * 1000,
 } as const;
-
-export function makePredictionV1Generator(config: PredictionV1AutoConfig = {}): PredictionV1GeneratorTick {
-  const postedAtByCondition = new Map<string, number>();
-  const postedCountByDay = new Map<string, number>();
-  const allowlist = conditionIdSet(config.allowlistConditionIds);
-  const blocklist = conditionIdSet(config.blocklistConditionIds);
-  let lastPollStartedAt = 0;
-  // Mutable state, observable via getState(). The role-gate early-return
-  // intentionally does not touch this — a closed gate is "no poll happened",
-  // which the launcher status endpoint reads as `lastPollAt: undefined`.
-  const state: PredictionV1GeneratorState = {};
-
-  const tick = async (): Promise<Task[] | null> => {
-    // Hot-spawn role gate (spec/2026-05-05-launcher-role-and-mode.md §5.2).
-    // Always-spawn loop, tick-time gate: if `getRoles` is supplied and the
-    // operator's `solverNets.prediction.roles` does not include 'launching',
-    // skip the poll entirely. Cadence bookkeeping is intentionally NOT
-    // updated here — leaving `lastPollStartedAt` untouched means the very
-    // first tick after the operator flips 'launching' on will run.
-    if (config.getRoles && !config.getRoles().includes('launching')) {
-      return null;
-    }
-    const now = Date.now();
-    const cadenceMs = config.cadenceMs ?? DEFAULTS.cadenceMs;
-    if (cadenceMs > 0 && lastPollStartedAt > 0 && now - lastPollStartedAt < cadenceMs) {
-      return null;
-    }
-    lastPollStartedAt = now;
-    // Record that a poll attempt happened, regardless of success.
-    state.lastPollAt = new Date(now).toISOString();
-
-    pruneOpenRounds(postedAtByCondition, now);
-    const dayKey = new Date(now).toISOString().slice(0, 10);
-    const todayCount = postedCountByDay.get(dayKey) ?? 0;
-    const dailyRemaining = Math.max(0, (config.maxNewRoundsPerDay ?? DEFAULTS.maxNewRoundsPerDay) - todayCount);
-    const openRemaining = Math.max(0, (config.maxOpenRounds ?? DEFAULTS.maxOpenRounds) - postedAtByCondition.size);
-    const pollLimit = Math.min(config.maxNewRoundsPerPoll ?? DEFAULTS.maxNewRoundsPerPoll, dailyRemaining, openRemaining);
-    if (pollLimit <= 0) {
-      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
-      state.lastError = undefined;
-      return null;
-    }
-
-    let candidates: MarketCandidate[];
-    try {
-      candidates = await listMarketCandidates({ ...config, limit: 250 });
-    } catch (err) {
-      // Preserve existing swallow-and-return-null contract; record the error
-      // for getState() so the launcher status endpoint can render it.
-      state.lastError = {
-        message: err instanceof Error ? err.message : String(err),
-        at: new Date().toISOString(),
-      };
-      state.lastPollSummary = { evaluated: 0, posted: 0, skipped: 0 };
-      return null;
-    }
-
-    const eligible: EligibleMarket[] = [];
-    let evaluatedCount = 0;
-    for (const market of prioritizeAllowlisted(candidates, allowlist)) {
-      if (eligible.length >= pollLimit * 3) break;
-      const conditionId = normalizeConditionId(market.conditionId);
-      if (postedAtByCondition.has(conditionId) || blocklist.has(conditionId)) continue;
-      evaluatedCount += 1;
-      const checked = await checkMarketEligibility(market, config, now);
-      if (checked) eligible.push(checked);
-    }
-
-    eligible.sort((a, b) => {
-      const allowDelta =
-        Number(allowlist.has(normalizeConditionId(b.market.conditionId))) -
-        Number(allowlist.has(normalizeConditionId(a.market.conditionId)));
-      if (allowDelta !== 0) return allowDelta;
-      const liquidityDelta = Number(b.market.liquidityUsd) - Number(a.market.liquidityUsd);
-      if (Number.isFinite(liquidityDelta) && liquidityDelta !== 0) return liquidityDelta;
-      const spreadDelta = Number(a.orderbook.spread) - Number(b.orderbook.spread);
-      if (Number.isFinite(spreadDelta) && spreadDelta !== 0) return spreadDelta;
-      return a.timeToResolutionHours - b.timeToResolutionHours;
-    });
-
-    const selected = eligible.slice(0, pollLimit);
-    const tasks: Task[] = [];
-    for (const entry of selected) {
-      const task = await buildTask(entry, config, now);
-      postedAtByCondition.set(normalizeConditionId(entry.market.conditionId), Date.parse(entry.market.endTime));
-      tasks.push(task);
-    }
-    if (tasks.length > 0) {
-      postedCountByDay.set(dayKey, todayCount + tasks.length);
-    }
-    // evaluated = candidates that survived dedup/blocklist and entered checkMarketEligibility
-    // posted    = tasks built (final selection)
-    // skipped   = evaluated - posted (rejected by eligibility check or eligible-but-not-selected within pollLimit)
-    // Markets filtered out before eligibility check (dedup, blocklist, or exit at eligible*3 cap) are
-    // not counted here — they're not surprising to the launcher and a future skipReasons field can
-    // surface them by category if needed.
-    const evaluated = evaluatedCount;
-    const posted = tasks.length;
-    const skipped = Math.max(0, evaluated - posted);
-    state.lastPollSummary = { evaluated, posted, skipped };
-    state.lastError = undefined;
-    return tasks.length > 0 ? tasks : null;
-  };
-
-  return Object.assign(tick, {
-    getState(): PredictionV1GeneratorStateSnapshot {
-      // Return a defensive copy so callers can't mutate internal state.
-      return {
-        lastPollAt: state.lastPollAt,
-        lastPollSummary: state.lastPollSummary ? { ...state.lastPollSummary } : undefined,
-        lastError: state.lastError ? { ...state.lastError } : undefined,
-        cadenceMs: config.cadenceMs ?? DEFAULTS.cadenceMs,
-      };
-    },
-  });
-}
 
 async function checkMarketEligibility(
   market: MarketCandidate,
@@ -396,11 +270,10 @@ function prioritizeAllowlisted(markets: MarketCandidate[], allowlist: Set<string
 // Launched-record generator (Task 12 of
 // spec/2026-05-05-solvernet-creation-and-launch.md §11).
 //
-// `makePredictionV1GeneratorForLaunchedRecord` is the new entry point used by
+// `makePredictionV1GeneratorForLaunchedRecord` is the entry point used by
 // the SolverNet subsystem (`daemon-init.ts`) to spawn a generator per local
-// launched record the daemon owns. It replaces the predecessor's
-// `getRoles().includes('launching')` startup-time gate with two tick-time
-// references the daemon (and the API) update at runtime:
+// launched record the daemon owns. It uses two tick-time references the
+// daemon (and the API) update at runtime:
 //
 //   - `recordRef.current` — the live `LaunchedSolverNetRecord` mirror. The
 //     daemon updates this when it writes a status flip (`launched ↔ paused
@@ -415,10 +288,9 @@ function prioritizeAllowlisted(markets: MarketCandidate[], allowlist: Set<string
 //     address, agent private key, polymarket fetchImpl) stay captured at
 //     construction time — those don't move once a SolverNet has launched.
 //
-// The OLD `makePredictionV1Generator` factory is intentionally left in place
-// for the legacy `collectTestnetAutoTaskGenerators` path (and its tests).
-// Task 22 of the SolverNet plan drops the legacy config block; at that
-// point the old factory becomes unreachable and can be removed.
+// Task 22 of the SolverNet plan retired the legacy
+// `makePredictionV1Generator` factory + `collectTestnetAutoTaskGenerators`
+// path; this is the only public generator factory.
 //
 // ────────────────────────────────────────────────────────────────────────────
 

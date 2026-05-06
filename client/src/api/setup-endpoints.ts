@@ -408,15 +408,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     if (body.enabled !== undefined) existing.enabled = body.enabled;
     if (body.solverType !== undefined) existing.solverType = body.solverType;
     if (normalizedRoles !== undefined) {
-      // Operator-mode patch only addresses solving/evaluating. Preserve any
-      // non-operator roles (today: 'launching') so launcher-mode state is
-      // never clobbered by an operator-mode role edit. Strict mode
-      // separation per spec/2026-05-05-launcher-role-and-mode.md §3.
-      const existingRoles = Array.isArray(existing['roles'])
-        ? (existing['roles'] as unknown[]).filter((r): r is string => typeof r === 'string')
-        : [];
-      const preservedRoles = existingRoles.filter((r) => !KNOWN_ROLES.includes(r));
-      existing.roles = Array.from(new Set([...normalizedRoles, ...preservedRoles]));
+      // Operator-mode patch overwrites the role array. Task 22 of
+      // spec/2026-05-05-solvernet-creation-and-launch.md retired the
+      // operator-config `'launching'` role; the previous "preserve
+      // non-operator roles" pass is no longer needed because every valid
+      // operator role is in `KNOWN_ROLES`.
+      existing.roles = Array.from(new Set(normalizedRoles));
       // Strip any legacy singular `role` so the persisted shape is canonical.
       // Eliminates ambiguity if a third-party tool reads the file and prefers
       // `role` over `roles`.

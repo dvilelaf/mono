@@ -2,10 +2,11 @@
  * Launcher mode status assembler.
  *
  * Composes per-SolverNet generator state, open-Task counts, and Safe budget
- * runway into the canonical `LauncherStatusResponse`. Only SolverNets whose
- * `roles` includes `'launching'` are surfaced — Solver-only and Evaluator-only
- * nets are filtered out here, not at the route layer, so the gather function
- * can be exercised in isolation.
+ * runway into the canonical `LauncherStatusResponse`. Surfaces every
+ * SolverNet entry the daemon has loaded — launcher ownership is no longer
+ * expressed via an operator-config `'launching'` role (Task 22 of
+ * spec/2026-05-05-solvernet-creation-and-launch.md dropped that enum value);
+ * the launched-record subsystem owns that signal now.
  *
  * Stale-poll detection is computed here from the generator's reported
  * `lastPollAt` and `cadenceMs`: a poll is stale when the wall clock has
@@ -133,10 +134,11 @@ export async function gatherLauncherStatus(
   const now = deps.now?.() ?? Date.now();
   const nets: LauncherStatusNetEntry[] = [];
 
-  for (const [name, net] of Object.entries(deps.config.solverNets ?? {})) {
-    const roles = net?.roles ?? [];
-    if (!roles.includes('launching')) continue;
-
+  for (const [name, _net] of Object.entries(deps.config.solverNets ?? {})) {
+    // Task 22 of spec/2026-05-05-solvernet-creation-and-launch.md removed
+    // the operator-config `'launching'` role; surface every loaded SolverNet
+    // entry. Launched-record ownership filters happen at the launched-record
+    // surface, not here.
     const snapshot = deps.getGeneratorState(name);
     const generatorState = deriveGeneratorState(snapshot);
     const stale = isStalePoll(snapshot, now);
