@@ -8,7 +8,8 @@
     "start": "tsx src/index.ts",
     "run:extract": "tsx src/cli.ts extract",
     "run:analyse": "tsx src/cli.ts analyse",
-    "run:synthesise": "tsx src/cli.ts synthesise"
+    "run:synthesise": "tsx src/cli.ts synthesise",
+    "run:eval": "tsx src/eval/cli.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

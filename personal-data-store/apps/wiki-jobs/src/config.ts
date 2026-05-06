@@ -13,7 +13,9 @@ export const config = {
     extract: process.env.WIKI_EXTRACT_CRON ?? "0 6 * * *",
     analyse: process.env.WIKI_ANALYSE_CRON ?? "0 7 * * *",
     synthesise: process.env.WIKI_SYNTHESISE_CRON ?? "0 8 * * 2,4",
+    eval: process.env.WIKI_EVAL_CRON ?? "0 9 * * 0",
   },
+  evalEnabled: (process.env.WIKI_EVAL_ENABLED ?? "true") === "true",
   pdsApiUrl: process.env.PDS_API_URL ?? "http://localhost:3000",
   canonicalTopics: {
     extract: (process.env.WIKI_EXTRACT_CANONICAL_TOPICS ?? "")

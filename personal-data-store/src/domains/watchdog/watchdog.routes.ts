@@ -29,6 +29,35 @@ watchdogRouter.post("/run", async (_req, res, next) => {
   }
 });
 
+// External callers (e.g. the wiki-jobs eval harness) report a single alert.
+// Same dedupe semantics as internal checks: one open row per fingerprint.
+watchdogRouter.post("/report", async (req, res, next) => {
+  try {
+    const body = req.body ?? {};
+    const required = ["checkType", "severity", "subject", "title", "fingerprint"];
+    for (const k of required) {
+      if (typeof body[k] !== "string" || !body[k]) {
+        return res.status(400).json({ error: `missing field: ${k}` });
+      }
+    }
+    if (!["info", "warning", "critical"].includes(body.severity)) {
+      return res.status(400).json({ error: "severity must be info|warning|critical" });
+    }
+    const r = await upsertAlert({
+      checkType: body.checkType,
+      severity: body.severity,
+      subject: body.subject,
+      title: body.title,
+      detail: typeof body.detail === "string" ? body.detail : undefined,
+      fingerprint: body.fingerprint,
+      metadata: body.metadata && typeof body.metadata === "object" ? body.metadata : undefined,
+    });
+    res.json({ inserted: r.inserted, id: r.alert.id, checkType: r.alert.checkType });
+  } catch (err) {
+    next(err);
+  }
+});
+
 watchdogRouter.patch("/:id/resolve", async (req, res, next) => {
   try {
     const row = await resolveAlert(req.params.id);
