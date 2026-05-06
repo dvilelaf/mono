@@ -127,10 +127,21 @@ async function checkMarketEligibility(
   return { market, orderbook, timeToResolutionHours, orderbookAgeSeconds };
 }
 
+interface BuildTaskExtras {
+  /**
+   * Spec §14 (Task 24): IPFS CID of the launched SolverNet manifest the task
+   * is being posted under. Becomes `manifestDigest = keccak256(manifestCid)`
+   * on chain. Required by the production adapter; tests that don't reach
+   * postTask may omit it.
+   */
+  solverNetManifestCid?: string;
+}
+
 async function buildTask(
   entry: EligibleMarket,
   config: PredictionV1AutoConfig,
   now: number,
+  extras: BuildTaskExtras = {},
 ): Promise<Task> {
   const { market, orderbook, timeToResolutionHours, orderbookAgeSeconds } = entry;
   const startTs = now;
@@ -204,6 +215,11 @@ async function buildTask(
     id,
     description: 'Forecast a binary externally resolved prediction market.',
     solverType: 'prediction.v1',
+    contractId: 'prediction',
+    contractVersion: 'v1',
+    ...(extras.solverNetManifestCid
+      ? { solverNetManifestCid: extras.solverNetManifestCid }
+      : {}),
     role: 'restoration',
     window: { startTs, endTs },
     claimPolicy,
@@ -211,11 +227,14 @@ async function buildTask(
     eligibility,
   };
 
-  if (config.agentEoa && config.safeAddress && config.agentPrivateKey) {
+  if (config.agentEoa && config.safeAddress && config.agentPrivateKey && extras.solverNetManifestCid) {
     const taskDoc: TaskV1 = {
       schemaVersion: 'task.v1',
       id,
       solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: extras.solverNetManifestCid,
       role: 'restoration',
       description: baseTask.description,
       window: baseTask.window!,
@@ -467,8 +486,12 @@ export function makePredictionV1GeneratorForLaunchedRecord(
 
     const selected = eligible.slice(0, pollLimit);
     const tasks: Task[] = [];
+    // Task 24 (spec §14): bind every generated task to the launched
+    // SolverNet manifest so the on-chain digest derives from
+    // `keccak256(manifestCid)`.
+    const solverNetManifestCid = record.manifestCid;
     for (const entry of selected) {
-      const task = await buildTask(entry, callConfig, now);
+      const task = await buildTask(entry, callConfig, now, { solverNetManifestCid });
       postedAtByCondition.set(normalizeConditionId(entry.market.conditionId), Date.parse(entry.market.endTime));
       tasks.push(task);
     }
