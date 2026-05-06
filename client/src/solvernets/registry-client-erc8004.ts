@@ -183,8 +183,11 @@ export interface IdentityRegistryBackedSolverNetRegistryClientConfig {
 /**
  * Encode a lifecycle payload into JCS-canonical UTF-8 JSON bytes — the on-wire
  * format passed to `IdentityRegistry.setMetadata` for `solvernet.lifecycle.v1`.
+ *
+ * Exported so the launch state machine (`launch-state-machine.ts`) can encode
+ * the same payload shape without duplicating the JCS canonicalization.
  */
-function encodeLifecyclePayload(payload: SetMetadataLifecyclePayload): Uint8Array {
+export function encodeLifecyclePayload(payload: SetMetadataLifecyclePayload): Uint8Array {
   return new TextEncoder().encode(canonicalJson(payload));
 }
 
