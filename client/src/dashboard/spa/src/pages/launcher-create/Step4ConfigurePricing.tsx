@@ -161,7 +161,7 @@ export function Step4ConfigurePricing({
         fundingSafeBalanceWei ?? null,
         validation.solutionWei,
         validation.verdictWei,
-        PREDICTION_V1_TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator,
+        PREDICTION_V1_TEMPLATE.claimPolicy.solver.maxClaimsPerOperator,
       ),
     [fundingSafeBalanceWei, validation.solutionWei, validation.verdictWei],
   );
@@ -301,7 +301,7 @@ export function Step4ConfigurePricing({
               ? `${formatEthFromWei(projection.perTaskWei.toString())} (${projection.perTaskWei} wei)`
               : '—'
           }
-          hint={`solution + verdict × maxClaimsPerOperator (${PREDICTION_V1_TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator})`}
+          hint={`solution + verdict × maxClaimsPerOperator (${PREDICTION_V1_TEMPLATE.claimPolicy.solver.maxClaimsPerOperator})`}
         />
         <SummaryRow
           label="Projected Tasks"

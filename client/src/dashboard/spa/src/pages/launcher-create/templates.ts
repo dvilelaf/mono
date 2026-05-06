@@ -46,11 +46,24 @@ export interface CreateWizardTemplate {
     output: string;
     windowDays?: number;
   };
-  claimPolicyDefaults: {
-    mode: 'parallel' | 'serial';
-    maxClaims: number;
-    maxClaimsPerOperator: number;
-    claimLeaseTtlSeconds: number;
+  claimPolicy: {
+    solver: {
+      mode: 'parallel' | 'serial';
+      maxClaims: number;
+      maxClaimsPerOperator: number;
+      claimLeaseTtlSeconds: number;
+      submissionWindowSeconds: number;
+      preconditions: ReadonlyArray<{ kind: string; source: string; expects: string }>;
+    };
+    evaluator: {
+      requiredVerdicts: number;
+      passThreshold: number;
+      maxVerdictsPerEvaluator: number;
+      claimLeaseTtlSeconds: number;
+      disallowSolverSelfEvaluation: boolean;
+      window: { duration: number; externalReadyAt?: string };
+      preconditions: ReadonlyArray<{ kind: string; source: string; expects: string }>;
+    };
   };
   credentialRequirements: {
     creator: ReadonlyArray<{ id: string; kind: string; required: boolean; description: string }>;
@@ -107,11 +120,26 @@ export const PREDICTION_V1_TEMPLATE: CreateWizardTemplate = {
     output: 'trailing mean brierSpread',
     windowDays: 84,
   },
-  claimPolicyDefaults: {
-    mode: 'parallel',
-    maxClaims: 25,
-    maxClaimsPerOperator: 1,
-    claimLeaseTtlSeconds: 30 * 60,
+  claimPolicy: {
+    solver: {
+      mode: 'parallel',
+      maxClaims: 25,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 30 * 60,
+      submissionWindowSeconds: 21600,
+      preconditions: [],
+    },
+    evaluator: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      maxVerdictsPerEvaluator: 1,
+      claimLeaseTtlSeconds: 30 * 60,
+      disallowSolverSelfEvaluation: true,
+      window: { duration: 604800, externalReadyAt: '${task.spec.resolution.expectedResolutionTime}+1h' },
+      preconditions: [
+        { kind: 'oracle.polymarket.resolution', source: '${task.spec.source.url}', expects: 'resolved' },
+      ],
+    },
   },
   credentialRequirements: {
     creator: [

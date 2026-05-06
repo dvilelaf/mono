@@ -130,18 +130,18 @@ export function Step2ReviewContract({
         </SectionBlock>
 
         <SectionBlock title="Claim policy defaults">
-          <ReadonlyRow label="Mode" value={TEMPLATE.claimPolicyDefaults.mode} />
+          <ReadonlyRow label="Mode" value={TEMPLATE.claimPolicy.solver.mode} />
           <ReadonlyRow
             label="Max claims"
-            value={String(TEMPLATE.claimPolicyDefaults.maxClaims)}
+            value={String(TEMPLATE.claimPolicy.solver.maxClaims)}
           />
           <ReadonlyRow
             label="Per operator"
-            value={String(TEMPLATE.claimPolicyDefaults.maxClaimsPerOperator)}
+            value={String(TEMPLATE.claimPolicy.solver.maxClaimsPerOperator)}
           />
           <ReadonlyRow
             label="Lease TTL"
-            value={`${TEMPLATE.claimPolicyDefaults.claimLeaseTtlSeconds}s`}
+            value={`${TEMPLATE.claimPolicy.solver.claimLeaseTtlSeconds}s`}
           />
         </SectionBlock>
 

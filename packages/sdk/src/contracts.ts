@@ -36,11 +36,39 @@ export interface SolverNetAggregationFunction {
   windowDays?: number;
 }
 
-export interface SolverNetClaimPolicyDefaults {
+export interface SolverNetPrecondition {
+  kind: string;
+  source: string;
+  expects: string;
+}
+
+export interface SolverNetEvaluationWindow {
+  duration: number;
+  externalReadyAt?: string;
+}
+
+export interface SolverNetSolverClaimPolicy {
   mode: 'parallel' | 'serial';
   maxClaims: number;
   maxClaimsPerOperator: number;
   claimLeaseTtlSeconds: number;
+  submissionWindowSeconds: number;
+  preconditions: SolverNetPrecondition[];
+}
+
+export interface SolverNetEvaluatorClaimPolicy {
+  requiredVerdicts: number;
+  passThreshold: number;
+  maxVerdictsPerEvaluator: number;
+  claimLeaseTtlSeconds: number;
+  disallowSolverSelfEvaluation: boolean;
+  window: SolverNetEvaluationWindow;
+  preconditions: SolverNetPrecondition[];
+}
+
+export interface SolverNetClaimPolicy {
+  solver: SolverNetSolverClaimPolicy;
+  evaluator: SolverNetEvaluatorClaimPolicy;
 }
 
 /**
@@ -66,7 +94,7 @@ export interface SolverNetContract {
     solution: SolverNetContractSchema;
     verdict: SolverNetContractSchema;
   };
-  claimPolicyDefaults: SolverNetClaimPolicyDefaults;
+  claimPolicy: SolverNetClaimPolicy;
   credentialRequirements: Record<SolverNetContractRole, CredentialRequirement[]>;
   evaluationFunction: SolverNetEvaluationFunction;
   aggregationFunction: SolverNetAggregationFunction;
@@ -92,11 +120,40 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
       json: zodToJsonSchema(PredictionV1VerdictPayloadSchema),
     },
   },
-  claimPolicyDefaults: {
-    mode: 'parallel',
-    maxClaims: 25,
-    maxClaimsPerOperator: 1,
-    claimLeaseTtlSeconds: 30 * 60,
+  claimPolicy: {
+    solver: {
+      mode: 'parallel',
+      maxClaims: 25,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 30 * 60,
+      // Solvers must submit within 6h of claim — covers slow Polymarket
+      // orderbook fetches without leaving stale claims open indefinitely.
+      submissionWindowSeconds: 6 * 60 * 60,
+      preconditions: [],
+    },
+    evaluator: {
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      maxVerdictsPerEvaluator: 1,
+      claimLeaseTtlSeconds: 30 * 60,
+      disallowSolverSelfEvaluation: true,
+      // Polymarket markets resolve months out. The evaluation window
+      // opens 1 hour after the market's expectedResolutionTime to give
+      // UMA's optimistic-oracle finalization headroom, and stays open
+      // for 7 days so claim-with-stale-resolution failures have time to
+      // self-heal across multiple evaluator polls.
+      window: {
+        duration: 7 * 24 * 60 * 60,
+        externalReadyAt: '${task.spec.resolution.expectedResolutionTime}+1h',
+      },
+      preconditions: [
+        {
+          kind: 'oracle.polymarket.resolution',
+          source: '${task.spec.source.url}',
+          expects: 'resolved',
+        },
+      ],
+    },
   },
   credentialRequirements: {
     creator: [

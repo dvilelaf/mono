@@ -34,11 +34,26 @@ export function buildPredictionV1ManifestStub(
       id: 'prediction',
       version: 'v1',
       schemas: { task: {}, solution: {}, verdict: {} },
-      claimPolicyDefaults: {
-        mode: 'parallel',
-        maxClaims: 25,
-        maxClaimsPerOperator: 1,
-        claimLeaseTtlSeconds: 30 * 60,
+      claimPolicy: {
+        solver: {
+          mode: 'parallel',
+          maxClaims: 25,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 30 * 60,
+          submissionWindowSeconds: 21600,
+          preconditions: [],
+        },
+        evaluator: {
+          requiredVerdicts: 1,
+          passThreshold: 1,
+          maxVerdictsPerEvaluator: 1,
+          claimLeaseTtlSeconds: 1800,
+          disallowSolverSelfEvaluation: true,
+          window: { duration: 604800, externalReadyAt: '${task.spec.resolution.expectedResolutionTime}+1h' },
+          preconditions: [
+            { kind: 'oracle.polymarket.resolution', source: '${task.spec.source.url}', expects: 'resolved' },
+          ],
+        },
       },
       credentialRequirements: { creator: [], solver: [], evaluator: [] },
       evaluationFunction: {

@@ -349,7 +349,17 @@ function buildUnsignedManifest(args: {
         solution: contract.schemas.solution.json,
         verdict: contract.schemas.verdict.json,
       },
-      claimPolicyDefaults: contract.claimPolicyDefaults,
+      claimPolicy: {
+        solver: {
+          ...contract.claimPolicy.solver,
+          preconditions: [...contract.claimPolicy.solver.preconditions],
+        },
+        evaluator: {
+          ...contract.claimPolicy.evaluator,
+          window: { ...contract.claimPolicy.evaluator.window },
+          preconditions: [...contract.claimPolicy.evaluator.preconditions],
+        },
+      },
       credentialRequirements: contract.credentialRequirements,
       // Copy the readonly `inputs` arrays so the manifest's mutable-array
       // schema accepts them. Functional content is identical.

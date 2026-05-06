@@ -9,6 +9,6 @@ export type {
   CredentialRequirement,
   SolverNetEvaluationFunction,
   SolverNetAggregationFunction,
-  SolverNetClaimPolicyDefaults,
+  SolverNetClaimPolicy,
   SolverNetContract,
 } from '@jinn-network/sdk/solvernets';

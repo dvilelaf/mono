@@ -20,7 +20,7 @@ export type {
   CredentialRequirement,
   SolverNetEvaluationFunction,
   SolverNetAggregationFunction,
-  SolverNetClaimPolicyDefaults,
+  SolverNetClaimPolicy,
   SolverNetContract,
   SolverNetContractMap,
   SolverNetContractSchema,

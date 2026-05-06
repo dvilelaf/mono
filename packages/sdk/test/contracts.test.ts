@@ -135,11 +135,24 @@ describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 
           solution: c.schemas.solution.json,
           verdict: c.schemas.verdict.json,
         },
-        claimPolicyDefaults: {
-          mode: c.claimPolicyDefaults.mode,
-          maxClaims: c.claimPolicyDefaults.maxClaims,
-          maxClaimsPerOperator: c.claimPolicyDefaults.maxClaimsPerOperator,
-          claimLeaseTtlSeconds: c.claimPolicyDefaults.claimLeaseTtlSeconds,
+        claimPolicy: {
+          solver: {
+            mode: c.claimPolicy.solver.mode,
+            maxClaims: c.claimPolicy.solver.maxClaims,
+            maxClaimsPerOperator: c.claimPolicy.solver.maxClaimsPerOperator,
+            claimLeaseTtlSeconds: c.claimPolicy.solver.claimLeaseTtlSeconds,
+            submissionWindowSeconds: c.claimPolicy.solver.submissionWindowSeconds,
+            preconditions: [...c.claimPolicy.solver.preconditions],
+          },
+          evaluator: {
+            requiredVerdicts: c.claimPolicy.evaluator.requiredVerdicts,
+            passThreshold: c.claimPolicy.evaluator.passThreshold,
+            maxVerdictsPerEvaluator: c.claimPolicy.evaluator.maxVerdictsPerEvaluator,
+            claimLeaseTtlSeconds: c.claimPolicy.evaluator.claimLeaseTtlSeconds,
+            disallowSolverSelfEvaluation: c.claimPolicy.evaluator.disallowSolverSelfEvaluation,
+            window: { ...c.claimPolicy.evaluator.window },
+            preconditions: [...c.claimPolicy.evaluator.preconditions],
+          },
         },
         credentialRequirements: c.credentialRequirements,
         evaluationFunction: {
@@ -180,5 +193,27 @@ describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 
     // Belt-and-braces: parse direct against the schema too.
     const direct = SolverNetManifestV1Schema.safeParse(manifest);
     expect(direct.success).toBe(true);
+  });
+
+  it('exposes the polymarket-resolution evaluator precondition', () => {
+    const evaluator = PREDICTION_V1_SOLVER_NET_CONTRACT.claimPolicy.evaluator;
+    expect(evaluator.preconditions).toHaveLength(1);
+    expect(evaluator.preconditions[0]).toEqual({
+      kind: 'oracle.polymarket.resolution',
+      source: '${task.spec.source.url}',
+      expects: 'resolved',
+    });
+  });
+
+  it('opens the evaluator window 1h after expectedResolutionTime, for 7 days', () => {
+    const evaluator = PREDICTION_V1_SOLVER_NET_CONTRACT.claimPolicy.evaluator;
+    expect(evaluator.window.externalReadyAt).toBe(
+      '${task.spec.resolution.expectedResolutionTime}+1h',
+    );
+    expect(evaluator.window.duration).toBe(7 * 24 * 3600);
+  });
+
+  it('solver branch leaves preconditions empty (no off-chain readiness gate for solving)', () => {
+    expect(PREDICTION_V1_SOLVER_NET_CONTRACT.claimPolicy.solver.preconditions).toEqual([]);
   });
 });

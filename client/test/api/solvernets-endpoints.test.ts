@@ -1421,7 +1421,7 @@ function makeManifest(args: {
       id: 'prediction',
       version: 'v1',
       schemas: { task: {}, solution: {}, verdict: {} },
-      claimPolicyDefaults: {},
+      claimPolicy: {},
       credentialRequirements: [],
       evaluationFunction: { name: 'eq', inputs: [] },
       aggregationFunction: { name: 'majority', inputs: [] },
@@ -1879,7 +1879,7 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
   });
 
   it('happy path: returns the manifest + lifecycle status', async () => {
-    const cid = 'bafyabcdef1234567890';
+    const cid = 'bafyabcdefabcdefabcdefabcdefabc';
     const manifest = makeManifest({ solverNetId: 'happy', manifestCid: cid });
     const registry = makeMockRegistryGet({
       manifests: new Map([[cid, manifest]]),
@@ -1913,7 +1913,7 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
   });
 
   it('returns 404 when the registry getManifest throws (hash mismatch / missing)', async () => {
-    const cid = 'bafytamperedmanifest';
+    const cid = 'bafytamperedmanifesteatatatatat';
     const registry = makeMockRegistryGet({
       getManifestError: new Error('manifest hash mismatch for cid'),
     });
@@ -1930,7 +1930,7 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
   });
 
   it('returns 404 when the lifecycle lookup throws (no events on chain)', async () => {
-    const cid = 'bafyhasmanifestnolifecycle';
+    const cid = 'bafyhasmanifestnolifecyclevvvvv';
     const manifest = makeManifest({ solverNetId: 'orphan', manifestCid: cid });
     const registry = makeMockRegistryGet({
       manifests: new Map([[cid, manifest]]),

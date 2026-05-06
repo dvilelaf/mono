@@ -26,10 +26,15 @@ describe('SolverNet contracts', () => {
     const contract = SOLVER_NET_CONTRACTS['prediction.v1'];
     expect(contract?.id).toBe('prediction');
     expect(contract?.version).toBe('v1');
-    expect(contract?.claimPolicyDefaults).toMatchObject({
+    expect(contract?.claimPolicy.solver).toMatchObject({
       mode: 'parallel',
       maxClaims: 25,
       maxClaimsPerOperator: 1,
+    });
+    expect(contract?.claimPolicy.evaluator).toMatchObject({
+      requiredVerdicts: 1,
+      passThreshold: 1,
+      disallowSolverSelfEvaluation: true,
     });
     expect(contract?.credentialRequirements.creator[0]?.id).toBe('polymarket.public.market-data.read');
     expect(contract?.credentialRequirements.solver).toEqual([]);

@@ -25,11 +25,33 @@ function buildValidManifest(): SolverNetManifestV1 {
         solution: { type: 'object', properties: {}, required: [] },
         verdict: { type: 'object', properties: {}, required: [] },
       },
-      claimPolicyDefaults: {
-        mode: 'parallel',
-        maxClaims: 25,
-        maxClaimsPerOperator: 1,
-        claimLeaseTtlSeconds: 1800,
+      claimPolicy: {
+        solver: {
+          mode: 'parallel',
+          maxClaims: 25,
+          maxClaimsPerOperator: 1,
+          claimLeaseTtlSeconds: 1800,
+          submissionWindowSeconds: 21600,
+          preconditions: [],
+        },
+        evaluator: {
+          requiredVerdicts: 1,
+          passThreshold: 1,
+          maxVerdictsPerEvaluator: 1,
+          claimLeaseTtlSeconds: 1800,
+          disallowSolverSelfEvaluation: true,
+          window: {
+            duration: 604800,
+            externalReadyAt: '${task.spec.resolution.expectedResolutionTime}+1h',
+          },
+          preconditions: [
+            {
+              kind: 'oracle.polymarket.resolution',
+              source: '${task.spec.source.url}',
+              expects: 'resolved',
+            },
+          ],
+        },
       },
       credentialRequirements: {
         creator: [
@@ -166,9 +188,76 @@ describe('SolverNetManifestV1 schema (§7)', () => {
     expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
   });
 
-  it('rejects when claimPolicyDefaults.mode is invalid', () => {
+  it('rejects when claimPolicy.solver.mode is invalid', () => {
     const manifest = buildValidManifest();
-    manifest.contract.claimPolicyDefaults.mode = 'unknown-mode' as 'parallel';
+    manifest.contract.claimPolicy.solver.mode = 'unknown-mode' as 'parallel';
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
+  });
+
+  it('rejects when claimPolicy.solver branch is missing', () => {
+    const manifest = buildValidManifest();
+    delete (manifest.contract.claimPolicy as Record<string, unknown>).solver;
+    const result = SolverNetManifestV1Schema.safeParse(manifest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const path = result.error.issues[0].path.join('.');
+      expect(path).toContain('claimPolicy.solver');
+    }
+  });
+
+  it('rejects when claimPolicy.evaluator branch is missing', () => {
+    const manifest = buildValidManifest();
+    delete (manifest.contract.claimPolicy as Record<string, unknown>).evaluator;
+    const result = SolverNetManifestV1Schema.safeParse(manifest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const path = result.error.issues[0].path.join('.');
+      expect(path).toContain('claimPolicy.evaluator');
+    }
+  });
+
+  it('rejects unknown precondition fields (.strict)', () => {
+    const manifest = buildValidManifest();
+    manifest.contract.claimPolicy.evaluator.preconditions = [
+      // @ts-expect-error — strict() rejects unknown fields
+      { kind: 'oracle.polymarket.resolution', source: 'x', expects: 'resolved', extra: 1 },
+    ];
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
+  });
+
+  it('accepts a precondition with the canonical fields', () => {
+    const manifest = buildValidManifest();
+    manifest.contract.claimPolicy.evaluator.preconditions = [
+      { kind: 'oracle.polymarket.resolution', source: 'https://example.com', expects: 'resolved' },
+    ];
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
+  });
+
+  it('accepts EvaluationWindow with a templated externalReadyAt', () => {
+    const manifest = buildValidManifest();
+    manifest.contract.claimPolicy.evaluator.window = {
+      duration: 604800,
+      externalReadyAt: '${task.spec.resolution.expectedResolutionTime}+1h',
+    };
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
+  });
+
+  it('accepts EvaluationWindow without externalReadyAt (optional)', () => {
+    const manifest = buildValidManifest();
+    manifest.contract.claimPolicy.evaluator.window = { duration: 86400 };
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
+  });
+
+  it('rejects the legacy claimPolicyDefaults shape (clean break)', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    const contract = manifest.contract as Record<string, unknown>;
+    delete contract.claimPolicy;
+    contract.claimPolicyDefaults = {
+      mode: 'parallel',
+      maxClaims: 25,
+      maxClaimsPerOperator: 1,
+      claimLeaseTtlSeconds: 1800,
+    };
     expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
   });
 

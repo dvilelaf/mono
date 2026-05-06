@@ -49,11 +49,50 @@ const CredentialRequirementZ = z.object({
   description: z.string(),
 }).strict();
 
-const ClaimPolicyDefaultsZ = z.object({
+// A precondition declares an off-chain readiness check the daemon must
+// satisfy before claiming the role's task. `kind` selects a registered
+// resolver (e.g. `oracle.polymarket.resolution`); `source` points the
+// resolver at the relevant data (templated against the Task body, e.g.
+// `${task.spec.source.url}`); `expects` is the value the resolver must
+// return for the precondition to pass.
+const PreconditionZ = z.object({
+  kind: z.string().min(1),
+  source: z.string().min(1),
+  expects: z.string().min(1),
+}).strict();
+
+// Lazy evaluation window. `duration` is the on-chain seconds-between
+// (max(submittedAt, externalReadyAt)) and (closes-at). `externalReadyAt`
+// is a templated timestamp expression resolved at task-create time
+// (e.g. `${task.spec.resolution.expectedResolutionTime}+1h`); when
+// omitted the window opens at `submittedAt`.
+const EvaluationWindowZ = z.object({
+  duration: z.number().int().positive(),
+  externalReadyAt: z.string().min(1).optional(),
+}).strict();
+
+const SolverClaimPolicyZ = z.object({
   mode: z.enum(['parallel', 'serial']),
   maxClaims: z.number().int().nonnegative(),
   maxClaimsPerOperator: z.number().int().nonnegative(),
   claimLeaseTtlSeconds: z.number().int().nonnegative(),
+  submissionWindowSeconds: z.number().int().nonnegative(),
+  preconditions: z.array(PreconditionZ).default([]),
+}).strict();
+
+const EvaluatorClaimPolicyZ = z.object({
+  requiredVerdicts: z.number().int().positive(),
+  passThreshold: z.number().int().positive(),
+  maxVerdictsPerEvaluator: z.number().int().nonnegative(),
+  claimLeaseTtlSeconds: z.number().int().nonnegative(),
+  disallowSolverSelfEvaluation: z.boolean(),
+  window: EvaluationWindowZ,
+  preconditions: z.array(PreconditionZ).default([]),
+}).strict();
+
+const ClaimPolicyZ = z.object({
+  solver: SolverClaimPolicyZ,
+  evaluator: EvaluatorClaimPolicyZ,
 }).strict();
 
 const EvaluationFunctionZ = z.object({
@@ -80,7 +119,7 @@ const ContractZ = z.object({
     solution: JsonSchemaZ,
     verdict: JsonSchemaZ,
   }).strict(),
-  claimPolicyDefaults: ClaimPolicyDefaultsZ,
+  claimPolicy: ClaimPolicyZ,
   credentialRequirements: z.object({
     creator: z.array(CredentialRequirementZ),
     solver: z.array(CredentialRequirementZ),
@@ -143,7 +182,11 @@ export type SolverNetManifestV1 = z.infer<typeof SolverNetManifestV1Schema>;
  */
 export type SolverNetContractRole = z.infer<typeof ContractRoleZ>;
 export type SolverNetCredentialRequirement = z.infer<typeof CredentialRequirementZ>;
-export type SolverNetClaimPolicyDefaults = z.infer<typeof ClaimPolicyDefaultsZ>;
+export type SolverNetSolverClaimPolicy = z.infer<typeof SolverClaimPolicyZ>;
+export type SolverNetEvaluatorClaimPolicy = z.infer<typeof EvaluatorClaimPolicyZ>;
+export type SolverNetClaimPolicy = z.infer<typeof ClaimPolicyZ>;
+export type SolverNetPrecondition = z.infer<typeof PreconditionZ>;
+export type SolverNetEvaluationWindow = z.infer<typeof EvaluationWindowZ>;
 export type SolverNetEvaluationFunction = z.infer<typeof EvaluationFunctionZ>;
 export type SolverNetAggregationFunction = z.infer<typeof AggregationFunctionZ>;
 

@@ -422,11 +422,24 @@ export interface SolverNetManifestV1 {
       solution: Record<string, unknown>;
       verdict: Record<string, unknown>;
     };
-    claimPolicyDefaults: {
-      mode: 'parallel' | 'serial';
-      maxClaims: number;
-      maxClaimsPerOperator: number;
-      claimLeaseTtlSeconds: number;
+    claimPolicy: {
+      solver: {
+        mode: 'parallel' | 'serial';
+        maxClaims: number;
+        maxClaimsPerOperator: number;
+        claimLeaseTtlSeconds: number;
+        submissionWindowSeconds: number;
+        preconditions: Array<{ kind: string; source: string; expects: string }>;
+      };
+      evaluator: {
+        requiredVerdicts: number;
+        passThreshold: number;
+        maxVerdictsPerEvaluator: number;
+        claimLeaseTtlSeconds: number;
+        disallowSolverSelfEvaluation: boolean;
+        window: { duration: number; externalReadyAt?: string };
+        preconditions: Array<{ kind: string; source: string; expects: string }>;
+      };
     };
     credentialRequirements: {
       creator: SolverNetCredentialRequirement[];
