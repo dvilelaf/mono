@@ -374,6 +374,19 @@ export const JinnConfigSchema = z.object({
     })
     .optional(),
 
+  /**
+   * Harness execution settings. The `mode` field controls whether the
+   * harness runs with state-write phases enabled (`train`) or disabled
+   * (`frozen`). Frozen mode produces stable codeDigest across Tasks for
+   * benchmark-grade per-snapshot scoring; see
+   * docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §5.
+   */
+  harness: z
+    .object({
+      mode: z.enum(['train', 'frozen']).default('train'),
+    })
+    .default({ mode: 'train' }),
+
   /** SolverNet activation, Harness selection, and operator-configured runtime plugins. */
   solverNets: z.record(z.object({
     enabled: z.boolean().default(true),
