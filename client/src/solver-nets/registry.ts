@@ -132,13 +132,28 @@ export class SolverNetRegistry {
   }
 }
 
+/**
+ * Parse the legacy operator-config `solverType` string (`'<id>.<version>'`)
+ * into a `{ id, version }` ref so we can call the contract registry's
+ * non-deprecated lookup signature. The operator config field itself is
+ * carried forward for now (Task 8 of
+ * `spec/2026-05-05-solvernet-creation-and-launch.md` — internal dispatch
+ * keeps `solverType` as a routing alias; Task 30 removes it).
+ */
+function parseSolverTypeRef(solverType: string): { id: string; version: string } | undefined {
+  const dot = solverType.lastIndexOf('.');
+  if (dot <= 0 || dot === solverType.length - 1) return undefined;
+  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
+}
+
 export async function loadSolverNets(
   config: { solverNets: Record<string, SolverNetConfig> },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
   for (const [name, net] of Object.entries(config.solverNets)) {
     if (!net.enabled) continue;
-    const contract = getSolverNetContract(net.solverType);
+    const ref = parseSolverTypeRef(net.solverType);
+    const contract = ref ? getSolverNetContract(ref) : undefined;
     if (!contract) {
       throw new Error(`SolverNet ${name} has no registered SolverNetContract for ${net.solverType}`);
     }
