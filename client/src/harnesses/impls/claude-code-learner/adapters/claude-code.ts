@@ -153,7 +153,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     // Ensure the plugin install directory exists. The adapter does NOT
     // copy the plugin — that's the operator's responsibility per the
     // README. If the operator has not installed it, Claude Code will
-    // not find the learner skill and will fail; check for it here.
+    // not find the learn skill and will fail; check for it here.
     mkdirSync(this.pluginInstallDir, { recursive: true });
 
     const prompt = buildInitialPrompt(inputs);
