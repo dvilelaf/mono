@@ -24,7 +24,8 @@ function makeLocalPlugin(supports: string[]): string {
 describe('SolverNet contracts', () => {
   it('registers prediction.v1 contract authority', () => {
     const contract = SOLVER_NET_CONTRACTS['prediction.v1'];
-    expect(contract?.solverType).toBe('prediction.v1');
+    expect(contract?.id).toBe('prediction');
+    expect(contract?.version).toBe('v1');
     expect(contract?.claimPolicyDefaults).toMatchObject({
       mode: 'parallel',
       maxClaims: 25,
@@ -42,9 +43,9 @@ describe('SolverNet contracts', () => {
     // `defaultRuntimePlugins` from the contract — runtime plugins are
     // operator-configured via `solverNets.<name>.plugins`, not contract-bound.
     expect(contract).not.toHaveProperty('defaultRuntimePlugins');
+    // Task 30: the legacy `solverType` field on SolverNetContract is gone.
+    expect(contract).not.toHaveProperty('solverType');
     contract?.schemas.task.zod.parse(makePredictionV1Task());
-    expect(contract?.id).toBe('prediction');
-    expect(contract?.version).toBe('v1');
   });
 
   it('loads enabled SolverNets with operator-configured runtime plugins', async () => {

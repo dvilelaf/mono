@@ -1,8 +1,10 @@
 // Surface tests for the SolverNet contract template (`SolverNetContract`).
 //
-// Task 6 of `spec/2026-05-05-solvernet-creation-and-launch.md`:
-// - `SolverNetContract` exposes `id` + `version` (alongside the legacy
-//   `solverType` field, which Task 30 removes).
+// `spec/2026-05-05-solvernet-creation-and-launch.md`:
+// - Task 6: `SolverNetContract` exposes `id` + `version`.
+// - Task 30: removed the legacy `solverType` field from `SolverNetContract`
+//   and the deprecated string-keyed `getSolverNetContract(solverType)`
+//   overload. The {id, version} shape is the only public surface.
 // - `defaultRuntimePlugins` is gone from both the interface and the
 //   `PREDICTION_V1_SOLVER_NET_CONTRACT` template.
 // - The schemas block exposes both Zod (daemon-side validation ergonomics)
@@ -22,17 +24,15 @@ import {
   type SolverNetManifestV1,
 } from '../src/solvernets/manifest-schema.js';
 
-describe('SolverNetContract surface (Task 6)', () => {
+describe('SolverNetContract surface (Task 6 / Task 30)', () => {
   it('PREDICTION_V1 populates id and version', () => {
     expect(PREDICTION_V1_SOLVER_NET_CONTRACT.id).toBe('prediction');
     expect(PREDICTION_V1_SOLVER_NET_CONTRACT.version).toBe('v1');
   });
 
-  it('keeps legacy solverType during migration (Task 8 migrates read sites; Task 30 removes)', () => {
-    expect(PREDICTION_V1_SOLVER_NET_CONTRACT.solverType).toBe('prediction.v1');
-    // solverType is the dot-join of id/version — derived but still present.
-    expect(`${PREDICTION_V1_SOLVER_NET_CONTRACT.id}.${PREDICTION_V1_SOLVER_NET_CONTRACT.version}`).toBe(
-      PREDICTION_V1_SOLVER_NET_CONTRACT.solverType,
+  it('does not carry the legacy solverType field (Task 30 removed it)', () => {
+    expect(PREDICTION_V1_SOLVER_NET_CONTRACT as Record<string, unknown>).not.toHaveProperty(
+      'solverType',
     );
   });
 
@@ -63,38 +63,31 @@ describe('SolverNetContract surface (Task 6)', () => {
     expect(taskJson.type).toBe('object');
   });
 
-  it('SOLVER_NET_CONTRACTS still keys by legacy SolverType during migration', () => {
+  it('SOLVER_NET_CONTRACTS keys by `${id}.${version}`', () => {
     expect(SOLVER_NET_CONTRACTS['prediction.v1']).toBe(PREDICTION_V1_SOLVER_NET_CONTRACT);
-    expect(getSolverNetContract('prediction.v1')).toBe(PREDICTION_V1_SOLVER_NET_CONTRACT);
-  });
-
-  it('payload validation continues to work via the zod side of schemas', () => {
-    // The internal validateWithSchema path uses the zod schema; sanity-check
-    // that this keeps functioning end-to-end through getSolverNetContract.
-    const contract = getSolverNetContract('prediction.v1') as SolverNetContract;
-    expect(contract.schemas.task.zod.safeParse(null).success).toBe(false);
-  });
-});
-
-// Task 7: getSolverNetContract({id, version}) overload + internal solverTypeAlias.
-//
-// The legacy string-keyed signature is preserved (deprecated) to let the
-// daemon migrate incrementally in Task 8. Both shapes resolve the same
-// template; Task 30 deletes the string-keyed signature alongside the legacy
-// `solverType` field.
-describe('getSolverNetContract — Task 7 overload', () => {
-  it('string-keyed signature still resolves PREDICTION_V1', () => {
-    expect(getSolverNetContract('prediction.v1')).toBe(PREDICTION_V1_SOLVER_NET_CONTRACT);
-  });
-
-  it('object-keyed signature ({id, version}) resolves the same template', () => {
     expect(getSolverNetContract({ id: 'prediction', version: 'v1' })).toBe(
       PREDICTION_V1_SOLVER_NET_CONTRACT,
     );
   });
 
-  it('both signatures return undefined for unknown identifiers', () => {
-    expect(getSolverNetContract('does.not.exist')).toBeUndefined();
+  it('payload validation continues to work via the zod side of schemas', () => {
+    // The internal validateWithSchema path uses the zod schema; sanity-check
+    // that this keeps functioning end-to-end through getSolverNetContract.
+    const contract = getSolverNetContract({ id: 'prediction', version: 'v1' }) as SolverNetContract;
+    expect(contract.schemas.task.zod.safeParse(null).success).toBe(false);
+  });
+});
+
+// Task 7: getSolverNetContract({id, version}) is the only signature.
+// Task 30 removed the legacy string-keyed overload.
+describe('getSolverNetContract', () => {
+  it('object-keyed signature ({id, version}) resolves PREDICTION_V1', () => {
+    expect(getSolverNetContract({ id: 'prediction', version: 'v1' })).toBe(
+      PREDICTION_V1_SOLVER_NET_CONTRACT,
+    );
+  });
+
+  it('returns undefined for unknown identifiers', () => {
     expect(getSolverNetContract({ id: 'does', version: 'not-exist' })).toBeUndefined();
     // Ensure id/version round-trip is just a dot-join: a valid id with a
     // bogus version still misses the lookup.
@@ -102,7 +95,7 @@ describe('getSolverNetContract — Task 7 overload', () => {
   });
 });
 
-describe('solverTypeAlias — internal helper for Task 8 migration', () => {
+describe('solverTypeAlias — internal harness-dispatch helper (spec §15)', () => {
   it("returns `${id}.${version}` for v1", async () => {
     const { solverTypeAlias } = await import('../src/contracts.js');
     expect(solverTypeAlias({ id: 'prediction', version: 'v1' })).toBe('prediction.v1');
