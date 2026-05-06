@@ -700,6 +700,8 @@ export class TaskEngine {
           };
           this.solutionOutputs.set(task.requestId, skippedOutput);
           this.modesByRequest.set(task.requestId, ctx.mode);
+          // Preserve trajectory for downstream pack() access (Task 6 regression fix).
+          this.trajectoryCollectors.set(task.requestId, trajectory);
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {

@@ -1462,6 +1462,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       identityPublisher,
       reputationFeedback,
       operatorConfig,
+      harnessMode: config.harness.mode,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
