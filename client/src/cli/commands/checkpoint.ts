@@ -84,6 +84,24 @@ function canonicalize(obj: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalize((obj as any)[k])}`).join(',')}}`;
 }
 
+export interface CheckpointListDeps {
+  listLocallyPublished(): Promise<Array<{ cid: string; name: string; version: string }>>;
+  listLocallyInstalled(): Promise<Array<{ cid: string; name: string; version: string }>>;
+}
+
+export async function checkpointListCommand(args: {
+  deps: CheckpointListDeps;
+}): Promise<{
+  published: Array<{ cid: string; name: string; version: string }>;
+  installed: Array<{ cid: string; name: string; version: string }>;
+}> {
+  const [published, installed] = await Promise.all([
+    args.deps.listLocallyPublished(),
+    args.deps.listLocallyInstalled(),
+  ]);
+  return { published, installed };
+}
+
 export interface CheckpointInstallDeps {
   fetchFromIpfs(cid: string): Promise<string>;
   verifySignature(args: { manifest: HarnessCheckpointManifest; signature: string }): Promise<boolean>;
