@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createMetric,
   queryMetrics,
+  queryMetricsPaginated,
   latestMetric,
   createSupplement,
   querySupplements,
@@ -24,6 +25,22 @@ healthRouter.get("/metrics", async (req, res, next) => {
       limit: req.query.limit ? Number(req.query.limit) : undefined,
     });
     res.json(metrics);
+  } catch (err) {
+    next(err);
+  }
+});
+
+healthRouter.get("/metrics/recent", async (req, res, next) => {
+  try {
+    const result = await queryMetricsPaginated({
+      search: req.query.search as string | undefined,
+      source: req.query.source as string | undefined,
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
+      page: req.query.page ? Number(req.query.page) : undefined,
+      pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+    });
+    res.json(result);
   } catch (err) {
     next(err);
   }
