@@ -92,9 +92,11 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/launcher/create" component={LauncherCreatePage} />
-          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
-          <Route path="/launcher" component={LauncherPage} />
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
         </Switch>,
         '/launcher',
       ),
@@ -114,9 +116,11 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/launcher/create" component={LauncherCreatePage} />
-          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
-          <Route path="/launcher" component={LauncherPage} />
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
         </Switch>,
         '/launcher/create',
       ),
@@ -133,9 +137,11 @@ describe('App routes', () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/launcher/create" component={LauncherCreatePage} />
-          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
-          <Route path="/launcher" component={LauncherPage} />
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
         </Switch>,
         '/launcher/launched/agent-1_prediction.v1-1_abcdef01',
       ),

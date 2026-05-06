@@ -71,10 +71,12 @@ export default function App(): JSX.Element {
           <Route path="/configuration">
             <ConfigurationPage onRestartPending={() => setRestartPending(true)} />
           </Route>
-          <Route path="/launcher/create" component={LauncherCreatePage} />
-          <Route path="/launcher/launched/:solverNetId" component={LauncherLaunchedPage} />
-          <Route path="/launcher" component={LauncherPage} />
-          <Route path="/operator/join/:cid" component={JoinFlow} />
+          <Route path="/launcher/create"><LauncherCreatePage /></Route>
+          <Route path="/launcher/launched/:solverNetId">
+            <LauncherLaunchedPage />
+          </Route>
+          <Route path="/launcher"><LauncherPage /></Route>
+          <Route path="/operator/join/:cid"><JoinFlow /></Route>
           <Route path="/leaderboard/:solverNet">
             {(params: { solverNet: string }) => (
               <LeaderboardPage solverNet={params.solverNet} />
