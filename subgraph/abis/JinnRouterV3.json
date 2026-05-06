@@ -731,7 +731,12 @@
               },
               {
                 "internalType": "uint64",
-                "name": "evaluationDeadline",
+                "name": "evaluationDuration",
+                "type": "uint64"
+              },
+              {
+                "internalType": "uint64",
+                "name": "externalReadyAt",
                 "type": "uint64"
               },
               {

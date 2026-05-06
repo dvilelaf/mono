@@ -140,7 +140,8 @@ export function handleTaskCreated(event: TaskCreatedEvent): void {
   row.claimWindowStart = event.params.claimWindowStart;
   row.claimWindowEnd = event.params.claimWindowEnd;
   row.submissionDeadline = event.params.submissionDeadline;
-  row.evaluationDeadline = event.params.evaluationDeadline;
+  row.evaluationDuration = event.params.evaluationDuration;
+  row.externalReadyAt = event.params.externalReadyAt;
   // Anchor canonical createdAt/Tx on the coordinator emission (the coordinator
   // carries the manifest digests; the router emits a paired event with budgets).
   row.createdAt = event.block.timestamp;
@@ -196,6 +197,25 @@ export function handleTaskSubmitted(event: TaskSubmittedEvent): void {
   row.submittedAtTx = event.transaction.hash;
   if (row.status == "CLAIMED") {
     row.status = "SUBMITTED";
+  }
+  // Mirror the on-chain `evaluationOpensAt(taskId, attemptIndex)` view so
+  // queries can filter / order by the per-attempt window without reading
+  // chain state. We must look up the parent Task to get
+  // externalReadyAt + evaluationDuration; both are populated by the
+  // TaskCreated handler before any TaskSubmitted event for the same task
+  // can be indexed (events are processed in block order; TaskCreated's
+  // emission strictly precedes any TaskSubmitted).
+  let task = Task.load(event.params.taskId.toString());
+  if (task != null) {
+    let externalReadyAt = task.externalReadyAt;
+    let duration = task.evaluationDuration;
+    if (externalReadyAt !== null && duration !== null) {
+      let opensAt = event.block.timestamp.gt(externalReadyAt as BigInt)
+        ? event.block.timestamp
+        : (externalReadyAt as BigInt);
+      row.evaluationOpensAt = opensAt;
+      row.evaluationClosesAt = opensAt.plus(duration as BigInt);
+    }
   }
   row.save();
 }

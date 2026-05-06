@@ -343,8 +343,23 @@ type Task @entity(immutable: false) {
   "TaskCoordinator submission deadline (unix seconds)"
   submissionDeadline: BigInt
 
-  "TaskCoordinator evaluation deadline (unix seconds)"
-  evaluationDeadline: BigInt
+  """
+  TaskCoordinator EvaluationPolicy.evaluationDuration (seconds). The
+  per-attempt evaluation window is computed lazily as
+      max(submittedAt, externalReadyAt) + evaluationDuration
+  so a single deadline timestamp can't be derived at TaskCreated time.
+  See `TaskAttempt.evaluationOpensAt` / `evaluationClosesAt` for the
+  per-attempt resolution.
+  """
+  evaluationDuration: BigInt
+
+  """
+  TaskCoordinator EvaluationPolicy.externalReadyAt (unix seconds). The
+  earliest timestamp at which the evaluation window can open, even if a
+  solution was submitted earlier. 0 means 'open as soon as the
+  solution is submitted'.
+  """
+  externalReadyAt: BigInt
 
   "True once any attempt has been finalized as passed (best-effort)"
   finalized: Boolean!
@@ -399,6 +414,21 @@ type TaskAttempt @entity(immutable: false) {
   submittedAt: BigInt
   submittedAtBlock: BigInt
   submittedAtTx: Bytes
+
+  """
+  Per-attempt evaluation-window opens-at (unix seconds), computed at
+  submission time as max(submittedAt, task.externalReadyAt). Mirrors the
+  on-chain `evaluationOpensAt(taskId, attemptIndex)` view. Null until
+  TaskSubmitted is indexed.
+  """
+  evaluationOpensAt: BigInt
+
+  """
+  Per-attempt evaluation-window closes-at (unix seconds), computed at
+  submission time as evaluationOpensAt + task.evaluationDuration.
+  Mirrors `evaluationClosesAt(taskId, attemptIndex)`.
+  """
+  evaluationClosesAt: BigInt
 
   "True iff AttemptFinalized has been emitted for this attempt"
   finalized: Boolean!

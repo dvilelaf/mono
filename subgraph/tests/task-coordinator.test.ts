@@ -126,8 +126,14 @@ function buildTaskCreatedEvent(
   );
   event.parameters.push(
     new ethereum.EventParam(
-      "evaluationDeadline",
-      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(1700010800)),
+      "evaluationDuration",
+      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(3600)),
+    ),
+  );
+  event.parameters.push(
+    new ethereum.EventParam(
+      "externalReadyAt",
+      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(0)),
     ),
   );
   return event;
@@ -707,6 +713,13 @@ describe("TaskCoordinator V3 handlers", () => {
       );
       assert.fieldEquals("TaskAttempt", id, "solutionWeight", "7777");
       assert.fieldEquals("TaskAttempt", id, "operator", OPERATOR_HEX);
+      // Stage 3: per-attempt evaluation window mirrors the on-chain views.
+      // buildTaskCreatedEvent sets evaluationDuration=3600 and
+      // externalReadyAt=0; the mock event's block.timestamp is 1 (newMockEvent
+      // default), so opens-at = max(submittedAt=1, externalReadyAt=0) = 1
+      // and closes-at = 1 + 3600 = 3601.
+      assert.fieldEquals("TaskAttempt", id, "evaluationOpensAt", "1");
+      assert.fieldEquals("TaskAttempt", id, "evaluationClosesAt", "3601");
     },
   );
 

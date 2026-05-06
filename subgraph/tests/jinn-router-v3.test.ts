@@ -114,8 +114,14 @@ function seedCoordinatorTask(
   );
   event.parameters.push(
     new ethereum.EventParam(
-      "evaluationDeadline",
-      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(1700010800)),
+      "evaluationDuration",
+      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(3600)),
+    ),
+  );
+  event.parameters.push(
+    new ethereum.EventParam(
+      "externalReadyAt",
+      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(0)),
     ),
   );
   handleCoordinatorTaskCreated(event);
