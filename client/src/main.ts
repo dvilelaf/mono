@@ -1418,6 +1418,88 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
+  //
+  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`,
+  // resumes any in-flight launch / lifecycle transitions, and starts the
+  // operator catalog refresher. Generator construction per launched record
+  // lands in Task 12; until then we expose `pendingGenerators` so the
+  // upcoming wiring has a clean handoff point.
+  //
+  // Day-1 SubgraphClient is the no-op stub — Task 25 wires the real
+  // subgraph extension. The launch state machine still resumes correctly
+  // through the receipt-confirmation path; only the mempool-drop fallback
+  // depends on subgraph reads.
+  let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
+  if (agentId && identityRegistryAddress && config.network === 'testnet') {
+    const {
+      initSolverNetSubsystem,
+      createIpfsClientAdapter,
+      createNoopSubgraphClient,
+      createMetadataPublisherFromViem,
+      createDefaultRegistryClient,
+    } = await import('./solvernets/daemon-init.js');
+    const { createSolverNetStore } = await import('./solvernets/store.js');
+
+    const solverNetStore = createSolverNetStore({ baseDir: config.earningDir });
+    const solverNetIpfs = createIpfsClientAdapter({
+      registryUrl: config.ipfsRegistryUrl,
+      gatewayUrl: config.ipfsGatewayUrl,
+    });
+    const solverNetSubgraph = createNoopSubgraphClient();
+    const solverNetPublisher = createMetadataPublisherFromViem({
+      identityRegistryAddress,
+      walletClient: agentClients.walletClient,
+      publicClient: agentClients.publicClient,
+    });
+    const solverNetRegistryClient = createDefaultRegistryClient({
+      ipfs: solverNetIpfs,
+      publisher: solverNetPublisher,
+      subgraph: solverNetSubgraph,
+      network: 'base-sepolia',
+    });
+
+    const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
+      agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
+      agentEoaPrivateKey: agentPrivateKey,
+      agentId,
+    };
+
+    try {
+      solverNetSubsystem = await initSolverNetSubsystem({
+        store: solverNetStore,
+        ipfs: solverNetIpfs,
+        publisher: solverNetPublisher,
+        subgraph: solverNetSubgraph,
+        registryClient: solverNetRegistryClient,
+        network: 'base-sepolia',
+        resolveSigner: async () => launcherSigner,
+        lifecycleSigner: launcherSigner,
+        awaitTxConfirmation: async (txHash) => {
+          const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
+          return { blockNumber: Number(receipt.blockNumber) };
+        },
+      });
+      console.log(
+        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
+          `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
+      );
+    } catch (err) {
+      console.warn(
+        `[main] SolverNet subsystem init failed; continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  } else {
+    console.log(
+      '[main] SolverNet subsystem: disabled ' +
+        '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
+    );
+  }
+  // Reference the subsystem to avoid an unused-locals error on builds where
+  // Task 12 hasn't yet wired the spawn loop. The catalog cache and
+  // pending-generators set will be consumed by Tasks 12, 14, and 15.
+  void solverNetSubsystem;
+
   // ── Auto Task generators (testnet only, opt-out via env) ─────────────────
   const autoTasksDisabled =
     process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
