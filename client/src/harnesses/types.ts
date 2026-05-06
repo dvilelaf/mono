@@ -72,6 +72,34 @@ export interface HarnessContext {
    * Spec: `spec/2026-05-executor-trust-boundary.md` §3.4.
    */
   secrets?: ScopedSecrets;
+  /**
+   * Harness execution mode.
+   *
+   * - `'train'` (default): learning mode. The harness's Improve / Memory
+   *   phases (or equivalent writeback paths in a Path 2 harness) run;
+   *   `implStateDir` mutates as the harness accumulates experience;
+   *   `Executor.codeDigest` changes after each Task. Substrate-flow
+   *   contributor.
+   *
+   * - `'frozen'`: evaluation mode. The harness MUST NOT write to
+   *   `implStateDir`. State is read-only; `codeDigest` is stable across
+   *   the entire frozen window. Verdicts on Solutions produced in this
+   *   mode accumulate under a single `(implName, version, codeDigest)`
+   *   identity, producing a clean benchmark score directly comparable to
+   *   traditional harness leaderboards (OpenHands, SWE-Agent, Aider, etc).
+   *
+   * The protocol enforces the freeze contract via the daemon-side
+   * hash-fence (the daemon hashes implStateDir before and after each Task
+   * and rejects envelopes where the hash changed in frozen mode).
+   * Path 2 harness implementations MUST gate writes on `mode === 'train'`;
+   * the SDK provides `requireTrain(ctx, action)` as an opt-in helper at
+   * write call sites.
+   *
+   * See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6
+   * for the full design (trust stack, daemon enforcement, verified vs
+   * unverified frozen credibility tier).
+   */
+  mode: 'train' | 'frozen';
 }
 
 // ── Solution ─────────────────────────────────────────────────────────

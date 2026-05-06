@@ -636,6 +636,7 @@ export class TaskEngine {
         abort: abort.signal,
         msUntilEndTs,
         trajectory,
+        mode: 'train',
       };
 
       let output: Solution;
