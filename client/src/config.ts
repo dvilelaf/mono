@@ -42,6 +42,14 @@ export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {
     plugins: [],
     taskGenerator: { enabled: true },
   },
+  'swe-rebench-v2': {
+    enabled: false, // opt-in; operator enables via config.solverNets['swe-rebench-v2'].enabled = true
+    solverType: 'swe-rebench-v2.v1',
+    role: 'solving',
+    harness: 'claude-code-learner',
+    plugins: [],
+    taskGenerator: { enabled: false },
+  },
 };
 
 export const JinnConfigSchema = z.object({
