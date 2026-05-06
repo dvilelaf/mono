@@ -70,29 +70,59 @@ Defer until:
 
 ## Pre-deploy gates
 
-Before running the upgrade for real, confirm these all pass:
+Before running the upgrade for real, confirm all four gates pass.
 
 ```bash
-# 1. Contracts regression (storage pins + ABI invariance + unit tests)
+# 1. Contracts regression — storage layout pins + ABI invariance + unit tests
 cd contracts && yarn test
-# Expected: ~486 passing, fork tests pending (default-skipped)
+# Expected: 486 passing. Storage pins enforce slot stability for every
+# load-bearing state variable on TaskCoordinator + JinnRouterV3 (17 pins).
+# ABI invariance asserts every renamed selector + event topic is byte-
+# identical to its pre-rename hash (23 tests). Drift on either == block.
 
-# 2. Live fork test (gated)
-cd contracts && \
-  RUN_FORK_TESTS=1 BASE_SEPOLIA_RPC_URL=https://sepolia.base.org \
-  yarn test --grep "Base Sepolia fork"
-# Expected: 11+ pending → 11+ passing. Storage compat, bytecode-diff,
-# activity-checker snapshot, full lifecycle (claim/submit/verdict/finalize)
-# all green. Optional FORK_BLOCK_NUMBER=<n> for reproducibility.
+# 2. Daemon Anvil-fork e2e — full lifecycle on a Base Sepolia fork with
+#    the upgrade applied in-fork (canonical pre-deploy gate)
+cd client && yarn e2e
+# Expected: 4 phases pass. The "Base Sepolia fork Task-first full loop
+# with real Mech" phase is the load-bearing one — it forks live Base
+# Sepolia via Anvil, runs `upgradeTaskStackInsideFork` to swap the
+# TaskCoordinator + JinnRouterV3 implementations, bootstraps two
+# operator fleets, and walks createTask -> claim -> submit ->
+# claimEvaluation -> submitVerdict -> finalize against the upgraded
+# stack. Verdict=SCORED + a non-zero score is the signal.
+#
+# This phase exercises:
+#  - Real Base Sepolia state at fork time (no hardfork-history issues —
+#    Anvil handles them natively)
+#  - The proxy upgrade path against live deployment artifacts
+#  - The new manifestDigest semantic end-to-end
+#  - All 16 V3 event topics decode correctly via the renamed ABIs
+#  - Real MechMarketplace + activity checker — not mocks
+#  - Operator claim eligibility filtered by manifestDigest
+#
+# Skip the fork phase locally with JINN_E2E_SKIP_FORK=1 (falls back to a
+# pure-local Anvil chain); for a deploy gate, leave it on.
 
-# 3. Subgraph matchstick
+# 3. Subgraph matchstick — handler decoding for all V3 event types
 cd subgraph && yarn test
 # Expected: 17 passing across task-coordinator + jinn-router-v3.
 ```
 
-If step 2 fails: the upgrade is NOT safe against actual deployed state. Do not proceed.
+If gate 1 fails: a structural bug slipped past the unit-level checks. Block.
 
-If step 1 or 3 fails: a structural bug has slipped past the unit-level gates. Do not proceed.
+If gate 2 fails: the upgrade is NOT safe against actual deployed state. Block.
+
+If gate 3 fails: the new V3 indexer has a handler bug. Doesn't strictly block the contract upgrade, but should land before the subgraph redeploy.
+
+### Gate 2 caveats (gaps not yet automated)
+
+`yarn e2e` does NOT automate these defensive checks. Run them manually before the live cutover if you want full coverage:
+
+- **Existing-task storage compatibility** — pick the most recent live task on Base Sepolia (`coordinator.nextTaskId() - 1` or earlier), snapshot the full `getTask(taskId)` struct, run the live upgrade, re-read the struct, assert byte-equal. The storage-layout pins (gate 1) PROVE slot positions are unchanged, so this is belt-and-braces — but if you're paranoid about a subtle struct-internal field reorder, this is the empirical confirmation.
+- **Bytecode-diff sanity** — `keccak256(provider.getCode(deployedNewImpl))` against `keccak256(<local artifact>.deployedBytecode)` — proves what you deployed is byte-identical to the local artifact. Cosmetic-rename should produce identical bytecode; surprises here surface compile-flag drift.
+- **Activity-checker pre/post snapshot** — same shape as the existing-task snapshot, applied to the activity checker's per-creator counters.
+
+These three gaps are NOT in `yarn e2e` because they require pre/post snapshot scaffolding that the e2e was never built for. They could be added to `runBaseSepoliaForkTaskFirstFullLoop` as a follow-up; for now, run them manually if the deployment risk profile warrants it.
 
 ## Cutover ordering — contracts first, subgraph second
 
