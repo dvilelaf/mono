@@ -201,7 +201,8 @@ const TASK_COORDINATOR_E2E_ABI = [
               components: [
                 { name: 'requiredVerdicts', type: 'uint16' },
                 { name: 'passThreshold', type: 'uint16' },
-                { name: 'evaluationDeadline', type: 'uint64' },
+                { name: 'evaluationDuration', type: 'uint64' },
+                { name: 'externalReadyAt', type: 'uint64' },
                 { name: 'maxVerdictsPerEvaluator', type: 'uint16' },
                 { name: 'disallowSolverSelfEvaluation', type: 'bool' },
               ],
@@ -1785,7 +1786,8 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
       evaluationPolicy: {
         requiredVerdicts: 1,
         passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 420),
+        evaluationDuration: 420n,
+        externalReadyAt: 0n,
         maxVerdictsPerEvaluator: 1,
         disallowSolverSelfEvaluation: true,
       },
@@ -2317,7 +2319,8 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       evaluationPolicy: {
         requiredVerdicts: 1,
         passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 420),
+        evaluationDuration: 420n,
+        externalReadyAt: 0n,
         maxVerdictsPerEvaluator: 1,
         disallowSolverSelfEvaluation: true,
       },
@@ -2728,7 +2731,8 @@ export async function runAnvilTaskFirstFullLoop(): Promise<AnvilTaskFirstFullLoo
       evaluationPolicy: {
         requiredVerdicts: 1,
         passThreshold: 1,
-        evaluationDeadline: BigInt(nowSec + 1_020),
+        evaluationDuration: 1020n,
+        externalReadyAt: 0n,
         maxVerdictsPerEvaluator: 1,
         disallowSolverSelfEvaluation: true,
       },
