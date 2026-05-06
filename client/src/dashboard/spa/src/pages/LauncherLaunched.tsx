@@ -75,7 +75,15 @@ export function LauncherLaunchedPage({
   const lifecycleMutation = useMutation({
     mutationFn: ({ target }: { target: LifecycleTarget }) =>
       api.solvernets.transitionLifecycle(solverNetId!, target),
-    onSuccess: (record) => {
+    onSuccess: async (record) => {
+      // jinn-mono-805s: cancel any in-flight poll before priming the cache.
+      // Without the cancel, a poll started DURING the (10-15s) on-chain
+      // transition resolves AFTER setQueryData and writes back the
+      // intermediate `lifecycleProgress` shape — the status badge then
+      // stays on the pre-transition value until the next manual reload.
+      await queryClient.cancelQueries({
+        queryKey: ['solvernets', 'launched', solverNetId],
+      });
       queryClient.setQueryData<LaunchedSolverNetRecord>(
         ['solvernets', 'launched', solverNetId],
         record,

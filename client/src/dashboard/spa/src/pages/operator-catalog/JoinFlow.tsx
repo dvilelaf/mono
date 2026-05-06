@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useParams } from 'wouter';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import type {
   RegistryManifestResponse,
@@ -81,6 +81,7 @@ export function JoinFlow({
   const params = useParams<{ cid: string }>();
   const [, navigateHook] = useLocation();
   const navigate = navigateTo ?? navigateHook;
+  const queryClient = useQueryClient();
   const cid = manifestCidOverride ?? params.cid;
 
   const manifestQuery = useQuery<RegistryManifestResponse>({
@@ -143,6 +144,9 @@ export function JoinFlow({
           : {}),
       }),
     onSuccess: () => {
+      // Invalidate so the catalog's joined-indicator badge appears on the
+      // next tick instead of waiting up to 30s for the next refetch.
+      void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
       navigate('/configuration#solvernets');
     },
     onError: (err) => {

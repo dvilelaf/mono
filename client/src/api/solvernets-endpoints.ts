@@ -828,7 +828,15 @@ export function registerSolverNetsEndpoints(
     // await it here — production launches can take 30+ seconds (IPFS pin +
     // tx confirmation) and the SPA tracks progress via `launchProgress`.
     void launchDeps.launchAction
-      .launch({ manifest, signer: launchDeps.signer })
+      .launch({
+        manifest,
+        signer: launchDeps.signer,
+        // jinn-mono-jnr1: forward the wizard's per-record runtime config so
+        // the launched record persists it; otherwise the generator falls
+        // back to DEFAULTS (cadence 6h etc.) regardless of what the
+        // operator picked in the Create flow.
+        generatorConfig: draft.generatorConfig,
+      })
       .catch((err) => {
         // The state machine has already persisted the failure to disk
         // (`launchProgress.txError`); we just log so the daemon operator

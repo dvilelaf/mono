@@ -125,6 +125,15 @@ export class LaunchAction {
   async launch(args: {
     manifest: SolverNetManifestV1;
     signer: SignerWithAgentEoa;
+    /**
+     * jinn-mono-jnr1: per-record runtime config from the wizard (cadence,
+     * caps, allow/blocklists). Persisted onto the launched record so the
+     * generator factory's `configRef` seeds with the operator's choice
+     * instead of falling back to DEFAULTS. Optional — empty / undefined
+     * means "use DEFAULTS for everything", which preserves the legacy
+     * behaviour for callers that don't yet pass this through.
+     */
+    generatorConfig?: Record<string, unknown>;
   }): Promise<LaunchedSolverNetRecord> {
     if (args.signer.agentId !== args.manifest.launcher.agentId) {
       throw new Error(
@@ -164,6 +173,12 @@ export class LaunchAction {
       status: 'launching',
       statusUpdatedAt: this.now().toISOString(),
       generatorEnabled: true,
+      // jinn-mono-jnr1: persist the wizard's generatorConfig so the daemon's
+      // generator factory's configRef seeds with the operator's choice on
+      // the next restart, not the DEFAULTS.
+      ...(args.generatorConfig !== undefined && {
+        generatorConfig: args.generatorConfig,
+      }),
       registry: {},
       launchProgress: { phase: 'broadcasting', attemptCount: 0 },
     };
