@@ -99,7 +99,7 @@ interface JoinedSolverNet {
 function detectJoinedSolverNet(
   bootstrapSolverNets: BootstrapWithSolverNets['solverNets'] | undefined,
   predictionEnabled: boolean,
-  predictionRoles: Array<'solving' | 'evaluating'> | undefined,
+  predictionRoles: string[] | undefined,
 ): JoinedSolverNet | null {
   if (bootstrapSolverNets) {
     // Pass 1: new shape — entries keyed by manifestCid (heuristic: starts

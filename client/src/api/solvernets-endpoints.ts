@@ -231,8 +231,9 @@ const RegistryStatusFilterSchema = z.enum(['launched', 'paused', 'retired']);
 // base32 lowercase alphanumeric). Earlier this regex anchored to `bafy`,
 // the dag-pb codec prefix; the IPFS adapter actually pins manifests as
 // raw bytes (codec `raw`), producing `bafkrei...`. See jinn-mono-wkzp.
-// Loose by design — the registry client does the canonical decode.
-const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|b[a-z2-7]{20,})$/u;
+// Loose by design — the registry client does the canonical decode. This only
+// blocks obviously invalid/path-like input before an IPFS round-trip.
+const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|b[A-Za-z0-9]{10,})$/u;
 
 // ── Lifecycle / generator-config validation schemas ─────────────────────────
 

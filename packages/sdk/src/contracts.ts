@@ -141,7 +141,6 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
 export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
   id: 'swe-rebench-v2',
   version: 'v1',
-  solverType: 'swe-rebench-v2.v1',
   name: 'SWE-rebench v2',
   schemas: {
     task: {
