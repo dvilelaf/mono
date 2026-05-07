@@ -13,9 +13,11 @@ import {
   runBaseSepoliaForkTaskFirstFullLoop,
   runContractIntegration,
   runAnvilTaskFirstFullLoop,
+  runFreezeFenceForkE2E,
   runLocalTaskFirstLifecycle,
   runPhase,
   runPredictionV1Smoke,
+  runTrainVsFrozenTrajectoryE2E,
   summarize,
 } from './task-first-helpers.js';
 
@@ -52,6 +54,28 @@ async function main(): Promise<void> {
       );
     }));
   }
+
+  // Freeze-fence phases use plain local Anvil (no Base Sepolia RPC needed),
+  // so they run even under JINN_E2E_SKIP_FORK=1 — they only require the
+  // `anvil` binary, like `runAnvilTaskFirstFullLoop`.
+  results.push(await runPhase('Anvil-fork freeze-fence e2e (stable digest, mutation detected, rollback)', async () => {
+    const result = await runFreezeFenceForkE2E();
+    process.stdout.write(
+      `rpcUrl=${result.rpcUrl} ` +
+      `digestStable=${result.codeDigestRun1 === result.codeDigestRun2} ` +
+      `violationHarness=${result.violationHarnessName} ` +
+      `rollbackOk=${result.preViolationHash === result.postViolationHash}\n`,
+    );
+  }));
+
+  results.push(await runPhase('Anvil-fork train-vs-frozen trajectory e2e (improve/memory gating)', async () => {
+    const result = await runTrainVsFrozenTrajectoryE2E();
+    process.stdout.write(
+      `rpcUrl=${result.rpcUrl} ` +
+      `train=[${result.trainPhaseSpans.join(',')}] ` +
+      `frozen=[${result.frozenPhaseSpans.join(',')}]\n`,
+    );
+  }));
 
   if (process.env['JINN_E2E_SKIP_CONTRACTS'] === '1') {
     process.stdout.write('\n--- TaskCoordinator/JinnRouterV3 contract integration ---\nskipped by JINN_E2E_SKIP_CONTRACTS=1\n');
