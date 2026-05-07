@@ -120,6 +120,10 @@ async function main(): Promise<void> {
 
   results.push(await runPhase('swe-rebench-v2 SolverType registration + parseSpec round-trip', async () => {
     const r = await runSweRebenchV2SolverTypeRegistrationE2E();
+    if (r.status === 'blocked') {
+      process.stdout.write(`BLOCKED: ${r.reason}\n`);
+      return;
+    }
     process.stdout.write(
       `registered=${r.registered} parseSpecOk=${r.parseSpecOk} ` +
       `schemaVersion=${r.schemaVersionEcho} instance=${r.generatedTaskInstanceId}\n`,

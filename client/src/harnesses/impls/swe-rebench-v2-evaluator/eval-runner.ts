@@ -25,24 +25,30 @@ export class PythonEvalRunner implements EvalRunner {
 
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     const tmp = await mkdtemp(join(tmpdir(), 'swerebench-eval-'));
+    // Single-task runner: we use the placeholder instance_id "task" in both
+    // the task spec and the patches override; eval.py matches them by id.
+    const INSTANCE_ID = 'task';
     const taskJson = [{
-      instance_id: 'task',
+      instance_id: INSTANCE_ID,
       image_name: args.image,
       FAIL_TO_PASS: args.fail_to_pass,
       PASS_TO_PASS: args.pass_to_pass,
       test_patch: args.test_patch,
       install_config: { test_cmd: args.test_cmd, log_parser: args.log_parser },
     }];
+    // Upstream eval.py expects --patches to be a JSON list of
+    // `{instance_id, patch, test_patch?}` overrides keyed by instance_id.
+    const patchesJson = [{ instance_id: INSTANCE_ID, patch: args.patch }];
     const taskJsonPath = join(tmp, 'task.json');
-    const patchJsonPath = join(tmp, 'patch.json');
+    const patchesJsonPath = join(tmp, 'patches.json');
     const reportPath = join(tmp, 'report.json');
     await writeFile(taskJsonPath, JSON.stringify(taskJson));
-    await writeFile(patchJsonPath, JSON.stringify({ task: { model_patch: args.patch } }));
+    await writeFile(patchesJsonPath, JSON.stringify(patchesJson));
 
     const pyArgs = [
       '-m', 'scripts.eval',
       '--json', taskJsonPath,
-      '--patch-json', patchJsonPath,
+      '--patches', patchesJsonPath,
       '--max-workers', String(this.opts.maxWorkers ?? 1),
       '--report-json', reportPath,
     ];
@@ -59,20 +65,36 @@ export class PythonEvalRunner implements EvalRunner {
       child.on('error', reject);
     });
 
-    let report: any;
+    let report: { items?: Array<Record<string, unknown>> };
     try {
-      report = JSON.parse(await readFile(reportPath, 'utf8'));
-    } catch (err) {
-      throw new Error(`Eval runner failed: exitCode=${exitCode}, stderr=${stderr}`);
+      report = JSON.parse(await readFile(reportPath, 'utf8')) as typeof report;
+    } catch {
+      await rm(tmp, { recursive: true, force: true });
+      throw new Error(`Eval runner failed: exitCode=${exitCode}, stderr=${stderr.slice(-500)}`);
     }
+
+    // Upstream report shape: { total, passed, items: [{instance_id, passed_match,
+    // from_fail_to_pass, failed_from_pass_to_pass, exit_code, log_path, error}] }.
+    const items = Array.isArray(report.items) ? report.items : [];
+    const item = items.find((i) => i['instance_id'] === INSTANCE_ID) ?? items[0] ?? {};
+
+    let logBody = '';
+    const logPath = item['log_path'];
+    if (typeof logPath === 'string' && logPath.length > 0) {
+      try {
+        logBody = await readFile(logPath, 'utf8');
+      } catch {
+        logBody = '';
+      }
+    }
+
     await rm(tmp, { recursive: true, force: true });
 
-    const taskReport = report.task ?? report['task'] ?? {};
     return {
-      passed_match: taskReport.passed_match === true,
-      passed: taskReport.passed_actual ?? [],
-      failed: taskReport.failed_actual ?? [],
-      log: stdout + (taskReport.log ?? ''),
+      passed_match: item['passed_match'] === true,
+      passed: Array.isArray(item['from_fail_to_pass']) ? (item['from_fail_to_pass'] as string[]) : [],
+      failed: Array.isArray(item['failed_from_pass_to_pass']) ? (item['failed_from_pass_to_pass'] as string[]) : [],
+      log: stdout + logBody,
       exitCode,
     };
   }
