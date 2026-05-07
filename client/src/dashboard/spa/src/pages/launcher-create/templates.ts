@@ -168,7 +168,12 @@ export const PREDICTION_V1_TEMPLATE: CreateWizardTemplate = {
   },
   generatorDefaults: {
     cadenceMs: 6 * 60 * 60 * 1000, // 6h
-    submissionWindowMs: 6 * 60 * 60 * 1000, // 6h
+    // Mirrors `PREDICTION_V1_SOLVER_NET_CONTRACT.claimPolicy.solver.submissionWindowSeconds * 1000`
+    // (manifest declares the canonical cross-operator value in seconds; the
+    // wizard form works in milliseconds for parity with the daemon's
+    // GeneratorConfig). Drift is caught by
+    // `client/test/dashboard/manifest-spa-mirror-drift.test.ts`.
+    submissionWindowMs: 6 * 60 * 60 * 1000, // 6h — match SDK manifest 21600s
     maxNewRoundsPerPoll: 25,
     maxNewRoundsPerDay: 100,
     maxOpenRounds: 250,
