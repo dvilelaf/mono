@@ -105,7 +105,7 @@ function buildInitialPrompt(inputs: TaskSessionInputs): string {
     inputs.taskCid ? `- goal.cid = ${inputs.taskCid}` : '',
     `- workingDir = ${inputs.workingDir}`,
     `- implStateDir = ${inputs.implStateDir}`,
-    `- deadline = ${inputs.windowEndTs} (ms since epoch)`,
+    `- goal.deadline = ${inputs.windowEndTs} (ms since epoch)`,
     `- msUntilDeadline = ${inputs.msUntilEndTs}`,
     `- mode = ${inputs.mode}`,
     inputs.taskBody

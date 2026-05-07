@@ -73,7 +73,7 @@ EOF
 
 *Phase-range hint:* if the env var `LEARNER_PHASE_RANGE` is set, run only the corresponding subset:
 
-- `all` (or unset) — run all seven phases (sections 3–9), then verify and return (sections 10–11).
+- `full` (or unset) — run all seven phases (sections 3–9), then verify and return (sections 10–11).
 - `pre-execute` — run only sections 3–5 (Orient, Strategize, Plan), then return. The harness's specialist wrapper will run Execute itself and invoke this skill again with `post-execute`.
 - `post-execute` — run section 7 (Debrief), plus sections 8–9 (Improve, Memory consolidation) only when `mode = train`. The harness's specialist wrapper has already populated `workingDir/.execute/` from a domain-specialist Execute path before invoking this pass.
 
