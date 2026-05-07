@@ -25,7 +25,7 @@ function predictionConfig(overrides: Record<string, unknown> = {}): Record<strin
       prediction: {
         enabled: true,
         solverType: 'prediction.v1',
-        harness: 'claude-code-learner',
+        harness: 'prediction-v1-baseline',
         // Mirrors the launcher's quick-start defaults: the bundled
         // prediction plugin is operator-configured per
         // `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9 (Task 6
@@ -137,7 +137,7 @@ describe('solver-nets command', () => {
       name: 'prediction',
       enabled: true,
       solverType: 'prediction.v1',
-      harness: 'claude-code-learner',
+      harness: 'prediction-v1-baseline',
       taskGeneratorEnabled: true,
     });
     expect(envelope['runtimePlugins']).toEqual(expect.arrayContaining([
@@ -152,9 +152,9 @@ describe('solver-nets command', () => {
       }),
     ]));
     expect(envelope['harness']).toMatchObject({
-      name: 'claude-code-learner',
+      name: 'prediction-v1-baseline',
       supportsPredictionV1Restoration: true,
-      readiness: { ready: true },
+      readiness: { ready: false, reason: 'requires live daemon' },
     });
   });
 
