@@ -59,7 +59,8 @@ async function main(): Promise<void> {
         `manifestCid=${result.manifestCid} taskId=${result.taskId} ` +
         `verdict=${result.verdict} score=${result.score} submitted=${result.submittedCount} ` +
         `lifecycle=${result.lifecycleSequence.join('->')} setMetadataCalls=${result.setMetadataCalls} ` +
-        `filter=${result.filterAssertions.join(',')}\n`,
+        `filter=${result.filterAssertions.join(',')} ` +
+        `evalPolicy=${result.evaluationPolicyAssertions.join(',')}\n`,
       );
     }));
   }

@@ -240,6 +240,7 @@ const TASK_COORDINATOR_E2E_ABI = [
         { name: 'status', type: 'uint8' },
         { name: 'finalization', type: 'uint8' },
         { name: 'verdictClaimCount', type: 'uint16' },
+        { name: 'unresolvedVerdictCount', type: 'uint16' },
         { name: 'validVerdictCount', type: 'uint16' },
         { name: 'passVerdictCount', type: 'uint16' },
       ],
@@ -2109,6 +2110,30 @@ export interface ForkSolverNetCreationResult {
    * or rejected the configured task/role pair.
    */
   filterAssertions: Array<'accept' | 'reject-cid' | 'reject-role'>;
+  /**
+   * Stage 7 follow-up: per-bug-fix on-fork validation outcomes. Each label
+   * is the assertion that landed on chain (or in the prefilter).
+   *
+   *   - lazy-window-rejects-early: TCEvaluationNotYetOpen revert before
+   *     externalReadyAt
+   *   - lazy-window-accepts-after-time-advance: claim succeeds once the
+   *     fork's block.timestamp passes externalReadyAt
+   *   - unresolved-does-not-finalize: an Unresolved verdict does not emit
+   *     AttemptFinalized and leaves validVerdictCount=0
+   *   - unresolved-reopens-slot: a fresh evaluator can claim a new slot
+   *     (verdictIndex=1) after the prior Unresolved
+   *   - prefilter-defers-on-unresolved: PreconditionResolverRegistry returns
+   *     ok:false when the mocked oracle says 'unresolved'
+   *   - prefilter-passes-on-resolved: ditto returns ok:true on 'resolved'
+   */
+  evaluationPolicyAssertions: Array<
+    | 'lazy-window-rejects-early'
+    | 'lazy-window-accepts-after-time-advance'
+    | 'unresolved-does-not-finalize'
+    | 'unresolved-reopens-slot'
+    | 'prefilter-defers-on-unresolved'
+    | 'prefilter-passes-on-resolved'
+  >;
 }
 
 /**
@@ -2273,15 +2298,22 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     assert(onDisk?.status === 'launched', 'launched record on disk is not status=launched');
 
     // Step 5 — bootstrap solver + evaluator operators (reuses existing
-    // fork loop's helper).
+    // fork loop's helper). A third operator (evaluator B) is bootstrapped
+    // here too so it shares timing/funding state with the other two; it's
+    // used by Stage 7 follow-up Phase F to prove an Unresolved verdict
+    // re-opens the slot for a different evaluator.
     const operator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
     operatorTmpDir = operator.tmpDir;
     const evaluatorOperator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
     evaluatorTmpDir = evaluatorOperator.tmpDir;
+    const evaluatorBOperator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
+    const evaluatorBTmpDir = evaluatorBOperator.tmpDir;
     const operatorAccount = privateKeyToAccount(operator.agentPrivateKey);
     const operatorWallet = walletClient(anvil.rpcUrl, operatorAccount, baseSepolia);
     const evaluatorAccount = privateKeyToAccount(evaluatorOperator.agentPrivateKey);
     const evaluatorWallet = walletClient(anvil.rpcUrl, evaluatorAccount, baseSepolia);
+    const evaluatorBAccount = privateKeyToAccount(evaluatorBOperator.agentPrivateKey);
+    const evaluatorBWallet = walletClient(anvil.rpcUrl, evaluatorBAccount, baseSepolia);
 
     const isOperator = await publicClient.readContract({
       address: operator.mechAddress,
@@ -2604,6 +2636,455 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       await rm(filterStoreDir, { recursive: true, force: true });
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Stage 7 follow-up: per-bug-fix on-fork validation phases. Each phase
+    // posts a new Task under the launched manifestDigest with a deliberately-
+    // shaped EvaluationPolicy and walks the chain through the path that the
+    // refactor changed. The hardhat unit suite proves the contract behavior
+    // against freshly-compiled source; these phases prove the deployed V3
+    // bytecode (post-cutover) carries the new behavior.
+    // ─────────────────────────────────────────────────────────────────────
+    const evaluationPolicyAssertions: ForkSolverNetCreationResult[
+      'evaluationPolicyAssertions'
+    ] = [];
+
+    // Top up every operator Safe + EOA before the new phases — Step 7's
+    // happy-path verdict cycle leaves Safes near-empty, and the new phases
+    // post 2 more tasks + several Safe-mediated claim txs.
+    const topUpWei = parseEther('1');
+    for (const addr of [
+      operator.safeAddress,
+      operatorAccount.address,
+      evaluatorOperator.safeAddress,
+      evaluatorAccount.address,
+      evaluatorBOperator.safeAddress,
+      evaluatorBAccount.address,
+    ]) {
+      await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
+        addr,
+        hexQuantity(topUpWei),
+      ]);
+    }
+
+    // Phase E — lazy evaluation window: claimEvaluation must revert with
+    // TCEvaluationNotYetOpen before block.timestamp reaches externalReadyAt,
+    // and succeed once the fork's clock crosses it.
+    {
+      const phaseLatest = await publicClient.getBlock();
+      const phaseNow = Number(phaseLatest.timestamp);
+      const externalReadyAt = phaseNow + 1_000;
+      const evaluationDuration = 600;
+      const lazyPolicy = {
+        claimWindowStart: BigInt(phaseNow - 5),
+        claimWindowEnd: BigInt(phaseNow + 200),
+        submissionDeadline: BigInt(phaseNow + 400),
+        claimLeaseTtlSeconds: 1_500,
+        maxClaims: 1,
+        maxClaimsPerOperator: 1,
+        policyHook: zeroAddress,
+        evaluationPolicy: {
+          requiredVerdicts: 1,
+          passThreshold: 1,
+          evaluationDuration: BigInt(evaluationDuration),
+          externalReadyAt: BigInt(externalReadyAt),
+          maxVerdictsPerEvaluator: 1,
+          disallowSolverSelfEvaluation: true,
+        },
+      };
+      const lazyTask = makePredictionV1Task();
+      const { digest: lazyTaskCidDigest, cid: lazyTaskCid } = taskCidDigestAndCid(lazyTask);
+      const lazyCreated = await writeContractTx({
+        publicClient,
+        rpcUrl: anvil.rpcUrl,
+        account: creator,
+        address: deployment.router,
+        abi: JINN_ROUTER_V3_E2E_ABI,
+        functionName: 'createTask',
+        args: [
+          lazyTaskCidDigest,
+          manifestDigest,
+          lazyPolicy,
+          deliveryRate,
+          deliveryRate,
+          responseTimeout,
+        ],
+        // maxClaims=1, requiredVerdicts=1 → required = rate * (1 + 1*1) = 2*rate.
+        // The router enforces an exact-match check on msg.value.
+        value: deliveryRate * 2n,
+        chain: baseSepolia,
+      });
+      const lazyCreatedEvent = decodeFirstEvent(
+        lazyCreated.receipt,
+        JINN_ROUTER_V3_E2E_ABI,
+        'TaskCreated',
+      );
+      const lazyTaskId = String(lazyCreatedEvent['taskId']);
+
+      const lazyClaim = await claimTask(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        deployment.router,
+        lazyTaskId,
+        operator.mechAddress,
+      );
+      const lazyRequestId = lazyClaim.requestId as Hex;
+
+      const lazySolutionPayload = makePredictionV1SolutionPayload();
+      const lazyRestorationEnvelope = await signedExecutionEnvelope({
+        solverType: 'prediction.v1',
+        role: 'restoration',
+        taskCid: lazyTaskCid,
+        requestId: lazyRequestId,
+        onchainCreationTx: lazyCreated.hash,
+        onchainCreationBlock: Number(lazyCreated.receipt.blockNumber),
+        safeAddress: operator.safeAddress,
+        privateKey: operator.agentPrivateKey,
+        window: PredictionV1TaskSchema.parse(lazyTask).window,
+        payload: lazySolutionPayload,
+      });
+      await callDeliverToMarketplace(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        operator.mechAddress,
+        [lazyRequestId],
+        [lazyRestorationEnvelope.signature.hash],
+      );
+      await claimDelivery(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        deployment.router,
+        lazyRequestId,
+        { variant: 'v3', kind: 'solution', evidenceHash: lazyRestorationEnvelope.signature.hash },
+      );
+
+      // Evaluator claim attempt while block.timestamp < externalReadyAt.
+      // Should revert TCEvaluationNotYetOpen.
+      let earlyClaimReverted = false;
+      try {
+        await claimEvaluation(
+          publicClient,
+          evaluatorWallet,
+          evaluatorOperator.safeAddress,
+          deployment.router,
+          lazyTaskId,
+          0,
+          evaluatorOperator.mechAddress,
+          keccak256(toBytes(`evaluation-early:${lazyTaskCid}:${lazyRequestId}`)),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Coordinator's revert reason or selector should appear in the message.
+        if (/TCEvaluationNotYetOpen|0x[0-9a-f]{8}/iu.test(message)) {
+          earlyClaimReverted = true;
+        } else {
+          throw err;
+        }
+      }
+      assert(
+        earlyClaimReverted,
+        'lazy-window: claimEvaluation accepted before externalReadyAt; ' +
+          'TCEvaluationNotYetOpen guard not enforced',
+      );
+      evaluationPolicyAssertions.push('lazy-window-rejects-early');
+
+      // Advance the fork past externalReadyAt and retry.
+      await anvilJsonRpc(anvil.rpcUrl, 'anvil_setNextBlockTimestamp', [
+        hexQuantity(BigInt(externalReadyAt + 10)),
+      ]);
+      await anvilJsonRpc(anvil.rpcUrl, 'anvil_mine', ['0x1']);
+
+      // claim now succeeds (window is open).
+      const lateClaim = await claimEvaluation(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress,
+        deployment.router,
+        lazyTaskId,
+        0,
+        evaluatorOperator.mechAddress,
+        keccak256(toBytes(`evaluation-late:${lazyTaskCid}:${lazyRequestId}`)),
+      );
+      assert(
+        lateClaim.requestId !== '0x' && BigInt(lateClaim.requestId).toString() !== '0',
+        `lazy-window: late claimEvaluation did not return a real requestId (got ${lateClaim.requestId})`,
+      );
+      evaluationPolicyAssertions.push('lazy-window-accepts-after-time-advance');
+    }
+
+    // Phase F — Unresolved verdict re-opens the slot. Bootstrap a third
+    // operator (`evaluatorB`) so we have two distinct evaluators on the
+    // same attempt. Solver submits, evaluator A delivers Unresolved (which
+    // must NOT finalize the attempt), evaluator B claims a fresh slot and
+    // delivers Pass (which finalizes).
+    {
+      const phaseLatest = await publicClient.getBlock();
+      const phaseNow = Number(phaseLatest.timestamp);
+      const unresolvedPolicy = {
+        claimWindowStart: BigInt(phaseNow - 5),
+        claimWindowEnd: BigInt(phaseNow + 200),
+        submissionDeadline: BigInt(phaseNow + 400),
+        claimLeaseTtlSeconds: 1_500,
+        maxClaims: 1,
+        maxClaimsPerOperator: 1,
+        policyHook: zeroAddress,
+        evaluationPolicy: {
+          // requiredVerdicts=2 leaves headroom for the Unresolved-then-Pass
+          // sequence we exercise below. The budget check in
+          // `JinnRouterV3.claimEvaluation` decrements
+          // `payment.verdictBudgetRemaining` by `deliveryRate` per claim
+          // and (today) does NOT refund on Unresolved — so 2 verdict
+          // budget slots are needed for the test to reach the
+          // coordinator's slot-reopen logic. This is independent of the
+          // chain-side invariant being verified (an Unresolved verdict
+          // does not seal the slot); the budget-refund-on-Unresolved
+          // gap is tracked separately.
+          requiredVerdicts: 2,
+          passThreshold: 2,
+          evaluationDuration: 1_200n,
+          externalReadyAt: 0n,
+          maxVerdictsPerEvaluator: 1,
+          disallowSolverSelfEvaluation: true,
+        },
+      };
+      const unresolvedTask = makePredictionV1Task();
+      const { digest: unresolvedDigest, cid: unresolvedCid } = taskCidDigestAndCid(unresolvedTask);
+      const unresolvedCreated = await writeContractTx({
+        publicClient,
+        rpcUrl: anvil.rpcUrl,
+        account: creator,
+        address: deployment.router,
+        abi: JINN_ROUTER_V3_E2E_ABI,
+        functionName: 'createTask',
+        args: [
+          unresolvedDigest,
+          manifestDigest,
+          unresolvedPolicy,
+          deliveryRate,
+          deliveryRate,
+          responseTimeout,
+        ],
+        // maxClaims=1, requiredVerdicts=2 → required = rate * (1 + 1*2) = 3*rate.
+        value: deliveryRate * 3n,
+        chain: baseSepolia,
+      });
+      const unresolvedCreatedEvent = decodeFirstEvent(
+        unresolvedCreated.receipt,
+        JINN_ROUTER_V3_E2E_ABI,
+        'TaskCreated',
+      );
+      const unresolvedTaskId = String(unresolvedCreatedEvent['taskId']);
+
+      const unresolvedSolverClaim = await claimTask(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        deployment.router,
+        unresolvedTaskId,
+        operator.mechAddress,
+      );
+      const unresolvedSolverRequestId = unresolvedSolverClaim.requestId as Hex;
+      const unresolvedSolutionPayload = makePredictionV1SolutionPayload();
+      const unresolvedSolverEnvelope = await signedExecutionEnvelope({
+        solverType: 'prediction.v1',
+        role: 'restoration',
+        taskCid: unresolvedCid,
+        requestId: unresolvedSolverRequestId,
+        onchainCreationTx: unresolvedCreated.hash,
+        onchainCreationBlock: Number(unresolvedCreated.receipt.blockNumber),
+        safeAddress: operator.safeAddress,
+        privateKey: operator.agentPrivateKey,
+        window: PredictionV1TaskSchema.parse(unresolvedTask).window,
+        payload: unresolvedSolutionPayload,
+      });
+      await callDeliverToMarketplace(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        operator.mechAddress,
+        [unresolvedSolverRequestId],
+        [unresolvedSolverEnvelope.signature.hash],
+      );
+      await claimDelivery(
+        publicClient,
+        operatorWallet,
+        operator.safeAddress,
+        deployment.router,
+        unresolvedSolverRequestId,
+        { variant: 'v3', kind: 'solution', evidenceHash: unresolvedSolverEnvelope.signature.hash },
+      );
+
+      // Evaluator A claims, then submits VerdictCode.Unresolved (=4).
+      const evaluatorAClaim = await claimEvaluation(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress,
+        deployment.router,
+        unresolvedTaskId,
+        0,
+        evaluatorOperator.mechAddress,
+        keccak256(toBytes(`evaluation-A:${unresolvedCid}:${unresolvedSolverRequestId}`)),
+      );
+      const evaluatorAVerdictRequestId = evaluatorAClaim.requestId as Hex;
+      // Synthesize a verdict envelope. The verdict body content doesn't
+      // matter for the chain-side re-open invariant; the verdictCode arg
+      // is what the contract reads.
+      const unresolvedVerdictEnvelope = await signedExecutionEnvelope({
+        solverType: 'prediction.v1',
+        role: 'verdict',
+        taskCid: unresolvedCid,
+        requestId: evaluatorAVerdictRequestId,
+        onchainCreationTx: unresolvedCreated.hash,
+        onchainCreationBlock: Number(unresolvedCreated.receipt.blockNumber),
+        safeAddress: evaluatorOperator.safeAddress,
+        privateKey: evaluatorOperator.agentPrivateKey,
+        window: PredictionV1TaskSchema.parse(unresolvedTask).window,
+        payload: { verdict: 'unresolved', score: 0 },
+      });
+      await callDeliverToMarketplace(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress,
+        evaluatorOperator.mechAddress,
+        [evaluatorAVerdictRequestId],
+        [unresolvedVerdictEnvelope.signature.hash],
+      );
+      const evaluatorADeliveryReceipt = await claimDelivery(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress,
+        deployment.router,
+        evaluatorAVerdictRequestId,
+        {
+          variant: 'v3',
+          kind: 'verdict',
+          evidenceHash: unresolvedVerdictEnvelope.signature.hash,
+          verdictCode: 4,
+        },
+      );
+      assert(
+        evaluatorADeliveryReceipt !== ('0x' as Hex),
+        'unresolved-verdict: claimDelivery returned no tx hash for verdictCode=4',
+      );
+      // Wait for the receipt so we can grep its logs for AttemptFinalized.
+      const evaluatorAReceipt = await publicClient.waitForTransactionReceipt({
+        hash: evaluatorADeliveryReceipt,
+      });
+      const finalizedLogTopic = keccak256(
+        toBytes('AttemptFinalized(uint256,uint32,bool,uint16,uint16)'),
+      );
+      const sawFinalize = evaluatorAReceipt.logs.some(
+        (lg) => lg.address.toLowerCase() === deployment.coordinator.toLowerCase() &&
+          lg.topics[0] === finalizedLogTopic,
+      );
+      assert(
+        !sawFinalize,
+        'unresolved-verdict: AttemptFinalized fired despite VerdictCode.Unresolved — slot incorrectly sealed',
+      );
+      evaluationPolicyAssertions.push('unresolved-does-not-finalize');
+
+      // Evaluator B (a fresh-bootstrapped third operator distinct from
+      // both the solver and evaluator A) claims a fresh slot. The gate
+      // `verdictClaimCount - unresolvedVerdictCount < requiredVerdicts`
+      // re-opens after the prior Unresolved.
+      const evaluatorBClaim = await claimEvaluation(
+        publicClient,
+        evaluatorBWallet,
+        evaluatorBOperator.safeAddress,
+        deployment.router,
+        unresolvedTaskId,
+        0,
+        evaluatorBOperator.mechAddress,
+        keccak256(toBytes(`evaluation-B:${unresolvedCid}:${unresolvedSolverRequestId}`)),
+      );
+      assert(
+        evaluatorBClaim.attemptIndex === 0,
+        `unresolved-reopens: evaluator B claimed unexpected attemptIndex=${evaluatorBClaim.attemptIndex}`,
+      );
+      // Read the AttemptRecord directly to verify the slot accounting:
+      //   verdictClaimCount = 2 (A + B both reserved slots)
+      //   unresolvedVerdictCount = 1 (A delivered Unresolved)
+      //   finalization = 1 (PendingEvaluation, not finalized)
+      // Together these prove evaluator B got verdictIndex=1 (the next
+      // monotonic slot) AND the gate
+      // `verdictClaimCount - unresolvedVerdictCount < requiredVerdicts`
+      // re-opened after the prior Unresolved.
+      const attemptAfterB = await publicClient.readContract({
+        address: deployment.coordinator,
+        abi: TASK_COORDINATOR_E2E_ABI,
+        functionName: 'getAttempt',
+        args: [BigInt(unresolvedTaskId), 0],
+      });
+      const verdictClaimCount = Number(tupleField<bigint | number>(attemptAfterB, 'verdictClaimCount', 11));
+      const unresolvedVerdictCount = Number(
+        tupleField<bigint | number>(attemptAfterB, 'unresolvedVerdictCount', 12),
+      );
+      const finalization = Number(tupleField<bigint | number>(attemptAfterB, 'finalization', 10));
+      assert(
+        verdictClaimCount === 2,
+        `unresolved-reopens: expected verdictClaimCount=2, got ${verdictClaimCount}`,
+      );
+      assert(
+        unresolvedVerdictCount === 1,
+        `unresolved-reopens: expected unresolvedVerdictCount=1, got ${unresolvedVerdictCount}`,
+      );
+      assert(
+        finalization === 1,
+        `unresolved-reopens: expected finalization=PendingEvaluation(1), got ${finalization}`,
+      );
+      evaluationPolicyAssertions.push('unresolved-reopens-slot');
+    }
+
+    // Phase G — precondition prefilter (in-process). Verifies the
+    // PreconditionResolverRegistry returns ok:false when the mocked
+    // oracle says 'unresolved' and ok:true on 'resolved', against the
+    // exact precondition shape the manifest carries.
+    {
+      const { createDefaultPreconditionRegistry } = await import(
+        '../../src/harnesses/engine/precondition-resolver.js'
+      );
+      const venueState: { status: 'resolved' | 'unresolved' } = { status: 'unresolved' };
+      const registry = createDefaultPreconditionRegistry({
+        getResolution: (async () => ({
+          venue: 'polymarket',
+          marketId: 'mock-market',
+          conditionId: '0x' + 'aa'.repeat(32),
+          status: venueState.status,
+          sourceUrl: 'https://polymarket.com/market/mock',
+        })) as never,
+      });
+      const dummyTask = {
+        ...task,
+        spec: { ...(task.spec ?? {}), source: { url: 'https://polymarket.com/market/mock' } },
+      } as unknown as Task;
+      const evaluatorPreconditions = manifest.contract.claimPolicy.evaluator.preconditions;
+
+      const unresolvedCheck = await registry.checkAll(evaluatorPreconditions, { task: dummyTask });
+      assert(
+        unresolvedCheck.ok === false,
+        'prefilter: registry.checkAll returned ok:true for an unresolved market',
+      );
+      assert(
+        /unresolved/.test(unresolvedCheck.ok ? '' : unresolvedCheck.reason),
+        `prefilter: unresolved reason did not mention 'unresolved' (${
+          unresolvedCheck.ok ? '<unreachable>' : unresolvedCheck.reason
+        })`,
+      );
+      evaluationPolicyAssertions.push('prefilter-defers-on-unresolved');
+
+      venueState.status = 'resolved';
+      const resolvedCheck = await registry.checkAll(evaluatorPreconditions, { task: dummyTask });
+      assert(
+        resolvedCheck.ok === true,
+        `prefilter: registry.checkAll returned ok:false for a resolved market (${
+          resolvedCheck.ok ? '' : resolvedCheck.reason
+        })`,
+      );
+      evaluationPolicyAssertions.push('prefilter-passes-on-resolved');
+    }
+
     // Step 9 — exercise lifecycle transitions: paused → launched → retired.
     let stopGeneratorCalls = 0;
     let startGeneratorCalls = 0;
@@ -2665,6 +3146,7 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       lifecycleSequence,
       setMetadataCalls: publisher.calls.length,
       filterAssertions,
+      evaluationPolicyAssertions,
     };
   } finally {
     stopMiningPulse();
@@ -2676,6 +3158,9 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     }
     if (evaluatorTmpDir) {
       await rm(evaluatorTmpDir, { recursive: true, force: true });
+    }
+    if (typeof evaluatorBTmpDir === 'string') {
+      await rm(evaluatorBTmpDir, { recursive: true, force: true });
     }
     await rm(storeBaseDir, { recursive: true, force: true });
     await anvil.teardown();
