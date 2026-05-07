@@ -590,6 +590,42 @@ function emitProgress(envelope: ProgressEnvelope): void {
   }
 }
 
+type ResolvedLaunchedRecordFactory =
+  | {
+      ok: true;
+      factory: import('./solver-types/task-generator-registry.js').TaskGeneratorFactory;
+      manifest: import('@jinn-network/sdk/solvernets').SolverNetManifestV1;
+      implementation: string;
+    }
+  | { ok: false; reason: string };
+
+async function resolveLaunchedRecordFactory(
+  manifestCid: string,
+  manifestResolver:
+    | ((cid: string) => Promise<import('@jinn-network/sdk/solvernets').SolverNetManifestV1 | null>)
+    | undefined,
+  registry: import('./solver-types/task-generator-registry.js').TaskGeneratorRegistry,
+): Promise<ResolvedLaunchedRecordFactory> {
+  if (!manifestResolver) {
+    return { ok: false, reason: `no manifest resolver wired (cid=${manifestCid})` };
+  }
+  const manifest = await manifestResolver(manifestCid).catch(() => null);
+  if (!manifest) {
+    return { ok: false, reason: `manifest could not be fetched (cid=${manifestCid})` };
+  }
+  const implementation = manifest.contract.taskGenerator.implementation;
+  const factory = registry.resolve(implementation);
+  if (!factory) {
+    return {
+      ok: false,
+      reason:
+        `no factory registered for implementation '${implementation}' ` +
+        `(daemon stays alive; this SolverNet won't auto-generate)`,
+    };
+  }
+  return { ok: true, factory, manifest, implementation };
+}
+
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   console.log(`[main] jinn-client starting on ${NETWORK_CHAIN}`);
 
@@ -1619,37 +1655,28 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     generator: import('./tasks/sources.js').TaskGenerator;
   }> = [];
   if (solverNetSubsystem && !autoTasksDisabled) {
-    // Manifest's `contract.taskGenerator.implementation` is a BINDING string
-    // that the registry resolves to a factory. Different operator-launchers
-    // running the same SolverNet CID converge on the same generator code.
+    // `contract.taskGenerator.implementation` is the BINDING pointer the
+    // registry resolves to a factory — operator-launchers running the same
+    // SolverNet CID converge on the same generator code.
     const { createDefaultTaskGeneratorRegistry } = await import(
       './solver-types/task-generator-registry.js'
     );
     const taskGeneratorRegistry = createDefaultTaskGeneratorRegistry();
     const manifestResolver = adapterManifestResolverHolder.current;
     for (const pending of solverNetSubsystem.pendingGenerators) {
-      const manifest = manifestResolver
-        ? await manifestResolver(pending.record.manifestCid).catch(() => null)
-        : null;
-      const implementation = manifest?.contract.taskGenerator.implementation;
-      if (!implementation) {
+      const resolved = await resolveLaunchedRecordFactory(
+        pending.record.manifestCid,
+        manifestResolver,
+        taskGeneratorRegistry,
+      );
+      if (!resolved.ok) {
         console.warn(
           `[main] launched-record generator skipped: ${pending.record.solverNetId} ` +
-            `— manifest could not be resolved (cid=${pending.record.manifestCid})`,
+            `— ${resolved.reason}`,
         );
         continue;
       }
-      const factory = taskGeneratorRegistry.resolve(implementation);
-      if (!factory) {
-        console.warn(
-          `[main] launched-record generator skipped: ${pending.record.solverNetId} ` +
-            `— no factory registered for implementation '${implementation}'. ` +
-            `Daemon stays alive; this SolverNet just won't auto-generate.`,
-        );
-        continue;
-      }
-      // Static deps (agent identity + Polymarket transport) are construction-
-      // time-fixed; runtime-editable settings flow through `configRef`.
+      const { factory, manifest, implementation } = resolved;
       const generator = factory({
         recordRef: pending.recordRef,
         configRef: pending.configRef,
@@ -1659,21 +1686,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           agentPrivateKey,
         },
       });
-      // The legacy `solverType` label is kept only for the GeneratedTaskSource
-      // ID; it derives from the manifest's `contract.{id}.{version}`.
       const solverType = `${manifest.contract.id}.${manifest.contract.version}`;
       launchedRecordGenerators.push({ solverType, generator });
-      // First launched prediction.v1 generator becomes the legacy
-      // `predictionGeneratorRef` source for the launcher status endpoint
-      // (kept thin; multi-record launcher status lives in the launched-record
-      // surface — see spec §11/Task 14).
-      if (
-        !predictionGeneratorRef &&
-        typeof generator === 'function' &&
-        typeof (generator as { getState?: unknown }).getState === 'function'
-      ) {
-        predictionGeneratorRef =
-          generator as unknown as typeof predictionGeneratorRef;
+      // First launched generator becomes the launcher-status source —
+      // multi-record status lives in the launched-record surface
+      // (spec §11/Task 14).
+      if (!predictionGeneratorRef) {
+        predictionGeneratorRef = generator as unknown as typeof predictionGeneratorRef;
       }
       console.log(
         `[main] launched-record generator wired: ${pending.record.solverNetId} ` +

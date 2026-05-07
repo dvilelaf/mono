@@ -1,16 +1,11 @@
-// TaskGeneratorRegistry — runtime resolution of `manifest.contract.taskGenerator.implementation`
-// strings to launcher-side generator factories. Mirrors the harness-resolution
-// pattern used for evaluators (see `client/src/harnesses/impls/index.ts:buildHarnesses`).
+// Runtime resolution of `manifest.contract.taskGenerator.implementation`
+// strings to launcher-side generator factories. Sibling pattern to
+// `PreconditionResolverRegistry` (`harnesses/engine/precondition-resolver.ts`):
+// same Map-of-string-to-factory shape, different value type.
 //
-// Why: the manifest declares `taskGenerator: { id, implementation }` so that
-// every operator-launcher running the same SolverNet CID converges on the
-// same generator code. This file is the dispatch layer: at daemon startup
-// (Stage C of jinn-mono-04wq), `main.ts` resolves each launched record's
-// manifest implementation pointer to a factory and spawns the generator.
-//
-// New SolverNets register their implementation string against a factory via
-// `register()`. The default registry ships with `prediction.v1` only;
-// additional kinds become side-effect imports + registrations as they land.
+// Today this only registers `prediction.v1`; the factory return type
+// reflects that. When a second generator kind lands, lift the return type
+// (and the dep imports below) to a polymorphic `TaskGenerator` umbrella.
 
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import type {
@@ -20,30 +15,15 @@ import type {
 } from './prediction-v1-auto.js';
 import { makePredictionV1GeneratorForLaunchedRecord } from './prediction-v1-auto.js';
 
-/**
- * Inputs every launcher-side generator factory accepts. The shape mirrors
- * `MakePredictionV1GeneratorForLaunchedRecordOpts` so the existing
- * `prediction-v1-auto` factory can be registered without an adapter shim.
- */
 export interface TaskGeneratorFactoryDeps {
   recordRef: { current: LaunchedSolverNetRecord };
   configRef: { current: PredictionV1GeneratorRuntimeConfig };
   staticConfig?: PredictionV1GeneratorStaticConfig;
 }
 
-/**
- * A factory that returns a tick callable. Today the only generator type is
- * `PredictionV1GeneratorTick`; future kinds will share this signature so the
- * launcher's main loop can poll them uniformly.
- */
 export type TaskGeneratorFactory = (deps: TaskGeneratorFactoryDeps) => PredictionV1GeneratorTick;
 
-/**
- * Registry of `implementation` string → factory. Keyed off the BINDING
- * pointer the manifest declares. Lookup is exact-match — no globbing, no
- * version-resolution magic. If two manifests advertise the same
- * implementation string, they get the same factory.
- */
+/** Exact-match lookup — no globbing, no version-resolution magic. */
 export class TaskGeneratorRegistry {
   private readonly factories = new Map<string, TaskGeneratorFactory>();
 
@@ -61,12 +41,6 @@ export class TaskGeneratorRegistry {
   }
 }
 
-/**
- * Default registry pre-loaded with prediction.v1's auto-generator. The
- * implementation string matches what
- * `PREDICTION_V1_SOLVER_NET_CONTRACT.taskGenerator.implementation` declares
- * (see `packages/sdk/src/contracts.ts`).
- */
 export function createDefaultTaskGeneratorRegistry(): TaskGeneratorRegistry {
   const registry = new TaskGeneratorRegistry();
   registry.register(

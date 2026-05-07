@@ -71,25 +71,14 @@ export class PredictionV1Evaluator implements Harness {
   }
 
   /**
-   * Run the Brier-loss evaluation against the recorded resolution.
-   *
-   * Precondition: the daemon's `PreconditionResolverRegistry`
-   * (`client/src/harnesses/engine/precondition-resolver.ts`, Stage 5 of
-   * jinn-mono-6tsg) has already verified
-   * `oracle.polymarket.resolution: resolved` before the adapter sent
-   * `claimEvaluation` on chain. By the time `run()` executes, the market
-   * is expected to be resolved.
-   *
-   * The internal `getResolution` call below is kept defensively for the
-   * no-prefilter test path and as a guard against the (very rare) race
-   * where the oracle reverts between prefilter and harness run. With
-   * Stage 1.1's terminal Unresolved (jinn-mono-04wq), if this defensive
-   * check returns `status !== 'resolved'`, the harness submits an
-   * Unresolved verdict that finalizes the attempt as not-passed —
-   * caller (launcher) gets a fast failure and can repost. See
-   * jinn-mono-96bo for the evaluator-side throw-on-race design
-   * follow-up (deferred until the race is observed in production —
-   * needs expireVerdictClaim on chain to do correctly).
+   * Precondition: the daemon's `PreconditionResolverRegistry` has already
+   * verified `oracle.polymarket.resolution: resolved` before the adapter
+   * called `claimEvaluation` on chain. The internal `getResolution` call
+   * below is kept defensively for the no-prefilter test path and the
+   * (essentially-zero) race where Polymarket reverts between prefilter
+   * and run. On race, the harness submits Unresolved which is now
+   * terminal — task finalizes as not-passed; see jinn-mono-96bo for the
+   * throw-on-race design follow-up.
    */
   async run(ctx: HarnessContext): Promise<Solution> {
     if (this.config.stub) {
