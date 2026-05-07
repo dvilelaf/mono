@@ -95,6 +95,15 @@ const ClaimPolicyZ = z.object({
   evaluator: EvaluatorClaimPolicyZ,
 }).strict();
 
+// BINDING pointer to the launcher-side task generator implementation. Mirrors
+// `EvaluationFunctionZ.implementation` — different operator-launchers running
+// the same SolverNet CID converge on the same generator code, so candidate
+// task fixtures stay consistent across deployments. See spec/2026-05-05.
+const TaskGeneratorZ = z.object({
+  id: z.string().min(1),
+  implementation: z.string().min(1),
+}).strict();
+
 const EvaluationFunctionZ = z.object({
   id: z.string().min(1),
   deterministic: z.boolean(),
@@ -125,6 +134,7 @@ const ContractZ = z.object({
     solver: z.array(CredentialRequirementZ),
     evaluator: z.array(CredentialRequirementZ),
   }).strict(),
+  taskGenerator: TaskGeneratorZ,
   evaluationFunction: EvaluationFunctionZ,
   aggregationFunction: AggregationFunctionZ,
 }).strict();
@@ -188,6 +198,7 @@ export type SolverNetClaimPolicy = z.infer<typeof ClaimPolicyZ>;
 export type SolverNetPrecondition = z.infer<typeof PreconditionZ>;
 export type SolverNetEvaluationWindow = z.infer<typeof EvaluationWindowZ>;
 export type SolverNetEvaluationFunction = z.infer<typeof EvaluationFunctionZ>;
+export type SolverNetTaskGenerator = z.infer<typeof TaskGeneratorZ>;
 export type SolverNetAggregationFunction = z.infer<typeof AggregationFunctionZ>;
 
 export interface ManifestValidationIssue {

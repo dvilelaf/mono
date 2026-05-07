@@ -155,6 +155,10 @@ describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 
           },
         },
         credentialRequirements: c.credentialRequirements,
+        taskGenerator: {
+          id: c.taskGenerator.id,
+          implementation: c.taskGenerator.implementation,
+        },
         evaluationFunction: {
           id: c.evaluationFunction.id,
           deterministic: c.evaluationFunction.deterministic,
@@ -215,5 +219,12 @@ describe('PREDICTION_V1_SOLVER_NET_CONTRACT projects into a SolverNetManifestV1 
 
   it('solver branch leaves preconditions empty (no off-chain readiness gate for solving)', () => {
     expect(PREDICTION_V1_SOLVER_NET_CONTRACT.claimPolicy.solver.preconditions).toEqual([]);
+  });
+
+  it('declares the binding task-generator implementation', () => {
+    expect(PREDICTION_V1_SOLVER_NET_CONTRACT.taskGenerator).toEqual({
+      id: 'prediction.polymarket-auto.v1',
+      implementation: 'client/src/solver-types/prediction-v1-auto',
+    });
   });
 });

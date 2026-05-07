@@ -277,6 +277,10 @@ const MOCK_MANIFEST = {
       },
     },
     credentialRequirements: { creator: [], solver: [], evaluator: [] },
+    taskGenerator: {
+      id: 'prediction.polymarket-auto.v1',
+      implementation: 'client/src/solver-types/prediction-v1-auto',
+    },
     evaluationFunction: {
       id: 'brier-score',
       deterministic: true,

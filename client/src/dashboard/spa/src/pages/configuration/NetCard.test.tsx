@@ -400,6 +400,10 @@ const baseManifest: SolverNetManifestV1 = {
       },
     },
     credentialRequirements: { creator: [], solver: [], evaluator: [] },
+    taskGenerator: {
+      id: 'prediction.polymarket-auto.v1',
+      implementation: 'client/src/solver-types/prediction-v1-auto',
+    },
     evaluationFunction: {
       id: 'predictionV1Eval',
       deterministic: true,

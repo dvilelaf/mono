@@ -39,6 +39,10 @@ describe('SolverNet contracts', () => {
     expect(contract?.credentialRequirements.creator[0]?.id).toBe('polymarket.public.market-data.read');
     expect(contract?.credentialRequirements.solver).toEqual([]);
     expect(contract?.credentialRequirements.evaluator[0]?.id).toBe('polymarket.public.resolution.read');
+    expect(contract?.taskGenerator).toMatchObject({
+      id: 'prediction.polymarket-auto.v1',
+      implementation: 'client/src/solver-types/prediction-v1-auto',
+    });
     expect(contract?.evaluationFunction.id).toBe('prediction.brier-loss.v1');
     expect(contract?.aggregationFunction).toMatchObject({
       id: 'prediction.trailing-mean-brier-spread.v1',

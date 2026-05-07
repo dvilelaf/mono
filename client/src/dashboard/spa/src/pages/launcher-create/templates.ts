@@ -70,6 +70,7 @@ export interface CreateWizardTemplate {
     solver: ReadonlyArray<{ id: string; kind: string; required: boolean; description: string }>;
     evaluator: ReadonlyArray<{ id: string; kind: string; required: boolean; description: string }>;
   };
+  taskGenerator: { id: string; implementation: string };
   /** Default generator-config values pre-filled in Step 3. */
   generatorDefaults: {
     cadenceMs: number;
@@ -160,6 +161,10 @@ export const PREDICTION_V1_TEMPLATE: CreateWizardTemplate = {
         description: 'Read public Polymarket/UMA final market state for resolution mapping.',
       },
     ],
+  },
+  taskGenerator: {
+    id: 'prediction.polymarket-auto.v1',
+    implementation: 'client/src/solver-types/prediction-v1-auto',
   },
   generatorDefaults: {
     cadenceMs: 6 * 60 * 60 * 1000, // 6h

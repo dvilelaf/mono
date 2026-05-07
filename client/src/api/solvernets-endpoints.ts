@@ -361,6 +361,7 @@ function buildUnsignedManifest(args: {
         },
       },
       credentialRequirements: contract.credentialRequirements,
+      taskGenerator: { ...contract.taskGenerator },
       // Copy the readonly `inputs` arrays so the manifest's mutable-array
       // schema accepts them. Functional content is identical.
       evaluationFunction: {

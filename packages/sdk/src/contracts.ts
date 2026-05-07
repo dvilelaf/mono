@@ -20,6 +20,18 @@ export interface CredentialRequirement {
   description: string;
 }
 
+export interface SolverNetTaskGenerator {
+  /** Stable identifier (e.g. `'prediction.polymarket-auto.v1'`). */
+  id: string;
+  /**
+   * BINDING pointer to the launcher-side task-generator implementation
+   * (e.g. `'client/src/solver-types/prediction-v1-auto'`). The launcher
+   * daemon's `TaskGeneratorRegistry` resolves this string to a generator
+   * factory at runtime. Mirrors `SolverNetEvaluationFunction.implementation`.
+   */
+  implementation: string;
+}
+
 export interface SolverNetEvaluationFunction {
   id: string;
   deterministic: boolean;
@@ -96,6 +108,7 @@ export interface SolverNetContract {
   };
   claimPolicy: SolverNetClaimPolicy;
   credentialRequirements: Record<SolverNetContractRole, CredentialRequirement[]>;
+  taskGenerator: SolverNetTaskGenerator;
   evaluationFunction: SolverNetEvaluationFunction;
   aggregationFunction: SolverNetAggregationFunction;
 }
@@ -173,6 +186,10 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
         description: 'Read public Polymarket/UMA final market state for resolution mapping.',
       },
     ],
+  },
+  taskGenerator: {
+    id: 'prediction.polymarket-auto.v1',
+    implementation: 'client/src/solver-types/prediction-v1-auto',
   },
   evaluationFunction: {
     id: 'prediction.brier-loss.v1',

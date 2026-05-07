@@ -82,6 +82,10 @@ function buildUnsignedManifest(overrides: {
         solver: [],
         evaluator: [],
       },
+      taskGenerator: {
+        id: 'prediction.polymarket-auto.v1',
+        implementation: 'client/src/solver-types/prediction-v1-auto',
+      },
       evaluationFunction: {
         id: 'prediction.brier-loss.v1',
         deterministic: true,

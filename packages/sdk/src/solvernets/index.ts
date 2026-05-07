@@ -18,6 +18,7 @@ export type {
   PayloadKind,
   SupportedSolverType,
   CredentialRequirement,
+  SolverNetTaskGenerator,
   SolverNetEvaluationFunction,
   SolverNetAggregationFunction,
   SolverNetClaimPolicy,

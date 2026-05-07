@@ -446,6 +446,7 @@ export interface SolverNetManifestV1 {
       solver: SolverNetCredentialRequirement[];
       evaluator: SolverNetCredentialRequirement[];
     };
+    taskGenerator: { id: string; implementation: string };
     evaluationFunction: {
       id: string;
       deterministic: boolean;

@@ -67,6 +67,10 @@ function buildManifest(
         },
       },
       credentialRequirements: { creator: [], solver: [], evaluator: [] },
+      taskGenerator: {
+        id: 'prediction.polymarket-auto.v1',
+        implementation: 'client/src/solver-types/prediction-v1-auto',
+      },
       evaluationFunction: {
         id: 'e',
         deterministic: true,

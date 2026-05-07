@@ -72,6 +72,10 @@ function buildValidManifest(): SolverNetManifestV1 {
           },
         ],
       },
+      taskGenerator: {
+        id: 'prediction.polymarket-auto.v1',
+        implementation: 'client/src/solver-types/prediction-v1-auto',
+      },
       evaluationFunction: {
         id: 'prediction.brier-loss.v1',
         deterministic: true,
@@ -246,6 +250,23 @@ describe('SolverNetManifestV1 schema (§7)', () => {
     const manifest = buildValidManifest();
     manifest.contract.claimPolicy.evaluator.window = { duration: 86400 };
     expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(true);
+  });
+
+  it('rejects when contract.taskGenerator is missing', () => {
+    const manifest = buildValidManifest() as unknown as Record<string, unknown>;
+    delete (manifest.contract as Record<string, unknown>).taskGenerator;
+    const result = SolverNetManifestV1Schema.safeParse(manifest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const path = result.error.issues[0].path.join('.');
+      expect(path).toContain('contract.taskGenerator');
+    }
+  });
+
+  it('rejects when contract.taskGenerator.implementation is missing', () => {
+    const manifest = buildValidManifest();
+    delete (manifest.contract.taskGenerator as Partial<typeof manifest.contract.taskGenerator>).implementation;
+    expect(SolverNetManifestV1Schema.safeParse(manifest).success).toBe(false);
   });
 
   it('rejects the legacy claimPolicyDefaults shape (clean break)', () => {
