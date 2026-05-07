@@ -143,7 +143,10 @@ async function main(): Promise<void> {
       `solutionSchema=${r.solutionSchemaVersion} verdictSchema=${r.verdictSchemaVersion} ` +
       `verdictScore=${r.verdictScore} attemptFinalization=${r.attemptFinalization} ` +
       `submitted=${r.submittedCount} solutionBudgetConsumed=${r.solutionBudgetConsumed} ` +
-      `verdictBudgetConsumed=${r.verdictBudgetConsumed}\n`,
+      `verdictBudgetConsumed=${r.verdictBudgetConsumed} ` +
+      `payloadV2=ok(version=${r.payloadV2VersionByte} ` +
+      `codeDigest=${r.payloadV2CodeDigestRoundTrip} implName=${r.payloadV2ImplNameRoundTrip} ` +
+      `mode=${r.payloadV2ModeRoundTrip})\n`,
     );
   }));
 

@@ -141,11 +141,24 @@ export function handleMetadataSet(event: MetadataSetEvent): void {
     if (sm.length > 0 && !isAllZero(sm)) {
       exec.sourceMeasurement = sm;
     }
-    // Index Executor.mode. Back-compat: v1 payload ABI tuple does not encode
-    // mode; decodeExecutionPayload defaults to "train". When payload v2 ships,
-    // decoded.mode will carry the actual operator-declared value.
+    // Index Executor.mode. v1 payloads default to "train"; v2 reads the
+    // actual operator-declared value from the payload's modeFlag.
     // See docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
     exec.mode = decoded.mode;
+
+    // Payload v2: surface harness identity (codeDigest + implName) so the
+    // HarnessRollup / FreezeViolation entities can populate. v1 payloads
+    // produce empty codeDigest bytes + empty implName — leave the entity
+    // fields null in that case so the rollup handlers' early-return guards
+    // continue to filter them.
+    if (decoded.codeDigest.length > 0 && !isAllZero(decoded.codeDigest)) {
+      // Re-apply the textual `sha256:` prefix so the on-chain index matches
+      // the off-chain SignedEnvelope.executor.codeDigest shape.
+      exec.codeDigest = "sha256:" + decoded.codeDigest.toHexString().substr(2);
+    }
+    if (decoded.implName.length > 0) {
+      exec.implName = decoded.implName;
+    }
 
     // NOTE: Execution.routerJob and Execution.deliveredAt are intentionally
     // NOT populated here. The previous code compared manifestHash (an operator-

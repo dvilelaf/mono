@@ -37,6 +37,7 @@ import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   createPublicClient,
+  decodeAbiParameters,
   http,
   keccak256,
   parseEther,
@@ -45,6 +46,12 @@ import {
   type Address,
   type PublicClient,
 } from 'viem';
+import {
+  PAYLOAD_TUPLE_V2,
+  codeDigestSha256ToBytes32,
+  encodeExecutionPayloadV2,
+  modeStringToFlag,
+} from '../../src/erc8004/identity.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import {
@@ -495,6 +502,16 @@ export interface SweRebenchV2AnvilSettlementResult {
   submittedCount: number;
   solutionBudgetConsumed: string;
   verdictBudgetConsumed: string;
+  /**
+   * ERC-8004 payload v2 round-trip: encodes a v2 setMetadata payload using the
+   * Solution envelope's codeDigest + implName, then ABI-decodes it and asserts
+   * the round-tripped fields match. This is the daemon-side encoding-correctness
+   * leg of Tier 4 — the subgraph decoder is unit-tested separately.
+   */
+  payloadV2VersionByte: number;
+  payloadV2CodeDigestRoundTrip: boolean;
+  payloadV2ImplNameRoundTrip: boolean;
+  payloadV2ModeRoundTrip: boolean;
 }
 
 /**
@@ -879,6 +896,46 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       `verdictBudgetRemaining=${verdictRemaining}, expected ${expectedRemaining}`,
     );
 
+    // ── ERC-8004 payload v2 round-trip (Tier 4 verification gap) ─────────────
+    // The settlement path doesn't itself call IdentityPublisher (that's wired
+    // into the harness engine, exercised in dedicated unit tests). What this
+    // phase asserts is that a v2 payload built from the Solution envelope's
+    // executor.codeDigest + implName + mode encodes + ABI-decodes cleanly,
+    // with the version byte set to 2 and all three new fields preserved.
+    // This is the daemon-side encoding-correctness leg; the subgraph decoder
+    // is unit-tested separately. See docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md §3
+    // and docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.
+    const envelopeCodeDigest = solutionEnvelope.executor.codeDigest;
+    const envelopeImplName = solutionEnvelope.executor.implName;
+    const envelopeMode = solutionEnvelope.executor.mode ?? 'train';
+    const v2Payload = {
+      version: 2 as const,
+      tier: 1 as const,
+      manifestHash: solutionEnvelope.signature.hash as `0x${string}`,
+      attestationQuoteCid: '0x' as `0x${string}`,
+      sourceMeasurement:
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      codeDigest: codeDigestSha256ToBytes32(envelopeCodeDigest),
+      implName: envelopeImplName,
+      modeFlag: modeStringToFlag(envelopeMode),
+    };
+    const v2EncodedHex = encodeExecutionPayloadV2(v2Payload);
+    // Version byte is the LSB of the first 32-byte word — at hex char index 64..66.
+    const v2VersionByte = parseInt(v2EncodedHex.slice(64, 66), 16);
+    assert(v2VersionByte === 2, `payload v2 version byte expected 2, got ${v2VersionByte}`);
+
+    const v2Decoded = decodeAbiParameters(PAYLOAD_TUPLE_V2, v2EncodedHex);
+    const decodedCodeDigest = String(v2Decoded[5]).toLowerCase();
+    const decodedImplName = String(v2Decoded[6]);
+    const decodedModeFlag = Number(v2Decoded[7]);
+    const expectedCodeDigestHex = codeDigestSha256ToBytes32(envelopeCodeDigest).toLowerCase();
+    const codeDigestRoundTrip = decodedCodeDigest === expectedCodeDigestHex;
+    const implNameRoundTrip = decodedImplName === envelopeImplName;
+    const modeRoundTrip = decodedModeFlag === modeStringToFlag(envelopeMode);
+    assert(codeDigestRoundTrip, `payload v2 codeDigest round-trip mismatch: encoded=${expectedCodeDigestHex} decoded=${decodedCodeDigest}`);
+    assert(implNameRoundTrip, `payload v2 implName round-trip mismatch: encoded=${envelopeImplName} decoded=${decodedImplName}`);
+    assert(modeRoundTrip, `payload v2 modeFlag round-trip mismatch: encoded=${modeStringToFlag(envelopeMode)} decoded=${decodedModeFlag}`);
+
     return {
       taskId,
       solverTypeDigestExpected: expectedSolverTypeDigest.toLowerCase(),
@@ -892,6 +949,10 @@ export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2A
       submittedCount,
       solutionBudgetConsumed: (rate * 3n - solutionRemaining).toString(),
       verdictBudgetConsumed: (rate * 3n - verdictRemaining).toString(),
+      payloadV2VersionByte: v2VersionByte,
+      payloadV2CodeDigestRoundTrip: codeDigestRoundTrip,
+      payloadV2ImplNameRoundTrip: implNameRoundTrip,
+      payloadV2ModeRoundTrip: modeRoundTrip,
     };
   } finally {
     await anvil.teardown();

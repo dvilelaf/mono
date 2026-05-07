@@ -32,6 +32,7 @@ import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.
 import { SkippableError } from '../types.js';
 import type {
   ExecutionPayload,
+  ExecutionPayloadV2,
   ExecutionTier,
   IdentityPublisher,
   ReputationRegistryClient,
@@ -39,7 +40,11 @@ import type {
   FeedbackHookOutcome,
   ResolvedAgent,
 } from '../../erc8004/index.js';
-import { submitEvaluatorFeedback } from '../../erc8004/index.js';
+import {
+  submitEvaluatorFeedback,
+  codeDigestSha256ToBytes32,
+  modeStringToFlag,
+} from '../../erc8004/index.js';
 import type { Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
@@ -1094,10 +1099,16 @@ export class TaskEngine {
 
     // 8. Persist DELIVERING with manifest CID + artifact CIDs + evidence hash.
     //    evidenceHash gets its own dedicated column (not stashed in informationalClaim).
+    //    executorMode + executorCodeDigest are also persisted so deliver() can
+    //    emit a payload v2 setMetadata after the transient maps are cleared.
+    //    See `client/src/erc8004/identity.ts` (publishContentV2) and the
+    //    payload-v2 ABI tuple in `abis.ts`.
     this.persistence.transition(task.requestId, TaskRunState.DELIVERING, {
       manifestCid,
       artifactCids,
       evidenceHash: signatureHash,
+      executorMode,
+      executorCodeDigest: fenceCodeDigest,
     });
     console.log(`[harness-engine] ${task.requestId} PACKAGING → DELIVERING manifestCid=${manifestCid}`);
 
@@ -1186,23 +1197,60 @@ export class TaskEngine {
         // v0 tier rule: with an evidenceHash on chain we declare `committed` (tier=1);
         // higher tiers (`attested`, `proved`) come later when TEE work lands.
         const tier: ExecutionTier = signatureHash ? 1 : 0;
-        const setMetadataPayload: ExecutionPayload = {
-          version: 1,
-          tier,
-          manifestHash: signatureHash ?? ('0x' as `0x${string}`),
-          attestationQuoteCid: '0x',
-          sourceMeasurement:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-        };
+        const manifestHashHex = signatureHash ?? ('0x' as `0x${string}`);
+
+        // Prefer v2 when the harness identity is available — the engine
+        // captures executorMode + executorCodeDigest in pack(). For legacy
+        // rows that completed before payload v2 wiring (or for solver paths
+        // that don't produce a fence digest), executorCodeDigest is null and
+        // we fall back to the v1 encoder so the indexer still sees envelope
+        // metadata, just without harness identity. v1 envelopes are decoded
+        // by the subgraph as mode='train' with empty codeDigest/implName.
+        const harnessImplName = task.implName;
+        const canEmitV2 =
+          !!task.executorMode &&
+          !!task.executorCodeDigest &&
+          !!harnessImplName;
         try {
-          const pubTxHash = await this.identityPublisher.publishContent({
-            kind: 'envelope',
-            cid: manifestCid,
-            payload: setMetadataPayload,
-          });
-          console.log(
-            `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash}`,
-          );
+          let pubTxHash: `0x${string}`;
+          if (canEmitV2) {
+            const v2Payload: ExecutionPayloadV2 = {
+              version: 2,
+              tier,
+              manifestHash: manifestHashHex,
+              attestationQuoteCid: '0x',
+              sourceMeasurement:
+                '0x0000000000000000000000000000000000000000000000000000000000000000',
+              codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest),
+              implName: harnessImplName as string,
+              modeFlag: modeStringToFlag(task.executorMode as 'train' | 'frozen'),
+            };
+            pubTxHash = await this.identityPublisher.publishContentV2({
+              kind: 'envelope',
+              cid: manifestCid,
+              payload: v2Payload,
+            });
+            console.log(
+              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v2 mode=${task.executorMode} impl=${harnessImplName})`,
+            );
+          } else {
+            const v1Payload: ExecutionPayload = {
+              version: 1,
+              tier,
+              manifestHash: manifestHashHex,
+              attestationQuoteCid: '0x',
+              sourceMeasurement:
+                '0x0000000000000000000000000000000000000000000000000000000000000000',
+            };
+            pubTxHash = await this.identityPublisher.publishContent({
+              kind: 'envelope',
+              cid: manifestCid,
+              payload: v1Payload,
+            });
+            console.log(
+              `[harness-engine] ${requestId}: setMetadata envelope:${manifestCid} tx=${pubTxHash} (payload v1)`,
+            );
+          }
         } catch (err) {
           console.warn(
             `[harness-engine] ${requestId}: setMetadata envelope publish failed (non-fatal): ${err instanceof Error ? err.message : err}`,
