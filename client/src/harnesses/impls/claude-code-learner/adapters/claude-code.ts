@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { finished } from 'node:stream/promises';
 import type { HarnessAdapter, TaskSessionInputs } from '../types.js';
 
 export interface ClaudeCodeHarnessAdapterConfig {
@@ -89,6 +90,10 @@ function taskContextJson(inputs: TaskSessionInputs): string {
   } catch {
     return '';
   }
+}
+
+function captureLogError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 /**
@@ -206,6 +211,15 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       mkdirSync(logDir, { recursive: true });
       const stdoutLog = createWriteStream(join(logDir, 'stdout.jsonl'), { flags: 'a' });
       const stderrLog = createWriteStream(join(logDir, 'stderr.log'), { flags: 'a' });
+      const stdoutDone = finished(stdoutLog).then(() => null, captureLogError);
+      const stderrDone = finished(stderrLog).then(() => null, captureLogError);
+      const closeLogs = async (): Promise<void> => {
+        if (!stdoutLog.writableEnded) stdoutLog.end();
+        if (!stderrLog.writableEnded) stderrLog.end();
+        const [stdoutErr, stderrErr] = await Promise.all([stdoutDone, stderrDone]);
+        if (stdoutErr) throw stdoutErr;
+        if (stderrErr) throw stderrErr;
+      };
       const child: ChildProcess = this.spawnFn(this.claudePath, args, spawnOpts);
 
       // If the abort signal already fired before we got here (race), kill
@@ -231,31 +245,38 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
         stderr += d.toString();
       });
 
-      child.on('exit', (code, signal) => {
+      let settled = false;
+      const settleAfterLogs = (
+        complete: () => void,
+        onLogError: (err: Error) => void = reject,
+      ) => {
+        if (settled) return;
+        settled = true;
         inputs.abort.removeEventListener('abort', onAbort);
-        stdoutLog.end();
-        stderrLog.end();
-        if (code === 0) {
-          resolve();
-        } else if (inputs.abort.aborted) {
-          // Window expired; resolve anyway so harvester can collect
-          // partial outputs. The shim's caller (engine) handles the
-          // abort signal separately.
-          resolve();
-        } else {
-          reject(
-            new Error(
-              `claude-code adapter: child exited with code=${code} signal=${signal}: ${stderr.slice(0, 500)}`,
-            ),
-          );
-        }
+        closeLogs().then(complete, onLogError);
+      };
+
+      child.on('exit', (code, signal) => {
+        settleAfterLogs(() => {
+          if (code === 0) {
+            resolve();
+          } else if (inputs.abort.aborted) {
+            // Window expired; resolve anyway so harvester can collect
+            // partial outputs. The shim's caller (engine) handles the
+            // abort signal separately.
+            resolve();
+          } else {
+            reject(
+              new Error(
+                `claude-code adapter: child exited with code=${code} signal=${signal}: ${stderr.slice(0, 500)}`,
+              ),
+            );
+          }
+        });
       });
 
       child.on('error', (err) => {
-        inputs.abort.removeEventListener('abort', onAbort);
-        stdoutLog.end();
-        stderrLog.end();
-        reject(err);
+        settleAfterLogs(() => reject(err), () => reject(err));
       });
     });
   }
