@@ -29,6 +29,7 @@ import {
   verifyManifestSignature,
 } from '../../harnesses/manifest/index.js';
 import { verifyPackageHash } from '../../harnesses/external-impls/package-hash.js';
+import { writeModeState } from '../../harnesses/mode-state.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -195,6 +196,13 @@ function runMode(ctx: CommandContext, configPath: string, mode: string): void {
   const cfg = readConfigFile(configPath);
   cfg.harness = { ...(cfg.harness ?? {}), mode: mode as 'train' | 'frozen' };
   writeConfigFile(configPath, cfg);
+  // Persist mode-switch metadata for the dashboard's HarnessStatusPanel.
+  // Best-effort; failures are non-fatal — the config write above is the source of truth.
+  try {
+    writeModeState({ mode: mode as 'train' | 'frozen', switchedAt: Date.now() });
+  } catch {
+    // ignore — status panel falls back to lastModeSwitchAt: undefined
+  }
   emitJson(ctx, { verb: 'harness mode', mode, configPath });
 }
 

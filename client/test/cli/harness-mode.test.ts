@@ -10,10 +10,12 @@ let CONFIG_PATH: string;
 beforeEach(() => {
   TMP = mkdtempSync(join(tmpdir(), 'cli-mode-'));
   CONFIG_PATH = join(TMP, 'config.json');
+  process.env['JINN_HARNESS_MODE_STATE_PATH'] = join(TMP, 'mode-state.json');
   writeFileSync(CONFIG_PATH, JSON.stringify({ network: 'testnet' }));
 });
 
 afterEach(() => {
+  delete process.env['JINN_HARNESS_MODE_STATE_PATH'];
   if (TMP) rmSync(TMP, { recursive: true, force: true });
 });
 
