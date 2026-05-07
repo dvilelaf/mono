@@ -9,6 +9,7 @@ export type CreateMessageInput = {
   subject: string;
   body: string;
   metadata?: Record<string, unknown>;
+  priority?: 1 | 2 | 3 | 4 | 5;
 };
 
 const TYPE_TAGS: Record<string, string[]> = {
@@ -60,7 +61,7 @@ export async function createMessage(input: CreateMessageInput) {
     title: input.subject,
     message: ntfyMessage,
     click,
-    priority: 3,
+    priority: input.priority ?? 3,
     tags,
   });
 

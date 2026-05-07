@@ -26,5 +26,9 @@ export const config = {
       enabled: (process.env.ISSUE_RUNNER_ENABLED ?? "true") === "true",
       schedule: process.env.ISSUE_RUNNER_SCHEDULE ?? "0 23 * * *",
     },
+    zec_monitor: {
+      enabled: (process.env.ZEC_MONITOR_ENABLED ?? "true") === "true",
+      schedule: process.env.ZEC_MONITOR_SCHEDULE ?? "0 8 * * 1",
+    },
   },
 } as const;
