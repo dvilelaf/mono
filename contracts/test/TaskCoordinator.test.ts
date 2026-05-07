@@ -398,7 +398,7 @@ describe("TaskCoordinator", function () {
     expect(verdict.claimExpiresAt).to.equal(closesAt);
   });
 
-  it("Unresolved verdict re-opens the slot — does not finalize, validVerdictCount stays 0", async function () {
+  it("Unresolved verdict is terminal — finalizes attempt with passVerdictCount unchanged", async function () {
     const { coordinator, router, creator, operator, evaluator, other } = await deploy();
     await createSubmittedAttempt(coordinator, router, await creator.getAddress(), await operator.getAddress());
 
@@ -411,27 +411,25 @@ describe("TaskCoordinator", function () {
       VERDICT_CID,
       VERDICT_UNRESOLVED
     );
-    // VerdictDelivered emitted; AttemptFinalized must NOT be.
+    // Both VerdictDelivered AND AttemptFinalized fire. With requiredVerdicts=1
+    // and passThreshold=1, validVerdictCount reaches 1 and passVerdictCount=0,
+    // so the attempt finalizes as not-passed.
     await expect(tx).to.emit(coordinator, "VerdictDelivered");
-    await expect(tx).to.not.emit(coordinator, "AttemptFinalized");
+    await expect(tx).to.emit(coordinator, "AttemptFinalized").withArgs(1, 0, false, 1, 0);
 
     const attempt = await coordinator.getAttempt(1, 0);
-    expect(attempt.validVerdictCount).to.equal(0);
+    expect(attempt.validVerdictCount).to.equal(1);
     expect(attempt.passVerdictCount).to.equal(0);
-    // verdictClaimCount stays monotonic (slot pointer); unresolvedVerdictCount
-    // tracks how many slots returned to the pool. Active claims =
-    // verdictClaimCount - unresolvedVerdictCount = 0 → re-claimable.
     expect(attempt.verdictClaimCount).to.equal(1);
-    expect(attempt.unresolvedVerdictCount).to.equal(1);
-    expect(attempt.finalization).to.equal(1); // still PendingEvaluation
+    expect(attempt.finalization).to.equal(3); // Failed
 
-    // The slot is re-claimable by another evaluator; new verdictIndex = 1.
-    await expect(coordinator.connect(router).claimEvaluation(1, 0, await other.getAddress()))
-      .to.emit(coordinator, "EvaluationClaimed")
-      .withArgs(1, 0, 1, await other.getAddress(), anyValue);
+    // Slot is consumed; further claims revert with TCAttemptAlreadyFinalized.
+    await expect(
+      coordinator.connect(router).claimEvaluation(1, 0, await other.getAddress())
+    ).to.be.revertedWithCustomError(coordinator, "TCAttemptAlreadyFinalized");
   });
 
-  it("mixed Pass + Unresolved with requiredVerdicts=2 stays pending until two non-Unresolved verdicts arrive", async function () {
+  it("multi-verdict (requiredVerdicts=3, passThreshold=2): Pass + Pass + Unresolved finalizes as passed", async function () {
     const { coordinator, router, creator, operator, evaluator, other } = await deploy();
     const [, , , , , , extra] = await ethers.getSigners();
     await coordinator.connect(router).createTask(
@@ -441,7 +439,7 @@ describe("TaskCoordinator", function () {
       {
         ...(await makePolicy()),
         evaluationPolicy: {
-          requiredVerdicts: 2,
+          requiredVerdicts: 3,
           passThreshold: 2,
           evaluationDuration: 600,
           externalReadyAt: 0,
@@ -454,18 +452,18 @@ describe("TaskCoordinator", function () {
     await coordinator.connect(router).registerAttemptRequest(1, 0, REQUEST_ID);
     await coordinator.connect(router).recordSubmission(REQUEST_ID, await operator.getAddress(), SOLUTION_CID, ethers.parseEther("1"));
 
-    // Evaluator 1: Unresolved — re-opens the slot.
+    // Evaluator 1: Pass.
     await coordinator.connect(router).claimEvaluation(1, 0, await evaluator.getAddress());
     await coordinator.connect(router).registerVerdictRequest(1, 0, 0, VERDICT_REQUEST_ID);
     const tx1 = await coordinator.connect(router).recordVerdict(
       VERDICT_REQUEST_ID,
       await evaluator.getAddress(),
       VERDICT_CID,
-      VERDICT_UNRESOLVED
+      VERDICT_PASS
     );
     await expect(tx1).to.not.emit(coordinator, "AttemptFinalized");
 
-    // Evaluator 2: Pass.
+    // Evaluator 2: Pass — still only 2 of 3 verdicts, attempt not finalized yet.
     await coordinator.connect(router).claimEvaluation(1, 0, await other.getAddress());
     await coordinator.connect(router).registerVerdictRequest(1, 0, 1, VERDICT_REQUEST_ID_2);
     const tx2 = await coordinator.connect(router).recordVerdict(
@@ -474,9 +472,10 @@ describe("TaskCoordinator", function () {
       VERDICT_CID_2,
       VERDICT_PASS
     );
-    await expect(tx2).to.not.emit(coordinator, "AttemptFinalized"); // only 1 valid, need 2
+    await expect(tx2).to.not.emit(coordinator, "AttemptFinalized");
 
-    // Evaluator 3: Pass — finalizes.
+    // Evaluator 3: Unresolved — third verdict counts toward validVerdictCount,
+    // finalizes the attempt. passVerdictCount=2 ≥ passThreshold=2 → PASS.
     const v3req = ethers.keccak256(ethers.toUtf8Bytes("v3-req"));
     const v3cid = ethers.keccak256(ethers.toUtf8Bytes("v3-cid"));
     await coordinator.connect(router).claimEvaluation(1, 0, await extra.getAddress());
@@ -485,9 +484,9 @@ describe("TaskCoordinator", function () {
       v3req,
       await extra.getAddress(),
       v3cid,
-      VERDICT_PASS
+      VERDICT_UNRESOLVED
     );
-    await expect(tx3).to.emit(coordinator, "AttemptFinalized").withArgs(1, 0, true, 2, 2);
+    await expect(tx3).to.emit(coordinator, "AttemptFinalized").withArgs(1, 0, true, 3, 2);
   });
 
   it("policyHook.canClaim is called on both claimTask (role=0) and claimEvaluation (role=1)", async function () {

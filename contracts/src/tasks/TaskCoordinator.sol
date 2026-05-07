@@ -135,16 +135,7 @@ contract TaskCoordinator {
         uint64 submittedAt;
         AttemptStatus status;
         AttemptFinalization finalization;
-        // Monotonic counter; doubles as the next verdictIndex. Each
-        // claimEvaluation assigns verdictIndex = verdictClaimCount and
-        // increments. Unresolved verdicts reopen the slot via
-        // unresolvedVerdictCount (see recordVerdict).
         uint16 verdictClaimCount;
-        // How many delivered verdicts came back as Unresolved. The
-        // gate against requiredVerdicts uses
-        // (verdictClaimCount - unresolvedVerdictCount), so an Unresolved
-        // verdict effectively returns the slot to the pool.
-        uint16 unresolvedVerdictCount;
         uint16 validVerdictCount;
         uint16 passVerdictCount;
     }
@@ -376,7 +367,6 @@ contract TaskCoordinator {
             status: AttemptStatus.Claimed,
             finalization: AttemptFinalization.None,
             verdictClaimCount: 0,
-            unresolvedVerdictCount: 0,
             validVerdictCount: 0,
             passVerdictCount: 0
         });
@@ -457,12 +447,7 @@ contract TaskCoordinator {
         if (evalPolicy.disallowSolverSelfEvaluation && evaluator == attempt.operator) {
             revert TCSolverSelfEvaluation(taskId, attemptIndex, evaluator);
         }
-        // Active claims = monotonic claimCount minus those that came back Unresolved.
-        // Unresolved verdicts return their slot to the pool, so the gate against
-        // requiredVerdicts only counts claims that could still produce a valid verdict.
-        if (attempt.verdictClaimCount - attempt.unresolvedVerdictCount >= evalPolicy.requiredVerdicts) {
-            revert TCMaxVerdictsReached(taskId, attemptIndex);
-        }
+        if (attempt.verdictClaimCount >= evalPolicy.requiredVerdicts) revert TCMaxVerdictsReached(taskId, attemptIndex);
         if (verdictClaimsByAttemptByEvaluator[taskId][attemptIndex][evaluator] >= evalPolicy.maxVerdictsPerEvaluator) {
             revert TCEvaluatorClaimLimitReached(taskId, attemptIndex, evaluator);
         }
@@ -577,26 +562,12 @@ contract TaskCoordinator {
         verdict.deliveredAt = uint64(block.timestamp);
         verdict.status = VerdictStatus.Delivered;
 
-        if (verdictCode == VerdictCode.Unresolved) {
-            // Unresolved verdicts don't burn the slot from the gate — the
-            // evaluator honestly reported the precondition isn't met yet.
-            // verdictClaimCount stays monotonic (verdictIndex pointer is
-            // preserved); unresolvedVerdictCount tracks how many slots
-            // returned to the pool so the gate computation
-            // (verdictClaimCount - unresolvedVerdictCount) opens room for
-            // a fresh claim.
-            attempt.unresolvedVerdictCount++;
-            emit VerdictDelivered(
-                ref.taskId,
-                ref.attemptIndex,
-                ref.verdictIndex,
-                evaluator,
-                verdictCidDigest,
-                verdictCodeRaw
-            );
-            return (false, false, false, address(0), 0);
-        }
-
+        // Every terminal verdict code (Pass, Fail, Invalid, Unresolved) counts
+        // as a delivered verdict. Unresolved is treated as a non-Pass terminal
+        // signal — the off-chain prefilter is the deferral mechanism; if an
+        // evaluator reaches the chain with Unresolved, the launcher gets a
+        // fast failure signal and can repost rather than the protocol silently
+        // retrying.
         attempt.validVerdictCount++;
         if (verdictCode == VerdictCode.Pass) {
             attempt.passVerdictCount++;
