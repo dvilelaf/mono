@@ -1364,11 +1364,6 @@
           },
           {
             "internalType": "uint16",
-            "name": "unresolvedVerdictCount",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
             "name": "validVerdictCount",
             "type": "uint16"
           },

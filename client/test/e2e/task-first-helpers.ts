@@ -2815,11 +2815,11 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       evaluationPolicyAssertions.push('lazy-window-accepts-after-time-advance');
     }
 
-    // Phase F — Unresolved verdict re-opens the slot. Bootstrap a third
-    // operator (`evaluatorB`) so we have two distinct evaluators on the
-    // same attempt. Solver submits, evaluator A delivers Unresolved (which
-    // must NOT finalize the attempt), evaluator B claims a fresh slot and
-    // delivers Pass (which finalizes).
+    // Phase F — Unresolved verdict is terminal (Stage 1.1). Solver submits,
+    // a single evaluator delivers VerdictCode.Unresolved, and the chain
+    // finalizes the attempt with passed=false (validVerdictCount=1,
+    // passVerdictCount=0). The off-chain prefilter (Stage 5) is the
+    // deferral mechanism; on-chain verdicts are all terminal.
     {
       const phaseLatest = await publicClient.getBlock();
       const phaseNow = Number(phaseLatest.timestamp);
