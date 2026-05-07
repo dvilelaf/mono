@@ -10,6 +10,7 @@
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
+import type { ZodIssue } from 'zod';
 import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
@@ -700,7 +701,7 @@ export class TaskEngine {
     const parsed = sdkContract.schemas.task.zod.safeParse(task);
     if (!parsed.success) {
       const issues = parsed.error.issues
-        .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
+        .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
         .join('; ');
       return `${ref.id}.${ref.version} task failed validation: ${issues}`;
     }
