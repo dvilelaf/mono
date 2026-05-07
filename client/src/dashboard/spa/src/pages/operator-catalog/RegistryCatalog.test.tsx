@@ -23,7 +23,7 @@ vi.mock('../../api/client.js', () => ({
 
 const { RegistryCatalog } = await import('./RegistryCatalog.js');
 
-function withProviders(node: JSX.Element, path = '/configuration'): JSX.Element {
+function withProviders(node: JSX.Element, path = '/operator'): JSX.Element {
   const { hook } = memoryLocation({ path });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (

@@ -90,7 +90,7 @@ export function OperatorCard({ name, roles, state, waitingMessage }: OperatorCar
           )}
         </span>
         <Link
-          href={`/configuration#solvernets/${name}`}
+          href={`/operator#solvernets/${name}`}
           style={{
             color: 'var(--accent-sky)',
             fontSize: '11px',

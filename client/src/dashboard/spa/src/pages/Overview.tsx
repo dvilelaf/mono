@@ -27,6 +27,15 @@ interface OverviewStatusV1 {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
   };
+  activity?: {
+    recent?: Array<{
+      id: number;
+      ts: string | null;
+      kind: string;
+      requestId: string | null;
+      txHash: string | null;
+    }>;
+  };
   predictionV1?: {
     /**
      * Mirror of the daemon-side `PredictionOperatorStatus`. Only a subset
@@ -157,6 +166,17 @@ function formatEth(wei?: string): string {
   }
 }
 
+function formatActivityKind(kind: string): string {
+  return kind.replace(/_/g, ' ');
+}
+
+function formatActivityTime(ts: string | null): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toISOString().slice(11, 16);
+}
+
 export function OverviewPage(): JSX.Element {
   const { data: status } = useQuery<OverviewStatusV1>({
     queryKey: ['status'],
@@ -203,6 +223,12 @@ export function OverviewPage(): JSX.Element {
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
   const allOperational = (status?.fleet?.services ?? []).every((s) => s.step === 'complete' || s.step === 'safe_binding_pending');
   const nodeStatus = allOperational ? 'Running' : 'Resuming';
+  const recentActivity = (status?.activity?.recent ?? []).map((e) => ({
+    id: String(e.id),
+    ts: formatActivityTime(e.ts),
+    message: e.requestId ? `${formatActivityKind(e.kind)} · ${e.requestId}` : formatActivityKind(e.kind),
+    txHash: e.txHash ?? undefined,
+  }));
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -218,7 +244,7 @@ export function OverviewPage(): JSX.Element {
           lead="Needs attention"
           body={firstAttention.message}
           ctaLabel="Configure prediction"
-          ctaHref="/configuration#solvernets/prediction"
+          ctaHref="/operator#solvernets/prediction"
         />
       )}
 
@@ -229,7 +255,7 @@ export function OverviewPage(): JSX.Element {
        * Operator-side state vs. empty-state — strictly mutually exclusive.
        * Spec §12: the OperatorCard surfaces the operator's joined SolverNet
        * from `bootstrap.solverNets`. The empty state ("Pick a SolverNet")
-       * deep-links to `/configuration#solvernets` where the registry catalog
+       * deep-links to `/operator#solvernets` where the registry catalog
        * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
        * shape and the new manifestCid-keyed shape during the Tasks 21/22
        * migration window.
@@ -246,11 +272,11 @@ export function OverviewPage(): JSX.Element {
           lead="Get started"
           body="Pick a SolverNet to participate in"
           ctaLabel="Configure"
-          ctaHref="/configuration#solvernets"
+          ctaHref="/operator#solvernets"
         />
       )}
 
-      <RecentActivity events={[]} />
+      <RecentActivity events={recentActivity} />
       <HarnessStatusPanel />
       <QuickActions
         claimableJinn={formatEth(status?.rewards?.pendingStakingRewardsWei)}

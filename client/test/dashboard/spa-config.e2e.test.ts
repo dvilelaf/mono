@@ -1,5 +1,5 @@
 /**
- * Page-split happy-path: navigate Overview → Configuration, swap a
+ * Page-split happy-path: navigate Overview → Operator, swap a
  * SolverNet's role, save, see the restart banner.
  *
  * The existing setup-mode harness in spa.e2e.test.ts spawns a real daemon
@@ -154,15 +154,15 @@ async function mockDaemonApi(page: Page): Promise<void> {
   );
 }
 
-test('operator opens Configuration, enables Evaluator role alongside Solver, sees restart banner', async ({ page }) => {
+test('operator opens Operator tab, enables Evaluator role alongside Solver, sees restart banner', async ({ page }) => {
   await mockDaemonApi(page);
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
 
   await expect(page.getByText('jinn operator')).toBeVisible();
 
-  // Top tab nav lands us on Configuration.
-  await page.getByRole('link', { name: /configuration/i }).click();
-  await expect(page).toHaveURL(/\/configuration$/);
+  // Top tab nav lands us on Operator, where activity and configuration live.
+  await page.getByRole('link', { name: /^operator$/i }).click();
+  await expect(page).toHaveURL(/\/operator$/);
   await expect(page.getByText(/solvernets/i).first()).toBeVisible();
 
   // Open the prediction net body (toggle is on by default per the mocked
@@ -172,6 +172,6 @@ test('operator opens Configuration, enables Evaluator role alongside Solver, see
   await page.getByRole('button', { name: /save changes/i }).click();
 
   // Restart banner appears across both tabs.
-  await expect(page.getByText(/configuration saved/i)).toBeVisible();
+  await expect(page.getByText(/operator settings saved/i)).toBeVisible();
   await expect(page.getByRole('button', { name: /restart node/i })).toBeVisible();
 });

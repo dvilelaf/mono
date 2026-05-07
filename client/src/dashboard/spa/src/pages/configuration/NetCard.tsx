@@ -9,7 +9,7 @@ import { SolverNetSigil } from './solverNetSigils.js';
 import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
 
 /**
- * Per-SolverNet card inside the Configuration > SolverNets section.
+ * Per-SolverNet card inside the Operator > SolverNets section.
  *
  * Two modes, distinguished by props (Task 21 introduces the manifest-keyed
  * mode; the legacy mode lingers until Task 22 drops the legacy schema):

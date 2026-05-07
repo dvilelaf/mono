@@ -572,8 +572,8 @@ test('Launcher happy-path: walks Create wizard and lands on the post-launch dash
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
   await expect(page.getByText('jinn operator')).toBeVisible();
 
-  // Switch to Launcher mode via the header ModeSwitch.
-  await page.getByRole('button', { name: 'Launcher' }).click();
+  // Switch to the Launcher workspace via the primary tabs.
+  await page.getByRole('link', { name: /^launcher$/i }).click();
 
   // Empty-state CTA appears — click "Create SolverNet".
   await expect(page.getByText(/no solvernets created yet\./i)).toBeVisible();

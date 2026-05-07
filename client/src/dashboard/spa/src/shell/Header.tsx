@@ -1,7 +1,4 @@
-import { useEffect } from 'react';
-import { Link, useLocation } from 'wouter';
-import { ModeSwitch } from './ModeSwitch.js';
-import { useAppMode, type AppMode } from './useAppMode.js';
+import { Link } from 'wouter';
 
 export interface HeaderProps {
   network: 'testnet' | 'mainnet';
@@ -14,26 +11,7 @@ function trunc(addr?: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-function modeForPath(path: string): AppMode {
-  return path.startsWith('/launcher') ? 'launcher' : 'operator';
-}
-
 export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX.Element {
-  const { mode, setMode } = useAppMode();
-  const [location, setLocation] = useLocation();
-
-  // Hydrate mode from URL on mount and on navigation, so deep links and
-  // browser back/forward keep mode and route coherent.
-  useEffect(() => {
-    const next = modeForPath(location);
-    if (next !== mode) setMode(next);
-  }, [location, mode, setMode]);
-
-  const onModeChange = (m: AppMode): void => {
-    setMode(m);
-    setLocation(m === 'operator' ? '/overview' : '/launcher');
-  };
-
   return (
     <header
       style={{
@@ -55,7 +33,6 @@ export function Header({ network, rpcHealthy, masterAddress }: HeaderProps): JSX
             jinn operator
           </span>
         </Link>
-        <ModeSwitch mode={mode} onChange={onModeChange} />
       </div>
       <div
         style={{

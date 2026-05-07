@@ -147,7 +147,7 @@ export function JoinFlow({
       // Invalidate so the catalog's joined-indicator badge appears on the
       // next tick instead of waiting up to 30s for the next refetch.
       void queryClient.invalidateQueries({ queryKey: ['operator', 'joined'] });
-      navigate('/configuration#solvernets');
+      navigate('/operator#solvernets');
     },
     onError: (err) => {
       setSubmitError(err instanceof Error ? err.message : String(err));
@@ -159,7 +159,7 @@ export function JoinFlow({
       <main data-testid="join-flow-missing-cid" style={pageStyle}>
         <ErrorBanner
           message="No manifest cid supplied."
-          onBack={() => navigate('/configuration#solvernets')}
+          onBack={() => navigate('/operator#solvernets')}
         />
       </main>
     );
@@ -182,7 +182,7 @@ export function JoinFlow({
       <main data-testid="join-flow-error" style={pageStyle}>
         <ErrorBanner
           message={`Failed to load manifest: ${message}`}
-          onBack={() => navigate('/configuration#solvernets')}
+          onBack={() => navigate('/operator#solvernets')}
           onRetry={() => {
             void manifestQuery.refetch();
           }}
@@ -543,7 +543,7 @@ export function JoinFlow({
         <button
           type="button"
           data-testid="join-flow-cancel"
-          onClick={() => navigate('/configuration#solvernets')}
+          onClick={() => navigate('/operator#solvernets')}
           style={ghostButtonStyle}
         >
           Cancel

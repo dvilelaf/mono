@@ -160,14 +160,14 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByText(operatorEyebrow('prediction'))).toBeNull();
   });
 
-  it('CTA on empty-state deep-links into /configuration#solvernets', async () => {
+  it('CTA on empty-state deep-links into /operator#solvernets', async () => {
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
     const cta = await screen.findByText(/configure\s*→/i);
     expect(cta.closest('a')?.getAttribute('href')).toBe(
-      '/configuration#solvernets',
+      '/operator#solvernets',
     );
   });
 });

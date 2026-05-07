@@ -42,7 +42,7 @@ vi.mock('../../api/client.js', () => ({
 }));
 
 function withProviders(node: JSX.Element): JSX.Element {
-  const { hook } = memoryLocation({ path: '/configuration' });
+  const { hook } = memoryLocation({ path: '/operator' });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>

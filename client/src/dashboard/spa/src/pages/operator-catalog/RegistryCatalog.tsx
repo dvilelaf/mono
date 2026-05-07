@@ -14,7 +14,7 @@ import type {
  * discovery and join flow").
  *
  * Replaces the legacy hardcoded "prediction" catalog entry that used to live
- * on Configuration > SolverNets. Each card exposes a Join CTA that routes
+ * on Operator > SolverNets. Each card exposes a Join CTA that routes
  * into the join flow (Task 21); for now the route renders a placeholder.
  *
  * Empty state copy is locked to spec §12: "No launched SolverNets available."

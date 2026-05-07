@@ -3,7 +3,7 @@ import { Agent } from '../regions/Agent.js';
 /**
  * Persistent right-rail Agent panel. Wraps the existing Agent region in a
  * column that flows naturally inside AppShell. The agent stays visible on
- * both Overview and Configuration so the operator's relationship with
+ * Overview, Operator, and Launcher so the operator's relationship with
  * Claude is continuous, not gated behind a tab.
  */
 export interface AgentRailProps {

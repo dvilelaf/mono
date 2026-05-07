@@ -3,7 +3,7 @@ import { RegistryCatalog } from '../operator-catalog/RegistryCatalog.js';
 import type { NetCardConfig } from './NetCard.js';
 
 /**
- * Configuration > SolverNets section. Wraps the registry-driven discovery
+ * Operator > SolverNets section. Wraps the registry-driven discovery
  * surface (`RegistryCatalog`) inside the standard `SectionCard` shell so the
  * header / collapse / hash-deep-link behaviour stays consistent with the other
  * sections.

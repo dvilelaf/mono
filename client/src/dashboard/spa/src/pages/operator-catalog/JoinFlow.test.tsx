@@ -274,7 +274,7 @@ describe('JoinFlow — submission', () => {
       }),
     );
     await waitFor(() =>
-      expect(nav.history.at(-1)).toBe('/configuration#solvernets'),
+      expect(nav.history.at(-1)).toBe('/operator#solvernets'),
     );
   });
 
@@ -315,7 +315,7 @@ describe('JoinFlow — submission', () => {
     expect(nav.history.at(-1)).toBe('/operator/join/bafybeiaaa');
   });
 
-  it('cancel button navigates back to /configuration#solvernets', async () => {
+  it('cancel button navigates back to /operator#solvernets', async () => {
     const { nav } = wrap(<JoinFlow />);
     await waitFor(() =>
       expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
@@ -323,6 +323,6 @@ describe('JoinFlow — submission', () => {
 
     fireEvent.click(screen.getByTestId('join-flow-cancel'));
 
-    expect(nav.history.at(-1)).toBe('/configuration#solvernets');
+    expect(nav.history.at(-1)).toBe('/operator#solvernets');
   });
 });

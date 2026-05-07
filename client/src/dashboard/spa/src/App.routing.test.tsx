@@ -4,17 +4,17 @@ import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverviewPage } from './pages/Overview.js';
-import { ConfigurationPage } from './pages/Configuration.js';
+import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 
-// Configuration + Overview + Launcher pages all useQuery for the daemon API;
+// Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
   api: {
     getBootstrap: async () => ({}),
-    getStatus: async () => ({}),
+    getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
@@ -57,7 +57,7 @@ describe('App routes', () => {
       withProviders(
         <Switch>
           <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/configuration"><ConfigurationPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
         '/overview',
       ),
@@ -67,25 +67,25 @@ describe('App routes', () => {
     expect(screen.getByText(/jinn earned/i)).toBeTruthy();
   });
 
-  it('renders ConfigurationPage on /configuration', () => {
+  it('renders OperatorPage on /operator', async () => {
     render(
       withProviders(
         <Switch>
           <Route path="/overview"><OverviewPage /></Route>
-          <Route path="/configuration"><ConfigurationPage /></Route>
+          <Route path="/operator"><OperatorPage /></Route>
         </Switch>,
-        '/configuration',
+        '/operator',
       ),
     );
-    // Configuration is composed of three section cards; the SolverNets head
-    // is the most stable assertion since it never collapses to nothing. Match
-    // the exact heading rather than `/solvernets/i` because the section body
-    // also contains "SolverNets" copy (e.g. "Discover launched SolverNets…").
-    expect(
+    expect(screen.getByTestId('operator-activity')).toBeTruthy();
+    // Operator is composed of activity plus the former configuration section
+    // cards; the SolverNets head is the most stable assertion since it never
+    // collapses to nothing.
+    await waitFor(() => expect(
       screen.getByText((_, el) =>
         el?.tagName === 'SPAN' && el.textContent === 'SolverNets',
       ),
-    ).toBeTruthy();
+    ).toBeTruthy());
   });
 
   it('renders LauncherPage on /launcher', async () => {

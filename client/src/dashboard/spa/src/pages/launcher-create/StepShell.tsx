@@ -240,7 +240,7 @@ export interface FieldShellProps {
 
 /**
  * Form-field wrapper for the Create wizard. Reuses the visual rhythm of
- * `<ConfigField>` but with inline error rendering — Configuration's pattern
+ * `<ConfigField>` but with inline error rendering — Operator configuration's pattern
  * surfaces errors at the section footer, the wizard surfaces per-field.
  */
 export function FieldShell({ label, helperText, error, children }: FieldShellProps): JSX.Element {

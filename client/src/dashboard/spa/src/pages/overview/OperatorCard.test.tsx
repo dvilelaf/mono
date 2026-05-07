@@ -23,7 +23,7 @@ describe('OperatorCard', () => {
     expect(screen.getByText(/live/i)).toBeTruthy();
     expect(screen.getByText(/waiting for tasks/i)).toBeTruthy();
     const link = screen.getByText(/configure/i).closest('a');
-    expect(link?.getAttribute('href')).toBe('/configuration#solvernets/prediction');
+    expect(link?.getAttribute('href')).toBe('/operator#solvernets/prediction');
   });
 
   it('renders both Solver and Evaluator pills when both roles are active', () => {

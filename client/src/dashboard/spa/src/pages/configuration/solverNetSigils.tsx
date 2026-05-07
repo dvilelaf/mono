@@ -1,6 +1,6 @@
 /**
  * Per-SolverNet sigil slot — a 26x26 mark rendered next to each SolverNet's
- * name in the Configuration > SolverNets section.
+ * name in the Operator > SolverNets section.
  *
  * NOTE: The 'prediction' orb is a TEMPORARY placeholder pending real per-net
  * brand art (see bd issue jinn-mono-l2zl.15.4.10). The fallback uses the
