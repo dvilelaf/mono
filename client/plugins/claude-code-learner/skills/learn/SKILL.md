@@ -310,7 +310,7 @@ outputPath           = workingDir/.debrief/analysis.json
 msUntilDeadline      = <current value>
 ```
 
-After it returns, verify `workingDir/.debrief/analysis.json` exists. If not, write `workingDir/.errors/debrief.json` and abort the pipeline (still run section 9 before returning).
+After it returns, verify `workingDir/.debrief/analysis.json` exists. If not, write `workingDir/.errors/debrief.json` and abort the pipeline. In `train` mode, still run section 9 before returning. In `frozen` mode, return without running section 9.
 
 Append a JSONL entry to `workingDir/.coordinator/log.jsonl`:
 `{ ts, phase, status, summary }`.
@@ -341,7 +341,7 @@ After it returns, read `workingDir/.improve/summary.json`. Verify:
 - One `promotion_record` per accepted change
 - Operator-access requests under `workingDir/.operator-requests/` if any
 
-If anything is inconsistent, write `workingDir/.errors/improve.json` and abort the pipeline (still run section 9 before returning).
+If anything is inconsistent, write `workingDir/.errors/improve.json` and abort the pipeline, then still run section 9 before returning. This section only runs in `train` mode.
 
 Append a JSONL entry to `workingDir/.coordinator/log.jsonl`:
 `{ ts, phase, status, summary }`.
