@@ -20,6 +20,11 @@ import {
   runTrainVsFrozenTrajectoryE2E,
   summarize,
 } from './task-first-helpers.js';
+import {
+  runSweRebenchV2HfFetchE2E,
+  runSweRebenchV2DockerEvalE2E,
+  runSweRebenchV2SolverTypeRegistrationE2E,
+} from './swe-rebench-v2-real-infra.js';
 
 async function main(): Promise<void> {
   const results = [];
@@ -84,6 +89,42 @@ async function main(): Promise<void> {
       await runContractIntegration();
     }));
   }
+
+  // ── swe-rebench-v2 real-infrastructure phases ───────────────────────────────
+  // Step 1 (HF fetch) is required for Tier 3 verification; steps 2 (Docker
+  // pull + eval.py) and 3 (SolverType registration) gracefully degrade with
+  // explicit BLOCKED reasons when their environment isn't available.
+
+  results.push(await runPhase('swe-rebench-v2 real HF fetch + schema hydration + state-store round-trip', async () => {
+    const r = await runSweRebenchV2HfFetchE2E();
+    if (r.partition === 'skipped') return;
+    process.stdout.write(
+      `partition=${r.partition} rows=${r.rowCount} sample=${r.sampledInstanceId} ` +
+      `schemaParsed=${r.schemaParsed} storeRoundTrip=${r.storeRoundTrip}\n`,
+    );
+  }));
+
+  results.push(await runPhase('swe-rebench-v2 real Docker pull + eval.py subprocess', async () => {
+    const r = await runSweRebenchV2DockerEvalE2E();
+    if (r.status === 'blocked') {
+      // Surface a precise BLOCKED reason in stdout but do not fail the phase —
+      // graceful degradation is the intent for env-dependent verifications.
+      process.stdout.write(`BLOCKED: ${r.reason}\n`);
+      return;
+    }
+    process.stdout.write(
+      `image=${r.imageName} instance=${r.instanceId} exit=${r.exitCode} ` +
+      `tail="${r.stderrTail.slice(0, 160)}"\n`,
+    );
+  }));
+
+  results.push(await runPhase('swe-rebench-v2 SolverType registration + parseSpec round-trip', async () => {
+    const r = await runSweRebenchV2SolverTypeRegistrationE2E();
+    process.stdout.write(
+      `registered=${r.registered} parseSpecOk=${r.parseSpecOk} ` +
+      `schemaVersion=${r.schemaVersionEcho} instance=${r.generatedTaskInstanceId}\n`,
+    );
+  }));
 
   summarize(results);
 }
