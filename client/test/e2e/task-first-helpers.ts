@@ -240,11 +240,22 @@ const TASK_COORDINATOR_E2E_ABI = [
         { name: 'status', type: 'uint8' },
         { name: 'finalization', type: 'uint8' },
         { name: 'verdictClaimCount', type: 'uint16' },
-        { name: 'unresolvedVerdictCount', type: 'uint16' },
         { name: 'validVerdictCount', type: 'uint16' },
         { name: 'passVerdictCount', type: 'uint16' },
       ],
     }],
+  },
+  {
+    name: 'AttemptFinalized',
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'attemptIndex', type: 'uint32', indexed: true },
+      { name: 'passed', type: 'bool', indexed: false },
+      { name: 'validVerdictCount', type: 'uint16', indexed: false },
+      { name: 'passVerdictCount', type: 'uint16', indexed: false },
+    ],
   },
   {
     name: 'getVerdictRequestRef',
@@ -2118,10 +2129,10 @@ export interface ForkSolverNetCreationResult {
    *     externalReadyAt
    *   - lazy-window-accepts-after-time-advance: claim succeeds once the
    *     fork's block.timestamp passes externalReadyAt
-   *   - unresolved-does-not-finalize: an Unresolved verdict does not emit
-   *     AttemptFinalized and leaves validVerdictCount=0
-   *   - unresolved-reopens-slot: a fresh evaluator can claim a new slot
-   *     (verdictIndex=1) after the prior Unresolved
+   *   - unresolved-finalizes-as-not-passed: an Unresolved verdict is
+   *     terminal — emits AttemptFinalized with passed=false (Stage 1.1
+   *     rollback: the prior slot-reopen mechanism was retired in favor of
+   *     the off-chain prefilter as the deferral mechanism)
    *   - prefilter-defers-on-unresolved: PreconditionResolverRegistry returns
    *     ok:false when the mocked oracle says 'unresolved'
    *   - prefilter-passes-on-resolved: ditto returns ok:true on 'resolved'
@@ -2129,8 +2140,7 @@ export interface ForkSolverNetCreationResult {
   evaluationPolicyAssertions: Array<
     | 'lazy-window-rejects-early'
     | 'lazy-window-accepts-after-time-advance'
-    | 'unresolved-does-not-finalize'
-    | 'unresolved-reopens-slot'
+    | 'unresolved-finalizes-as-not-passed'
     | 'prefilter-defers-on-unresolved'
     | 'prefilter-passes-on-resolved'
   >;
@@ -2298,22 +2308,15 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     assert(onDisk?.status === 'launched', 'launched record on disk is not status=launched');
 
     // Step 5 — bootstrap solver + evaluator operators (reuses existing
-    // fork loop's helper). A third operator (evaluator B) is bootstrapped
-    // here too so it shares timing/funding state with the other two; it's
-    // used by Stage 7 follow-up Phase F to prove an Unresolved verdict
-    // re-opens the slot for a different evaluator.
+    // fork loop's helper).
     const operator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
     operatorTmpDir = operator.tmpDir;
     const evaluatorOperator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
     evaluatorTmpDir = evaluatorOperator.tmpDir;
-    const evaluatorBOperator = await bootstrapBaseSepoliaForkOperator(anvil.rpcUrl);
-    const evaluatorBTmpDir = evaluatorBOperator.tmpDir;
     const operatorAccount = privateKeyToAccount(operator.agentPrivateKey);
     const operatorWallet = walletClient(anvil.rpcUrl, operatorAccount, baseSepolia);
     const evaluatorAccount = privateKeyToAccount(evaluatorOperator.agentPrivateKey);
     const evaluatorWallet = walletClient(anvil.rpcUrl, evaluatorAccount, baseSepolia);
-    const evaluatorBAccount = privateKeyToAccount(evaluatorBOperator.agentPrivateKey);
-    const evaluatorBWallet = walletClient(anvil.rpcUrl, evaluatorBAccount, baseSepolia);
 
     const isOperator = await publicClient.readContract({
       address: operator.mechAddress,
@@ -2657,8 +2660,6 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       operatorAccount.address,
       evaluatorOperator.safeAddress,
       evaluatorAccount.address,
-      evaluatorBOperator.safeAddress,
-      evaluatorBAccount.address,
     ]) {
       await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
         addr,
@@ -2831,18 +2832,13 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         maxClaimsPerOperator: 1,
         policyHook: zeroAddress,
         evaluationPolicy: {
-          // requiredVerdicts=2 leaves headroom for the Unresolved-then-Pass
-          // sequence we exercise below. The budget check in
-          // `JinnRouterV3.claimEvaluation` decrements
-          // `payment.verdictBudgetRemaining` by `deliveryRate` per claim
-          // and (today) does NOT refund on Unresolved — so 2 verdict
-          // budget slots are needed for the test to reach the
-          // coordinator's slot-reopen logic. This is independent of the
-          // chain-side invariant being verified (an Unresolved verdict
-          // does not seal the slot); the budget-refund-on-Unresolved
-          // gap is tracked separately.
-          requiredVerdicts: 2,
-          passThreshold: 2,
+          // Stage 1.1 (terminal Unresolved) — single evaluator slot is
+          // sufficient. The chain treats Unresolved as a terminal verdict
+          // alongside Pass/Fail/Invalid: it counts toward
+          // validVerdictCount and finalizes the attempt with
+          // passVerdictCount unchanged. No budget headroom is needed.
+          requiredVerdicts: 1,
+          passThreshold: 1,
           evaluationDuration: 1_200n,
           externalReadyAt: 0n,
           maxVerdictsPerEvaluator: 1,
@@ -2866,8 +2862,8 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
           deliveryRate,
           responseTimeout,
         ],
-        // maxClaims=1, requiredVerdicts=2 → required = rate * (1 + 1*2) = 3*rate.
-        value: deliveryRate * 3n,
+        // maxClaims=1, requiredVerdicts=1 → required = rate * (1 + 1*1) = 2*rate.
+        value: deliveryRate * 2n,
         chain: baseSepolia,
       });
       const unresolvedCreatedEvent = decodeFirstEvent(
@@ -2969,72 +2965,66 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
         'unresolved-verdict: claimDelivery returned no tx hash for verdictCode=4',
       );
       // Wait for the receipt so we can grep its logs for AttemptFinalized.
+      // Stage 1.1: VerdictCode.Unresolved is now a terminal verdict — it
+      // counts toward validVerdictCount and finalizes the attempt with
+      // passVerdictCount unchanged (so passed=false). The slot does NOT
+      // re-open; the launcher gets a fast not-passed signal.
       const evaluatorAReceipt = await publicClient.waitForTransactionReceipt({
         hash: evaluatorADeliveryReceipt,
       });
       const finalizedLogTopic = keccak256(
         toBytes('AttemptFinalized(uint256,uint32,bool,uint16,uint16)'),
       );
-      const sawFinalize = evaluatorAReceipt.logs.some(
+      const finalizedLog = evaluatorAReceipt.logs.find(
         (lg) => lg.address.toLowerCase() === deployment.coordinator.toLowerCase() &&
           lg.topics[0] === finalizedLogTopic,
       );
       assert(
-        !sawFinalize,
-        'unresolved-verdict: AttemptFinalized fired despite VerdictCode.Unresolved — slot incorrectly sealed',
+        finalizedLog !== undefined,
+        'unresolved-verdict: AttemptFinalized did NOT fire — terminal Unresolved is not finalizing as expected',
       );
-      evaluationPolicyAssertions.push('unresolved-does-not-finalize');
-
-      // Evaluator B (a fresh-bootstrapped third operator distinct from
-      // both the solver and evaluator A) claims a fresh slot. The gate
-      // `verdictClaimCount - unresolvedVerdictCount < requiredVerdicts`
-      // re-opens after the prior Unresolved.
-      const evaluatorBClaim = await claimEvaluation(
-        publicClient,
-        evaluatorBWallet,
-        evaluatorBOperator.safeAddress,
-        deployment.router,
-        unresolvedTaskId,
-        0,
-        evaluatorBOperator.mechAddress,
-        keccak256(toBytes(`evaluation-B:${unresolvedCid}:${unresolvedSolverRequestId}`)),
+      // Decode AttemptFinalized data: bool passed, uint16 validVerdictCount,
+      // uint16 passVerdictCount. The `passed` boolean is the lead arg in
+      // data; topics[1..3] carry indexed taskId + attemptIndex.
+      const decoded = decodeEventLog({
+        abi: TASK_COORDINATOR_E2E_ABI,
+        data: finalizedLog.data,
+        topics: finalizedLog.topics,
+      });
+      assert(
+        decoded.eventName === 'AttemptFinalized',
+        `unresolved-verdict: expected AttemptFinalized, decoded as ${decoded.eventName}`,
+      );
+      const finalizedArgs = decoded.args as unknown as {
+        passed: boolean;
+        validVerdictCount: number;
+        passVerdictCount: number;
+      };
+      assert(
+        finalizedArgs.passed === false,
+        `unresolved-verdict: expected passed=false, got ${finalizedArgs.passed}`,
       );
       assert(
-        evaluatorBClaim.attemptIndex === 0,
-        `unresolved-reopens: evaluator B claimed unexpected attemptIndex=${evaluatorBClaim.attemptIndex}`,
+        Number(finalizedArgs.validVerdictCount) === 1,
+        `unresolved-verdict: expected validVerdictCount=1, got ${finalizedArgs.validVerdictCount}`,
       );
-      // Read the AttemptRecord directly to verify the slot accounting:
-      //   verdictClaimCount = 2 (A + B both reserved slots)
-      //   unresolvedVerdictCount = 1 (A delivered Unresolved)
-      //   finalization = 1 (PendingEvaluation, not finalized)
-      // Together these prove evaluator B got verdictIndex=1 (the next
-      // monotonic slot) AND the gate
-      // `verdictClaimCount - unresolvedVerdictCount < requiredVerdicts`
-      // re-opened after the prior Unresolved.
-      const attemptAfterB = await publicClient.readContract({
+      assert(
+        Number(finalizedArgs.passVerdictCount) === 0,
+        `unresolved-verdict: expected passVerdictCount=0, got ${finalizedArgs.passVerdictCount}`,
+      );
+      // Cross-check via direct AttemptRecord read: finalization=Failed(3).
+      const attemptAfter = await publicClient.readContract({
         address: deployment.coordinator,
         abi: TASK_COORDINATOR_E2E_ABI,
         functionName: 'getAttempt',
         args: [BigInt(unresolvedTaskId), 0],
       });
-      const verdictClaimCount = Number(tupleField<bigint | number>(attemptAfterB, 'verdictClaimCount', 11));
-      const unresolvedVerdictCount = Number(
-        tupleField<bigint | number>(attemptAfterB, 'unresolvedVerdictCount', 12),
-      );
-      const finalization = Number(tupleField<bigint | number>(attemptAfterB, 'finalization', 10));
+      const finalization = Number(tupleField<bigint | number>(attemptAfter, 'finalization', 10));
       assert(
-        verdictClaimCount === 2,
-        `unresolved-reopens: expected verdictClaimCount=2, got ${verdictClaimCount}`,
+        finalization === 3,
+        `unresolved-verdict: expected finalization=Failed(3), got ${finalization}`,
       );
-      assert(
-        unresolvedVerdictCount === 1,
-        `unresolved-reopens: expected unresolvedVerdictCount=1, got ${unresolvedVerdictCount}`,
-      );
-      assert(
-        finalization === 1,
-        `unresolved-reopens: expected finalization=PendingEvaluation(1), got ${finalization}`,
-      );
-      evaluationPolicyAssertions.push('unresolved-reopens-slot');
+      evaluationPolicyAssertions.push('unresolved-finalizes-as-not-passed');
     }
 
     // Phase G — precondition prefilter (in-process). Verifies the
@@ -3158,9 +3148,6 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     }
     if (evaluatorTmpDir) {
       await rm(evaluatorTmpDir, { recursive: true, force: true });
-    }
-    if (typeof evaluatorBTmpDir === 'string') {
-      await rm(evaluatorBTmpDir, { recursive: true, force: true });
     }
     await rm(storeBaseDir, { recursive: true, force: true });
     await anvil.teardown();
