@@ -35,7 +35,23 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
+import {
+  createPublicClient,
+  http,
+  keccak256,
+  parseEther,
+  toBytes,
+  zeroAddress,
+  type Address,
+  type PublicClient,
+} from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { base } from 'viem/chains';
+import {
+  SweRebenchV2SolutionPayloadSchema,
+  SweRebenchV2TaskSchema,
+  SweRebenchV2VerdictPayloadSchema,
+} from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import {
   buildHistoricalPool,
   fetchHfSplit,
@@ -45,7 +61,19 @@ import {
 import { GeneratorStateStore } from '../../src/solver-types/_swe-rebench-v2-state.js';
 import { SOLVER_TYPES } from '../../src/solver-types/index.js';
 import { PythonEvalRunner } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
-import { assert } from './task-first-helpers.js';
+import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
+import { SignedEnvelopeSchema } from '../../src/types/envelope.js';
+import {
+  ANVIL_PRIVATE_KEYS,
+  assert,
+  compileContracts,
+  decodeFirstEvent,
+  deployTaskFirstStack,
+  signedExecutionEnvelope,
+  spawnPlainAnvil,
+  tupleField,
+  writeContractTx,
+} from './task-first-helpers.js';
 
 const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const FALLBACK_PARTITIONS = ['2026_02', '2026_01', '2025_12', '2025_11'];
@@ -449,5 +477,423 @@ export async function runSweRebenchV2SolverTypeRegistrationE2E(): Promise<Solver
     delete process.env['JINN_SWE_REBENCH_V2_LAUNCHER_ENABLED'];
     delete process.env['JINN_SWE_REBENCH_V2_STATE_DIR'];
     await rm(stateDir, { recursive: true, force: true });
+  }
+}
+
+// ── Phase 4: Anvil settlement with the swe-rebench-v2.v1 SolverType ──────────
+
+export interface SweRebenchV2AnvilSettlementResult {
+  taskId: string;
+  solverTypeDigestExpected: string;
+  solverTypeDigestOnchain: string;
+  solverTypePreserved: boolean;
+  solutionSchemaVersion: string;
+  verdictSchemaVersion: string;
+  verdictScore: number;
+  attemptStatus: number;
+  attemptFinalization: number;
+  submittedCount: number;
+  solutionBudgetConsumed: string;
+  verdictBudgetConsumed: string;
+}
+
+/**
+ * Settle a swe-rebench-v2.v1 Task end-to-end on a fresh local Anvil:
+ * createTask → claimTask → deliverToMarketplace (Solution) → claimSolutionDelivery
+ * → claimEvaluation → deliverToMarketplace (Verdict) → claimVerdictDelivery.
+ *
+ * The point of this phase (vs. `runAnvilTaskFirstFullLoop`, which uses
+ * prediction.v1) is to verify the swe-rebench-v2.v1 SolverType's distinctive
+ * fields round-trip on-chain unmodified:
+ *   • the on-chain Task's `solverTypeDigest` equals
+ *     keccak256(utf8('swe-rebench-v2.v1')) — i.e. it is NOT silently re-encoded
+ *     to prediction.v1 anywhere in the post path
+ *   • the Solution envelope's payload.schemaVersion is
+ *     'swe-rebench-v2-solution.v1' after the SignedEnvelope round-trip
+ *   • the Verdict envelope's payload.schemaVersion is
+ *     'swe-rebench-v2-verdict.v1' after the SignedEnvelope round-trip
+ *   • settlement records the verdict score (binary 0/1) on-chain and consumes
+ *     the operator's reward escrow exactly once per delivery
+ *
+ * Reuses the shared chain-setup helpers exported from `task-first-helpers.ts`
+ * (`spawnPlainAnvil`, `deployTaskFirstStack`, `signedExecutionEnvelope`, etc.)
+ * — we do NOT duplicate the chain bring-up. Stub Solver/Evaluator (no Docker).
+ */
+export async function runSweRebenchV2AnvilSettlementE2E(): Promise<SweRebenchV2AnvilSettlementResult> {
+  await compileContracts();
+
+  const anvil = await spawnPlainAnvil();
+  const accounts = ANVIL_PRIVATE_KEYS.map((key) => privateKeyToAccount(key));
+  const [creator, operatorA, operatorB, evaluator] = accounts;
+  assert(creator && operatorA && operatorB && evaluator, 'missing deterministic e2e accounts');
+  const rate = parseEther('0.01');
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(anvil.rpcUrl),
+  }) as unknown as PublicClient;
+
+  try {
+    for (const account of accounts) {
+      await anvilJsonRpc(anvil.rpcUrl, 'anvil_setBalance', [
+        account.address,
+        '0x56bc75e2d63100000', // 100 ETH
+      ]);
+    }
+
+    const { deployment, artifacts } = await deployTaskFirstStack(
+      publicClient,
+      anvil.rpcUrl,
+      creator,
+      operatorA,
+      operatorB,
+      evaluator,
+      rate,
+    );
+
+    // ── Build a real-shaped SweRebenchV2Task (independent of HF) ─────────────
+    const nowMs = Date.now();
+    const deadlineUnix = Math.floor(nowMs / 1000) + 7 * 24 * 60 * 60;
+    const sweTaskSpec = SweRebenchV2TaskSchema.parse({
+      schemaVersion: 'swe-rebench-v2.v1',
+      instance_id: 'unidata__netcdf-c-1925',
+      repo: 'unidata/netcdf-c',
+      base_commit: 'a'.repeat(40),
+      language: 'c',
+      problem_statement: 'Anvil settlement fixture: swe-rebench-v2 round-trip.',
+      interface: '',
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2026_02',
+      deadline_unix: deadlineUnix,
+      round_month: '2026-05',
+    });
+
+    const taskWindow = {
+      startTs: nowMs - 1_000,
+      endTs: nowMs + 7 * 24 * 60 * 60 * 1000,
+    };
+    const task = {
+      id: 'swe-rebench-v2-anvil-settle',
+      description: `swe-rebench-v2 anvil settlement: ${sweTaskSpec.instance_id}`,
+      solverType: 'swe-rebench-v2.v1' as const,
+      window: taskWindow,
+      spec: sweTaskSpec as unknown as Record<string, unknown>,
+    };
+
+    const taskCidDigest = keccak256(toBytes(JSON.stringify(task)));
+    const taskCid = `f01551220${taskCidDigest.slice(2)}`;
+    const expectedSolverTypeDigest = keccak256(toBytes('swe-rebench-v2.v1'));
+
+    const latestBlock = await publicClient.getBlock();
+    const nowSec = Number(latestBlock.timestamp);
+    const policy = {
+      claimWindowStart: BigInt(nowSec - 5),
+      claimWindowEnd: BigInt(nowSec + 300),
+      submissionDeadline: BigInt(nowSec + 900),
+      claimLeaseTtlSeconds: 120,
+      maxClaims: 3,
+      maxClaimsPerOperator: 1,
+      policyHook: zeroAddress,
+      evaluationPolicy: {
+        requiredVerdicts: 1,
+        passThreshold: 1,
+        evaluationDeadline: BigInt(nowSec + 1_020),
+        maxVerdictsPerEvaluator: 1,
+        disallowSolverSelfEvaluation: true,
+      },
+    };
+
+    // ── createTask carries solverTypeDigest = keccak256('swe-rebench-v2.v1') ──
+    const created = await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: creator,
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'createTask',
+      args: [taskCidDigest, expectedSolverTypeDigest, policy, rate, rate, 3600n],
+      value: rate * 6n,
+    });
+    const taskCreated = decodeFirstEvent(created.receipt, artifacts.router.abi, 'TaskCreated');
+    const taskId = String(taskCreated['taskId']);
+    assert(taskId === '1', `expected first taskId=1, got ${taskId}`);
+
+    // Read back the on-chain Task — verify solverTypeDigest survives the
+    // round-trip with NO downcast / re-encoding to prediction.v1.
+    const taskRecordPostCreate = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: artifacts.coordinator.abi,
+      functionName: 'getTask',
+      args: [BigInt(taskId)],
+    });
+    const onchainSolverTypeDigest = String(
+      tupleField<`0x${string}`>(taskRecordPostCreate, 'solverTypeDigest', 2),
+    ).toLowerCase();
+    const predictionDigest = keccak256(toBytes('prediction.v1')).toLowerCase();
+    assert(
+      onchainSolverTypeDigest === expectedSolverTypeDigest.toLowerCase(),
+      `on-chain solverTypeDigest=${onchainSolverTypeDigest} did not match keccak256('swe-rebench-v2.v1')=${expectedSolverTypeDigest.toLowerCase()}`,
+    );
+    assert(
+      onchainSolverTypeDigest !== predictionDigest,
+      `on-chain solverTypeDigest collided with prediction.v1 digest — Task was downcast`,
+    );
+
+    // ── Solver claim + Solution submission ───────────────────────────────────
+    const claimA = await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: operatorA,
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'claimTask',
+      args: [BigInt(taskId), deployment.mechA],
+    });
+    const attemptA = decodeFirstEvent(claimA.receipt, artifacts.router.abi, 'TaskAttemptCreated');
+    const requestIdA = String(attemptA['requestId']);
+    const attemptIndexA = Number(attemptA['attemptIndex']);
+    assert(attemptIndexA === 0, `first attempt index was ${attemptIndexA}`);
+
+    const solutionPayloadCanonical = SweRebenchV2SolutionPayloadSchema.parse({
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch:
+        '--- a/src/example.c\n+++ b/src/example.c\n@@ -1,1 +1,1 @@\n-/* before */\n+/* after */\n',
+      trajectory_cid: 'bafy-stub-swe-rebench-v2-trajectory',
+      cost: { totalUsd: 0.42, breakdown: { llm: 0.4, tools: 0.02 } },
+    });
+
+    const solutionEnvelope = await signedExecutionEnvelope({
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+      taskCid,
+      requestId: requestIdA,
+      onchainCreationTx: created.hash,
+      onchainCreationBlock: Number(created.receipt.blockNumber),
+      safeAddress: operatorA.address as Address,
+      privateKey: ANVIL_PRIVATE_KEYS[1],
+      window: taskWindow,
+      payload: solutionPayloadCanonical as unknown as Record<string, unknown>,
+      implName: 'swe-rebench-v2-solver-stub',
+    });
+    // Round-trip envelope through SignedEnvelopeSchema and re-validate the
+    // payload against the SDK Solution schema. This is the in-process
+    // evidence that the schemaVersion is preserved on the wire.
+    const reparsedSolution = SignedEnvelopeSchema.parse(JSON.parse(JSON.stringify(solutionEnvelope)));
+    assert(
+      reparsedSolution.solverType === 'swe-rebench-v2.v1',
+      `solution envelope solverType after round-trip: ${reparsedSolution.solverType}`,
+    );
+    const reparsedSolutionPayload = SweRebenchV2SolutionPayloadSchema.parse(reparsedSolution.payload);
+    const solutionSchemaVersion = reparsedSolutionPayload.schemaVersion;
+    assert(
+      solutionSchemaVersion === 'swe-rebench-v2-solution.v1',
+      `Solution payload schemaVersion after round-trip: ${solutionSchemaVersion}`,
+    );
+
+    await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: operatorA,
+      address: deployment.mechA,
+      abi: artifacts.mech.abi,
+      functionName: 'deliverToMarketplace',
+      args: [[requestIdA], [solutionEnvelope.signature.hash]],
+    });
+    await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: operatorA,
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'claimSolutionDelivery',
+      args: [requestIdA, solutionEnvelope.signature.hash],
+    });
+
+    // ── Evaluator claim + Verdict submission ─────────────────────────────────
+    const claimVerdict = await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: evaluator,
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'claimEvaluation',
+      args: [
+        BigInt(taskId),
+        attemptIndexA,
+        deployment.mechEvaluator,
+        keccak256(toBytes(`evaluation:${taskCid}:${requestIdA}`)),
+      ],
+    });
+    const verdictAttempt = decodeFirstEvent(
+      claimVerdict.receipt,
+      artifacts.router.abi,
+      'EvaluationAttemptCreated',
+    );
+    const verdictRequestId = String(verdictAttempt['requestId']);
+    const verdictIndex = Number(verdictAttempt['verdictIndex']);
+    assert(verdictIndex === 0, `first verdict index was ${verdictIndex}`);
+
+    const verdictPayloadCanonical = SweRebenchV2VerdictPayloadSchema.parse({
+      schemaVersion: 'swe-rebench-v2-verdict.v1',
+      score: 1,
+      passed_match: true,
+      test_log_cid: 'bafy-stub-swe-rebench-v2-test-log',
+      evaluator_cost_usd: 0.05,
+    });
+
+    const verdictEnvelope = await signedExecutionEnvelope({
+      solverType: 'swe-rebench-v2.v1',
+      role: 'verdict',
+      taskCid,
+      requestId: verdictRequestId,
+      onchainCreationTx: created.hash,
+      onchainCreationBlock: Number(created.receipt.blockNumber),
+      safeAddress: evaluator.address as Address,
+      privateKey: ANVIL_PRIVATE_KEYS[3],
+      window: taskWindow,
+      payload: verdictPayloadCanonical as unknown as Record<string, unknown>,
+      implName: 'swe-rebench-v2-evaluator-stub',
+    });
+    const reparsedVerdict = SignedEnvelopeSchema.parse(JSON.parse(JSON.stringify(verdictEnvelope)));
+    assert(
+      reparsedVerdict.solverType === 'swe-rebench-v2.v1',
+      `verdict envelope solverType after round-trip: ${reparsedVerdict.solverType}`,
+    );
+    const reparsedVerdictPayload = SweRebenchV2VerdictPayloadSchema.parse(reparsedVerdict.payload);
+    const verdictSchemaVersion = reparsedVerdictPayload.schemaVersion;
+    assert(
+      verdictSchemaVersion === 'swe-rebench-v2-verdict.v1',
+      `Verdict payload schemaVersion after round-trip: ${verdictSchemaVersion}`,
+    );
+
+    await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: evaluator,
+      address: deployment.mechEvaluator,
+      abi: artifacts.mech.abi,
+      functionName: 'deliverToMarketplace',
+      args: [[verdictRequestId], [verdictEnvelope.signature.hash]],
+    });
+    // claimVerdictDelivery records the binary score (1 = pass) on-chain.
+    await writeContractTx({
+      publicClient,
+      rpcUrl: anvil.rpcUrl,
+      account: evaluator,
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'claimVerdictDelivery',
+      args: [verdictRequestId, verdictEnvelope.signature.hash, reparsedVerdictPayload.score],
+    });
+
+    // ── Settlement assertions ────────────────────────────────────────────────
+    const verdictRef = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: artifacts.coordinator.abi,
+      functionName: 'getVerdictRequestRef',
+      args: [verdictRequestId],
+    });
+    assert(
+      String(tupleField<bigint>(verdictRef, 'taskId', 0)) === taskId,
+      'swe-rebench-v2 verdictRef taskId mismatch',
+    );
+    assert(
+      Number(tupleField<number | bigint>(verdictRef, 'attemptIndex', 1)) === attemptIndexA,
+      'swe-rebench-v2 verdictRef attemptIndex mismatch',
+    );
+    assert(
+      Number(tupleField<number | bigint>(verdictRef, 'verdictIndex', 2)) === verdictIndex,
+      'swe-rebench-v2 verdictRef verdictIndex mismatch',
+    );
+    assert(
+      tupleField<boolean>(verdictRef, 'exists', 3) === true,
+      'swe-rebench-v2 verdictRef missing',
+    );
+
+    const attemptRecord = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: artifacts.coordinator.abi,
+      functionName: 'getAttempt',
+      args: [BigInt(taskId), attemptIndexA],
+    });
+    const attemptStatus = Number(tupleField<bigint>(attemptRecord, 'status', 9));
+    const attemptFinalization = Number(tupleField<bigint>(attemptRecord, 'finalization', 10));
+    assert(
+      String(tupleField<string>(attemptRecord, 'requestId', 3)).toLowerCase() ===
+        requestIdA.toLowerCase(),
+      'swe-rebench-v2 attempt requestId mismatch',
+    );
+    assert(
+      String(tupleField<string>(attemptRecord, 'solutionCidDigest', 4)).toLowerCase() ===
+        solutionEnvelope.signature.hash.toLowerCase(),
+      'swe-rebench-v2 submission evidence hash mismatch',
+    );
+    assert(attemptStatus === 3, `swe-rebench-v2 attempt was not submitted (status=${attemptStatus})`);
+    assert(
+      attemptFinalization === 2,
+      `swe-rebench-v2 attempt was not finalized as passed (finalization=${attemptFinalization})`,
+    );
+
+    const taskRecord = await publicClient.readContract({
+      address: deployment.coordinator,
+      abi: artifacts.coordinator.abi,
+      functionName: 'getTask',
+      args: [BigInt(taskId)],
+    });
+    const submittedCount = Number(tupleField<bigint>(taskRecord, 'submittedCount', 6));
+    assert(
+      submittedCount === 1,
+      `swe-rebench-v2 submittedCount=${submittedCount}, expected 1`,
+    );
+
+    // The on-chain solverTypeDigest must STILL be the swe-rebench-v2.v1 digest
+    // after settlement (defence-in-depth — earlier we asserted right after
+    // createTask; this re-asserts it didn't get rewritten by any settlement
+    // path that we don't expect to touch it).
+    const onchainSolverTypeDigestAfter = String(
+      tupleField<`0x${string}`>(taskRecord, 'solverTypeDigest', 2),
+    ).toLowerCase();
+    assert(
+      onchainSolverTypeDigestAfter === expectedSolverTypeDigest.toLowerCase(),
+      `solverTypeDigest after settlement=${onchainSolverTypeDigestAfter}, expected ${expectedSolverTypeDigest.toLowerCase()}`,
+    );
+
+    // Reward escrow consumption: solution + verdict each burn `rate` from
+    // their respective remaining budgets. Initial deposit was `rate * 6n`,
+    // split equally (rate * 3 for solutions, rate * 3 for verdicts). After
+    // one delivery each, remaining = rate * 2.
+    const payment = await publicClient.readContract({
+      address: deployment.router,
+      abi: artifacts.router.abi,
+      functionName: 'taskPayments',
+      args: [BigInt(taskId)],
+    });
+    const solutionRemaining = tupleField<bigint>(payment, 'solutionBudgetRemaining', 6);
+    const verdictRemaining = tupleField<bigint>(payment, 'verdictBudgetRemaining', 7);
+    const expectedRemaining = rate * 2n;
+    assert(
+      solutionRemaining === expectedRemaining,
+      `solutionBudgetRemaining=${solutionRemaining}, expected ${expectedRemaining}`,
+    );
+    assert(
+      verdictRemaining === expectedRemaining,
+      `verdictBudgetRemaining=${verdictRemaining}, expected ${expectedRemaining}`,
+    );
+
+    return {
+      taskId,
+      solverTypeDigestExpected: expectedSolverTypeDigest.toLowerCase(),
+      solverTypeDigestOnchain: onchainSolverTypeDigest,
+      solverTypePreserved: onchainSolverTypeDigest === expectedSolverTypeDigest.toLowerCase(),
+      solutionSchemaVersion,
+      verdictSchemaVersion,
+      verdictScore: reparsedVerdictPayload.score,
+      attemptStatus,
+      attemptFinalization,
+      submittedCount,
+      solutionBudgetConsumed: (rate * 3n - solutionRemaining).toString(),
+      verdictBudgetConsumed: (rate * 3n - verdictRemaining).toString(),
+    };
+  } finally {
+    await anvil.teardown();
   }
 }

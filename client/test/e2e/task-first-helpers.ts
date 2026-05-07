@@ -88,14 +88,14 @@ const BASE_SEPOLIA_E2E_FUNDING_WEI = 100n * 10n ** 18n;
 const BASE_SEPOLIA_E2E_PASSWORD = 'jinn-task-first-fork-e2e';
 const BASE_SEPOLIA_DISTRIBUTOR_STAKE_FLOAT = 1_000n * 10n ** 18n;
 
-const ANVIL_PRIVATE_KEYS = [
+export const ANVIL_PRIVATE_KEYS = [
   '0x0000000000000000000000000000000000000000000000000000000000000001',
   '0x0000000000000000000000000000000000000000000000000000000000000002',
   '0x0000000000000000000000000000000000000000000000000000000000000003',
   '0x0000000000000000000000000000000000000000000000000000000000000004',
 ] as const satisfies readonly Hex[];
 
-const JINN_ROUTER_V3_E2E_ABI = [
+export const JINN_ROUTER_V3_E2E_ABI = [
   ...JINN_ROUTER_ABI,
   {
     name: 'taskCoordinator',
@@ -145,7 +145,7 @@ const JINN_ROUTER_V3_E2E_ABI = [
   },
 ] as const satisfies Abi;
 
-const TASK_COORDINATOR_E2E_ABI = [
+export const TASK_COORDINATOR_E2E_ABI = [
   {
     name: 'authorizedRouter',
     type: 'function',
@@ -827,7 +827,7 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
   }
 }
 
-interface ContractArtifact {
+export interface ContractArtifact {
   abi: Abi;
   bytecode: Hex;
 }
@@ -838,12 +838,12 @@ interface DeploymentArtifact {
   config?: Record<string, unknown>;
 }
 
-interface AnvilHarness {
+export interface AnvilHarness {
   rpcUrl: string;
   teardown(): Promise<void>;
 }
 
-interface Deployment {
+export interface Deployment {
   coordinator: Address;
   router: Address;
   marketplace: Address;
@@ -862,7 +862,7 @@ export interface AnvilTaskFirstFullLoopResult {
   refundedUnusedBudget: boolean;
 }
 
-async function spawnPlainAnvil(): Promise<AnvilHarness> {
+export async function spawnPlainAnvil(): Promise<AnvilHarness> {
   const anvilCheck = spawnSync('anvil', ['--version'], { stdio: 'ignore' });
   if (anvilCheck.status !== 0) {
     throw new Error('anvil not in PATH; install Foundry to run the Task-first Anvil e2e');
@@ -925,7 +925,7 @@ async function runChild(command: string, args: string[], options: { cwd: string;
   });
 }
 
-async function compileContracts(): Promise<void> {
+export async function compileContracts(): Promise<void> {
   await runChild('yarn', ['compile'], { cwd: CONTRACTS_DIR });
 }
 
@@ -988,7 +988,7 @@ async function deployContract(
   return getAddress(receipt.contractAddress);
 }
 
-async function writeContractTx(params: {
+export async function writeContractTx(params: {
   publicClient: PublicClient;
   rpcUrl: string;
   account: PrivateKeyAccount;
@@ -1014,7 +1014,7 @@ async function writeContractTx(params: {
   return { hash, receipt };
 }
 
-function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: string): Record<string, unknown> {
+export function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: string): Record<string, unknown> {
   for (const log of receipt.logs as Log[]) {
     try {
       const decoded = decodeEventLog({ abi, data: log.data, topics: log.topics });
@@ -1028,13 +1028,13 @@ function decodeFirstEvent(receipt: TransactionReceipt, abi: Abi, eventName: stri
   throw new Error(`missing ${eventName} event in tx ${receipt.transactionHash}`);
 }
 
-function tupleField<T>(value: unknown, key: string, index: number): T {
+export function tupleField<T>(value: unknown, key: string, index: number): T {
   const record = value as Record<string, unknown>;
   if (record[key] !== undefined) return record[key] as T;
   return (value as readonly unknown[])[index] as T;
 }
 
-async function deployTaskFirstStack(
+export async function deployTaskFirstStack(
   publicClient: PublicClient,
   rpcUrl: string,
   owner: PrivateKeyAccount,
@@ -1118,7 +1118,7 @@ async function deployTaskFirstStack(
   };
 }
 
-async function signedExecutionEnvelope(params: {
+export async function signedExecutionEnvelope(params: {
   solverType: string;
   role: 'restoration' | 'verdict';
   taskCid: string;
@@ -1129,6 +1129,7 @@ async function signedExecutionEnvelope(params: {
   privateKey: Hex;
   window: { startTs: number; endTs: number };
   payload: Record<string, unknown>;
+  implName?: string;
 }): Promise<SignedEnvelope> {
   const account = privateKeyToAccount(params.privateKey);
   const unsigned = {
@@ -1148,7 +1149,9 @@ async function signedExecutionEnvelope(params: {
     },
     window: params.window,
     executor: {
-      implName: params.role === 'verdict' ? 'prediction-v1-evaluator' : 'prediction-v1-e2e-harness',
+      implName:
+        params.implName ??
+        (params.role === 'verdict' ? 'prediction-v1-evaluator' : 'prediction-v1-e2e-harness'),
       implVersion: '1.0.0',
       clientGitSha: 'dev-e2e',
       codeDigest: `sha256:${'11'.repeat(32)}`,

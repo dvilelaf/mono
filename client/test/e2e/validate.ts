@@ -21,8 +21,9 @@ import {
   summarize,
 } from './task-first-helpers.js';
 import {
-  runSweRebenchV2HfFetchE2E,
+  runSweRebenchV2AnvilSettlementE2E,
   runSweRebenchV2DockerEvalE2E,
+  runSweRebenchV2HfFetchE2E,
   runSweRebenchV2SolverTypeRegistrationE2E,
 } from './swe-rebench-v2-real-infra.js';
 
@@ -127,6 +128,22 @@ async function main(): Promise<void> {
     process.stdout.write(
       `registered=${r.registered} parseSpecOk=${r.parseSpecOk} ` +
       `schemaVersion=${r.schemaVersionEcho} instance=${r.generatedTaskInstanceId}\n`,
+    );
+  }));
+
+  // Verify swe-rebench-v2.v1 round-trips cleanly through the on-chain Task
+  // lifecycle: solverTypeDigest is preserved (no implicit downcast to
+  // prediction.v1), Solution/Verdict envelope schemaVersions survive the
+  // SignedEnvelope round-trip, and settlement consumes operator escrow.
+  // Plain Anvil — no external RPC needed.
+  results.push(await runPhase('swe-rebench-v2 Anvil settlement (Task → claim → Solution → Verdict → settle)', async () => {
+    const r = await runSweRebenchV2AnvilSettlementE2E();
+    process.stdout.write(
+      `taskId=${r.taskId} solverTypePreserved=${r.solverTypePreserved} ` +
+      `solutionSchema=${r.solutionSchemaVersion} verdictSchema=${r.verdictSchemaVersion} ` +
+      `verdictScore=${r.verdictScore} attemptFinalization=${r.attemptFinalization} ` +
+      `submitted=${r.submittedCount} solutionBudgetConsumed=${r.solutionBudgetConsumed} ` +
+      `verdictBudgetConsumed=${r.verdictBudgetConsumed}\n`,
     );
   }));
 
