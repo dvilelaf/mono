@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -550,7 +551,37 @@ describe('harvestOutput — generic typed-payload path', () => {
     expect(swArtifact?.artifactType).toBe('swe-rebench-v2_v1_verdict');
   });
 
-  it('falls through to legacy portfolio shape when no typed payload was submitted', () => {
+  it('materializes a swe-rebench restoration payload from repo diff when phase summaries are absent', () => {
+    rmSync(workingDir, { recursive: true, force: true });
+    mkdirSync(workingDir, { recursive: true });
+    const repoDir = join(workingDir, 'repo');
+    mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoDir });
+    writeFileSync(join(repoDir, 'example.py'), 'old = True\n');
+    execFileSync('git', ['add', 'example.py'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-m', 'base'], { cwd: repoDir });
+    writeFileSync(join(repoDir, 'example.py'), 'old = False\n');
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+    });
+    expect((out.solutionPayload as Record<string, unknown>).patch).toContain('old = True');
+    expect((out.solutionPayload as Record<string, unknown>).patch).toContain('old = False');
+    const payloadPath = join(workingDir, '.execute', 'solution-payload.json');
+    expect(existsSync(payloadPath)).toBe(true);
+    expect(JSON.parse(readFileSync(payloadPath, 'utf8'))).toEqual(out.solutionPayload);
+  });
+
+  it('falls through to phase-artifact-only shape when no typed payload was submitted', () => {
     // No .execute/solution-payload.json written.
     const out = harvestOutput(workingDir, undefined, {
       id: 'task-1',
