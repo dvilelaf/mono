@@ -378,7 +378,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
-  it('uses a full delivery-log scan by default for delayed SolutionDeliveryClaimed events', async () => {
+  it('bounds the default delivery-log scan around delayed SolutionDeliveryClaimed events', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {
       decodeSolutionDeliveryClaimedLogs,
@@ -394,16 +394,16 @@ describe('MechAdapter TaskCoordinator flow', () => {
       requestId: REQUEST_ID,
       operator: solverSafe,
       transactionHash: TX_HASH,
-      blockNumber: 25_000,
+      blockNumber: 125_000,
     }]);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
-    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(25_001n);
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(125_001n);
     (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
-    (adapter as any).requestBlockCursor = 24_999n;
+    (adapter as any).requestBlockCursor = 124_999n;
 
     const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
     const { value } = await gen.next();
@@ -413,8 +413,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
       expect.anything(),
       solverMech,
       REQUEST_ID,
-      0n,
       25_000n,
+      125_000n,
     );
 
     await adapter.stop();

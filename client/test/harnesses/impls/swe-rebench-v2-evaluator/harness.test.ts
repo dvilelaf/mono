@@ -154,7 +154,7 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
     const r = await h.isReady();
     expect(r.ready).toBe(false);
-    expect(r.nextStep?.cli).toBe('jinn solver-nets enable swe-rebench-v2-evaluator');
+    expect(r.nextStep?.cli).toBe('jinn harnesses enable swe-rebench-v2-evaluator');
   });
 
   it('reports not-enabled when implStateDir not configured', async () => {
@@ -310,6 +310,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     return {
       fetchTaskRow: vi.fn().mockResolvedValue({
         instance_id: 'unidata__netcdf-c-1925',
+        repo: 'Unidata/netcdf-c',
         image_name,
         FAIL_TO_PASS: ['test_a'],
         PASS_TO_PASS: ['test_b'],

@@ -73,12 +73,12 @@ import type {
   PendingGeneratorSpawn,
   SolverNetCatalogCache,
 } from '../solvernets/daemon-init.js';
+import { resolveContractFromSolverNetId } from '../solvernets/launched-record-dispatcher.js';
 import type {
   SignerWithAgentEoa,
   SolverNetManifestSummary,
   SolverNetRegistryClient,
 } from '../solvernets/registry-client.js';
-import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 
 /**
  * Optional Task-14 deps that turn on the launch + lifecycle + generator-config
@@ -253,7 +253,7 @@ const LifecycleBodySchema = z
  * `.strict()` rejects unknown keys so a typo in the SPA surfaces as 400
  * rather than silently dropping the field.
  */
-const GeneratorConfigPatchSchema = z
+const PredictionV1GeneratorConfigPatchSchema = z
   .object({
     cadenceMs: z.number().int().nonnegative().optional(),
     maxNewRoundsPerPoll: z.number().int().nonnegative().optional(),
@@ -270,6 +270,38 @@ const GeneratorConfigPatchSchema = z
     maxOrderbookAgeSeconds: z.number().int().nonnegative().optional(),
   })
   .strict();
+
+const SweRebenchV2GeneratorConfigPatchSchema = z
+  .object({
+    N_target_successes: z.number().int().positive().optional(),
+    N_max_postings_per_task: z.number().int().positive().optional(),
+    cooldown_ms: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.N_target_successes !== undefined &&
+      value.N_max_postings_per_task !== undefined &&
+      value.N_max_postings_per_task < value.N_target_successes
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['N_max_postings_per_task'],
+        message: 'must be >= N_target_successes',
+      });
+    }
+  });
+
+function parseGeneratorConfigPatchForRecord(
+  record: LaunchedSolverNetRecord,
+  raw: unknown,
+): z.SafeParseReturnType<unknown, Record<string, unknown>> {
+  const contract = resolveContractFromSolverNetId(record.solverNetId);
+  if (contract?.id === 'swe-rebench-v2' && contract.version === 'v1') {
+    return SweRebenchV2GeneratorConfigPatchSchema.safeParse(raw);
+  }
+  return PredictionV1GeneratorConfigPatchSchema.safeParse(raw);
+}
 
 // ── Launch helpers ──────────────────────────────────────────────────────────
 
@@ -1066,19 +1098,6 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'invalid_body', message: 'expected JSON body' }, 400);
     }
 
-    const parsed = GeneratorConfigPatchSchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json(
-        {
-          error: 'invalid_body',
-          message: parsed.error.issues
-            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
-            .join('; '),
-        },
-        400,
-      );
-    }
-
     let record: LaunchedSolverNetRecord | null;
     try {
       record = await store.loadRecord(id);
@@ -1095,10 +1114,23 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
 
+    const parsed = parseGeneratorConfigPatchForRecord(record, raw);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: 'invalid_body',
+          message: parsed.error.issues
+            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
+            .join('; '),
+        },
+        400,
+      );
+    }
+
     // Patch semantics: merge the provided fields over the existing config.
     // Operators editing one field shouldn't have to re-send the rest.
-    const nextConfig: PredictionV1GeneratorRuntimeConfig = {
-      ...((record.generatorConfig as PredictionV1GeneratorRuntimeConfig | undefined) ?? {}),
+    const nextConfig: Record<string, unknown> = {
+      ...(record.generatorConfig ?? {}),
       ...parsed.data,
     };
 
@@ -1107,7 +1139,7 @@ export function registerSolverNetsEndpoints(
     // for storage.
     const updatedRecord: LaunchedSolverNetRecord = {
       ...record,
-      generatorConfig: nextConfig as Record<string, unknown>,
+      generatorConfig: nextConfig,
     };
     const validated = LaunchedSolverNetRecordSchema.safeParse(updatedRecord);
     if (!validated.success) {

@@ -64,7 +64,7 @@
 12. The evaluator harness (`SweRebenchV2EvaluatorHarness`) ships in `@jinn-network/client` and is registered in `buildHarnesses()`. Operators who want to join `roles: ['evaluator']` for swe-rebench-v2 must first run:
 
     ```bash
-    jinn solver-nets enable swe-rebench-v2-evaluator
+    jinn harnesses enable swe-rebench-v2-evaluator
     ```
 
     The enable flow validates that Docker is reachable (`docker info`) and `python3` is on PATH, then clones `https://github.com/SWE-rebench/SWE-rebench-V2.git` into `<engine.implStateDirRoot>/swe-rebench-v2-evaluator/upstream/`. The marker file at `<engine.implStateDirRoot>/swe-rebench-v2-evaluator/state.json` records `{ enabled: true, upstreamRepoDir }`.

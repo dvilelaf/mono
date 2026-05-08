@@ -505,6 +505,27 @@ describe('harvestOutput — generic typed-payload path', () => {
     });
   });
 
+  it('does not fail typed-payload harvest when learner execute summary is missing', () => {
+    rmSync(join(workingDir, '.execute', 'summary.json'), { force: true });
+    const swePayload = {
+      schemaVersion: 'swe-rebench-v2-solution.v1',
+      patch: 'diff --git a/foo b/foo\n@@ -1 +1 @@\n-old\n+new\n',
+    };
+    writeTypedPayload(swePayload);
+
+    const out = harvestOutput(workingDir, undefined, {
+      id: 'task-1',
+      description: 'd',
+      solverType: 'swe-rebench-v2.v1',
+      role: 'restoration',
+    } as never);
+
+    expect(out.solutionPayload).toEqual(swePayload);
+    expect(out.gating).toMatchObject({
+      phasesCompleted: expect.arrayContaining(['execute']),
+    });
+  });
+
   it('reads typed payload as verdictPayload for evaluation role', () => {
     const verdict = {
       schemaVersion: 'swe-rebench-v2-verdict.v1',

@@ -594,6 +594,7 @@ export class TaskEngine {
       task.solverType ?? undefined,
       task.taskRole ?? 'restoration',
       task.task as Task | undefined,
+      task.requestId,
     );
     if (reason) {
       this.persistence.markFailed(task.requestId, reason);
@@ -701,10 +702,16 @@ export class TaskEngine {
     }
     const parsed = sdkContract.schemas.task.zod.safeParse(task);
     if (!parsed.success) {
-      const issues = parsed.error.issues
+      const parsedSpec = task.spec !== undefined
+        ? sdkContract.schemas.task.zod.safeParse(task.spec)
+        : undefined;
+      if (parsedSpec?.success) return null;
+
+      const issues = (parsedSpec ?? parsed).error.issues
         .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
         .join('; ');
-      return `${ref.id}.${ref.version} task failed validation: ${issues}`;
+      const scope = parsedSpec ? 'task.spec' : 'task';
+      return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
     }
     return null;
   }
@@ -789,6 +796,7 @@ export class TaskEngine {
     solverType: string | undefined,
     role: 'restoration' | 'evaluation',
     task?: Task,
+    currentRequestId?: string,
   ): Promise<string | null> {
     // Per-launch operator-eligibility filter (Task 28 of
     // `spec/2026-05-05-solvernet-creation-and-launch.md` §14). When the
@@ -810,6 +818,13 @@ export class TaskEngine {
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
     // rows that pre-date `contractId`. See `routingKeyForTask`.
     const routingKey = this.routingKeyForTask(task, solverType);
+    if (routingKey && this.persistence.hasInFlightFor({
+      solverType: routingKey,
+      taskRole: role,
+      excludeRequestId: currentRequestId,
+    })) {
+      return `another ${routingKey}/${role} task is already in flight`;
+    }
     const solverNet = this.solverNetRegistry && routingKey
       ? this.solverNetRegistry.forSolverType(routingKey, role)
       : undefined;

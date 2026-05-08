@@ -17,7 +17,7 @@ import { PredictionApyV0Evaluator } from './prediction-apy-v0-evaluator/index.js
 import {
   ClaudeCodeLearnerImpl,
 } from './claude-code-learner/index.js';
-import { ClaudeCodeHarnessAdapter } from './claude-code-learner/index.js';
+import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './claude-code-learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 
 /**
@@ -58,6 +58,10 @@ export interface HarnessEnv {
    * and artifact acquisition tools.
    */
   corpusEnv?: RunnerContext['corpusEnv'];
+  /** Path to the `codex` executable. Defaults to `codex`. */
+  codexPath?: string;
+  /** Default Codex model when a SolverNet does not specify one. */
+  codexModel?: string;
   /**
    * Root for impl-scoped state dirs (e.g. hyperliquid api-wallet). Defaults under
    * `~/.jinn-client/engine/impl-state` when unset — wired from `config.engine` in main.
@@ -207,6 +211,22 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   });
   out.push(new ClaudeCodeLearnerImpl({
     adapter: learnerAdapter,
+  }));
+
+  // Codex-backed peer Harness. It supports the same restoration surface as
+  // claude-code-learner, but is selected only by explicit SolverNet harness
+  // config so historical first-match fallback stays unchanged.
+  const codexLearnerAdapter = new CodexCodeHarnessAdapter({
+    codexPath: env.codexPath,
+    codexModel: env.codexModel,
+    storePath: env.storePath,
+    daemonApiUrl: env.daemonApiUrl,
+    daemonApiToken: env.daemonApiToken,
+    corpusEnv: env.corpusEnv,
+  });
+  out.push(new ClaudeCodeLearnerImpl({
+    name: 'codex-code-learner',
+    adapter: codexLearnerAdapter,
   }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {

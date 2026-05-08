@@ -63,6 +63,7 @@ interface PendingEvaluationSolution {
 
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
+const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
 const DEFAULT_MECH_CLAIM_POLICY: TaskClaimPolicy = {
   mode: 'exclusive',
   maxClaims: 1,
@@ -453,12 +454,10 @@ export class MechAdapter implements ExecutionAdapter {
     const toBlock = solution.blockNumber != null
       ? BigInt(solution.blockNumber)
       : await this.publicClient.getBlockNumber();
-    const configuredLookback = this.config.mechDeliverBackfillLookbackBlocks;
-    const fromBlock = configuredLookback == null
-      ? 0n
-      : toBlock > configuredLookback
-      ? toBlock - configuredLookback
-      : 0n;
+    const lookback =
+      this.config.mechDeliverBackfillLookbackBlocks ??
+      DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS;
+    const fromBlock = toBlock > lookback ? toBlock - lookback : 0n;
     const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
       this.publicClient,
       deliveryMech,
@@ -479,10 +478,6 @@ export class MechAdapter implements ExecutionAdapter {
   private async evaluationAnnouncementForSolution(
     solution: PendingEvaluationSolution,
   ): Promise<TaskAnnouncement | undefined> {
-    if (solution.operator.toLowerCase() === this.config.safeAddress.toLowerCase()) {
-      return undefined;
-    }
-
     const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
     const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
@@ -743,7 +738,13 @@ export class MechAdapter implements ExecutionAdapter {
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
     // Strip signature to recompute the hash over the unsigned body.
-    const { signature, ...unsignedBody } = parsed;
+    //
+    // Important: compute over the fetched wire object, not over the parsed
+    // schema result. The schema normalizes some nested objects and may strip
+    // extension metadata that was present when the envelope was signed.
+    const rawSigned = rawEnvelope as Record<string, unknown>;
+    const { signature: _rawSignature, ...unsignedBody } = rawSigned;
+    const signature = parsed.signature;
     const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
     const recomputed = keccak256(jcsBytes);
     if (recomputed !== signature.hash) {

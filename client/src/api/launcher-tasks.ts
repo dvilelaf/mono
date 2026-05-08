@@ -40,6 +40,7 @@ export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
   solverNet: string;
+  solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
   claims: { current: number; max: number };
@@ -124,6 +125,7 @@ function mapRecordToEntry(
   const solverNet =
     record.solverNet
     ?? (record.solverType ? solverTypeIndex.get(record.solverType) : undefined)
+    ?? record.solverType
     ?? 'unknown';
   const claimsCurrent = record.claims?.current ?? 0;
   const claimsMax = record.claims?.max ?? DEFAULT_CLAIMS_MAX;
@@ -133,6 +135,7 @@ function mapRecordToEntry(
     taskId: record.taskId,
     taskCid: record.taskCid,
     solverNet,
+    ...(record.solverType ? { solverType: record.solverType } : {}),
     postedAt: record.postedAt,
     state: record.state ?? 'open',
     claims: { current: claimsCurrent, max: claimsMax },

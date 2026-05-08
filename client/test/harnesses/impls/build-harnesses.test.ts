@@ -56,4 +56,14 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     const b = buildHarnesses({ ...ENV, externalImpls: [], disabledNames: [] });
     expect(a.length).toBe(b.length);
   });
+
+  it('registers codex-code-learner as an explicit peer without moving the default learner', () => {
+    const impls = buildHarnesses({ ...ENV });
+    const learnerIndex = impls.findIndex((impl) => impl.name === 'claude-code-learner');
+    const codexIndex = impls.findIndex((impl) => impl.name === 'codex-code-learner');
+
+    expect(learnerIndex).toBeGreaterThanOrEqual(0);
+    expect(codexIndex).toBeGreaterThan(learnerIndex);
+    expect(impls[codexIndex]!.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
+  });
 });

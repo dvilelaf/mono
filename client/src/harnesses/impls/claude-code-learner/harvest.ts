@@ -345,12 +345,22 @@ function collectLearnerArtifacts(workingDir: string): OutputArtifact[] {
 export function harvestOutput(workingDir: string, phaseRange?: string, task?: Task): Solution {
   const range = resolvePhaseRange(phaseRange);
   const requiredPhases = new Set<Phase>(REQUIRED_PHASES[range]);
+  const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
+  const typedPayload = safeReadJson(typedPayloadPath);
 
-  // Hard-fail on missing or corrupt primary artifacts for all required phases.
+  // Hard-fail on missing or corrupt primary artifacts for all required phases
+  // unless a typed SolverNet payload is already present. In the typed-payload
+  // path, phase artifacts are useful learner telemetry, but the payload is the
+  // delivery contract the engine needs to package and settle.
   const validated = new Map<Phase, Record<string, unknown>>();
   for (const phase of REQUIRED_PHASES[range]) {
     const path = join(workingDir, `.${phase}`, PHASE_PRIMARY_ARTIFACT[phase]);
-    validated.set(phase, requiredReadJson(path));
+    if (!typedPayload) {
+      validated.set(phase, requiredReadJson(path));
+      continue;
+    }
+    const artifact = safeReadJson(path);
+    if (artifact) validated.set(phase, artifact);
   }
 
   const phasesCompleted = detectCompletedPhases(workingDir);
@@ -447,8 +457,6 @@ export function harvestOutput(workingDir: string, phaseRange?: string, task?: Ta
   // `submit_typed_payload` which validates against the active SolverNet's
   // schema and persists to .execute/solution-payload.json. Harvest reads it
   // back generically — no per-solverType branching here.
-  const typedPayloadPath = join(workingDir, '.execute', 'solution-payload.json');
-  const typedPayload = safeReadJson(typedPayloadPath);
   const informationalEntries: Record<string, unknown> = {};
   if (learnerArtifacts.length > 0) {
     informationalEntries['learnerFeedbackArtifacts'] = learnerArtifacts.map((artifact) => ({

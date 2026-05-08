@@ -1411,7 +1411,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
-  });
+  }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
 
@@ -1882,38 +1882,26 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     generator: import('./tasks/sources.js').TaskGenerator;
   }> = [];
   if (solverNetSubsystem && !autoTasksDisabled) {
-    const { makePredictionV1GeneratorForLaunchedRecord } = await import(
-      './solver-types/prediction-v1-auto.js'
+    const { wireLaunchedRecordGenerators } = await import(
+      './solvernets/launched-record-dispatcher.js'
     );
-    for (const pending of solverNetSubsystem.pendingGenerators) {
-      // Static deps (agent identity + Polymarket transport) are construction-
-      // time-fixed; runtime-editable settings flow through `configRef`.
-      const generator = makePredictionV1GeneratorForLaunchedRecord({
-        recordRef: pending.recordRef,
-        configRef: pending.configRef,
-        staticConfig: {
-          agentEoa: agentEoaAddress,
-          safeAddress,
-          agentPrivateKey,
-        },
-      });
-      launchedRecordGenerators.push({ solverType: 'prediction.v1', generator });
-      // First launched prediction.v1 generator becomes the legacy
-      // `predictionGeneratorRef` source for the launcher status endpoint
-      // (kept thin; multi-record launcher status lives in the launched-record
-      // surface — see spec §11/Task 14).
-      if (
-        !predictionGeneratorRef &&
-        typeof generator === 'function' &&
-        typeof (generator as { getState?: unknown }).getState === 'function'
-      ) {
-        predictionGeneratorRef =
-          generator as unknown as typeof predictionGeneratorRef;
-      }
-      console.log(
-        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
-          `(prediction.v1, status=${pending.record.status})`,
-      );
+    const wired = await wireLaunchedRecordGenerators({
+      pendingGenerators: solverNetSubsystem.pendingGenerators,
+      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
+      staticConfig: {
+        agentEoa: agentEoaAddress,
+        safeAddress,
+        agentPrivateKey,
+      },
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+    });
+    launchedRecordGenerators.push(...wired.generators);
+    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
+      predictionGeneratorRef =
+        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
     }
   }
   if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {

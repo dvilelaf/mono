@@ -145,6 +145,7 @@ export interface LauncherTaskEntry {
   taskId: string;
   taskCid: string;
   solverNet: string;
+  solverType?: string;
   postedAt: string;
   state: LauncherTaskState;
   claims: { current: number; max: number };
