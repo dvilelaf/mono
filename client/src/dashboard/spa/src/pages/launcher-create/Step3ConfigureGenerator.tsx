@@ -481,7 +481,7 @@ function SweRebenchV2GeneratorForm({
     <StepShell
       step={3}
       title="Configure generator"
-      blurb="The generator pulls work items from the SWE-rebench v2 HuggingFace pool and posts tasks until enough successful attempts accumulate or the task-posting cap is hit."
+      blurb="The generator pulls SWE-rebench v2 instances from the HuggingFace pool and posts Tasks until enough successful Verdicts accumulate or the posting cap is hit."
       error={error}
       footer={
         <StepNav
@@ -494,8 +494,8 @@ function SweRebenchV2GeneratorForm({
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
         <FieldShell
-          label="Target successful attempts per work item"
-          helperText="How many score=1 Verdicts saturate a work item and stop further task posting."
+          label="Target successful Verdicts per instance"
+          helperText="How many score=1 Verdicts saturate a SWE instance and stop further Task posting."
           error={fieldErrors.N_target_successes ?? null}
         >
           <input
@@ -509,8 +509,8 @@ function SweRebenchV2GeneratorForm({
           />
         </FieldShell>
         <FieldShell
-          label="Max tasks per work item"
-          helperText="Hard ceiling on task postings to bound spend on impossible work items."
+          label="Max Task postings per instance"
+          helperText="Hard ceiling on Task postings to bound spend on impossible SWE instances."
           error={fieldErrors.N_max_postings_per_task ?? null}
         >
           <input
@@ -525,7 +525,7 @@ function SweRebenchV2GeneratorForm({
         </FieldShell>
         <FieldShell
           label="Cooldown between task postings (ms)"
-          helperText="Minimum gap before posting another task for the same work item. Minimum 60s."
+          helperText="Minimum gap before posting another Task for the same SWE instance. Minimum 60s."
           error={fieldErrors.cooldown_ms ?? null}
         >
           <input

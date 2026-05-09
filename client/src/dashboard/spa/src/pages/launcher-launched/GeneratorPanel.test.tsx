@@ -84,9 +84,48 @@ afterEach(() => {
   cleanup();
 });
 
+function expandGeneratorConfig(): void {
+  fireEvent.click(screen.getByTestId('launcher-launched-generator-toggle'));
+}
+
 describe('GeneratorPanel', () => {
+  it('keeps generator config collapsed by default', () => {
+    render(<GeneratorPanel record={buildRecord()} onSave={async () => undefined} />);
+
+    const toggle = screen.getByTestId('launcher-launched-generator-toggle');
+    expect(toggle.textContent).toBe('Edit config');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('launcher-launched-generator-config')).toBeNull();
+    expect(screen.queryByTestId('launcher-launched-generator-cadenceMs')).toBeNull();
+    expect(screen.getByTestId('launcher-launched-generator-enabled').textContent).toBe('yes');
+  });
+
+  it('keeps swe-rebench-v2 generator config collapsed by default', () => {
+    render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
+
+    const toggle = screen.getByTestId('launcher-launched-generator-toggle');
+    expect(toggle.textContent).toBe('Edit config');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('launcher-launched-generator-config')).toBeNull();
+    expect(screen.queryByTestId('launcher-launched-generator-N_target_successes')).toBeNull();
+    expect(screen.getByTestId('launcher-launched-generator-enabled').textContent).toBe('yes');
+  });
+
+  it('expands generator config from the launcher page panel', () => {
+    render(<GeneratorPanel record={buildRecord()} onSave={async () => undefined} />);
+
+    expandGeneratorConfig();
+
+    const toggle = screen.getByTestId('launcher-launched-generator-toggle');
+    expect(toggle.textContent).toBe('Hide config');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('launcher-launched-generator-config')).toBeTruthy();
+    expect(screen.getByTestId('launcher-launched-generator-cadenceMs')).toBeTruthy();
+  });
+
   it('pre-fills inputs from record.generatorConfig', () => {
     render(<GeneratorPanel record={buildRecord()} onSave={async () => undefined} />);
+    expandGeneratorConfig();
     expect(
       (screen.getByTestId('launcher-launched-generator-cadenceMs') as HTMLInputElement).value,
     ).toBe('21600000');
@@ -105,6 +144,7 @@ describe('GeneratorPanel', () => {
 
   it('Save is disabled until the form is dirty', () => {
     render(<GeneratorPanel record={buildRecord()} onSave={async () => undefined} />);
+    expandGeneratorConfig();
     const save = screen.getByTestId('launcher-launched-generator-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
   });
@@ -112,6 +152,7 @@ describe('GeneratorPanel', () => {
   it('Save invokes onSave with the diff patch only', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<GeneratorPanel record={buildRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-maxOpenRounds'), {
       target: { value: '500' },
     });
@@ -128,6 +169,7 @@ describe('GeneratorPanel', () => {
   it('rejects sub-60s cadence via inline error and disables Save', () => {
     const onSave = vi.fn();
     render(<GeneratorPanel record={buildRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-cadenceMs'), {
       target: { value: '5000' },
     });
@@ -142,6 +184,7 @@ describe('GeneratorPanel', () => {
 
   it('rejects non-numeric input', () => {
     render(<GeneratorPanel record={buildRecord()} onSave={async () => undefined} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-maxOpenRounds'), {
       target: { value: 'abc' },
     });
@@ -153,6 +196,7 @@ describe('GeneratorPanel', () => {
   it('windowMs maps to submissionWindowMs in the patch', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<GeneratorPanel record={buildRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-windowMs'), {
       target: { value: '7200000' },
     });
@@ -164,6 +208,7 @@ describe('GeneratorPanel', () => {
   it('list field changes are sent as parsed arrays', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<GeneratorPanel record={buildRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(
       screen.getByTestId('launcher-launched-generator-allowlistConditionIds'),
       { target: { value: '0xabc, 0xdef' } },
@@ -220,6 +265,7 @@ describe('GeneratorPanel', () => {
   it('surfaces save error message inline when onSave throws', async () => {
     const onSave = vi.fn().mockRejectedValue(new Error('500 boom'));
     render(<GeneratorPanel record={buildRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-maxOpenRounds'), {
       target: { value: '500' },
     });
@@ -233,6 +279,7 @@ describe('GeneratorPanel', () => {
 
   it('renders swe-rebench-v2 generator fields for swe launched records', () => {
     render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
+    expandGeneratorConfig();
     expect(
       (screen.getByTestId('launcher-launched-generator-N_target_successes') as HTMLInputElement).value,
     ).toBe('1');
@@ -265,6 +312,7 @@ describe('GeneratorPanel', () => {
   it('saves swe-rebench-v2 generator patch keys', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={onSave} />);
+    expandGeneratorConfig();
     fireEvent.change(screen.getByTestId('launcher-launched-generator-N_target_successes'), {
       target: { value: '3' },
     });
