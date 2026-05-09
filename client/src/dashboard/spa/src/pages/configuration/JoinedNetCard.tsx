@@ -17,6 +17,7 @@ import {
   harnessNamesMatch,
   harnessOptionLabel,
 } from './harnessNames.js';
+import { PluginPicker } from './PluginPicker.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -39,10 +40,12 @@ import {
 export interface JoinedNetEntry {
   manifestCid: string;
   name?: string;
+  contract?: { id: string; version: string };
   roles: Array<'solver' | 'evaluator'>;
   harness?: string;
   model?: string;
   plugins?: string[];
+  disabledDefaultPlugins?: string[];
 }
 
 export interface JoinedNetCardProps {
@@ -62,6 +65,7 @@ export interface JoinedNetCardProps {
 interface FormState {
   harness: string;
   plugins: string[];
+  disabledDefaultPlugins: string[];
   model: string;
 }
 
@@ -70,7 +74,8 @@ function snapshot(joined: JoinedNetEntry): FormState {
   return {
     harness,
     plugins: joined.plugins ?? [],
-    model: joined.model ?? defaultModelForHarness(joined.harness),
+    disabledDefaultPlugins: joined.disabledDefaultPlugins ?? [],
+    model: joined.model ?? defaultModelForHarness(harness),
   };
 }
 
@@ -82,6 +87,10 @@ function isDirty(form: FormState, joined: JoinedNetEntry): boolean {
   const b = [...(joined.plugins ?? [])].sort();
   if (a.length !== b.length) return true;
   for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return true;
+  const disabledA = [...form.disabledDefaultPlugins].sort();
+  const disabledB = [...(joined.disabledDefaultPlugins ?? [])].sort();
+  if (disabledA.length !== disabledB.length) return true;
+  for (let i = 0; i < disabledA.length; i += 1) if (disabledA[i] !== disabledB[i]) return true;
   return false;
 }
 
@@ -126,6 +135,7 @@ export function JoinedNetCard({
     );
   })();
   const catalogEntry = resolvedCatalogEntry;
+  const contractRef = joined.contract ?? catalogEntry?.contract;
   const catalogResolving =
     !skipResolve && (manifestQuery.isLoading || catalogQuery.isLoading);
   // Orphaned: manifest fetch failed (typically 404 — manifest no longer in
@@ -142,7 +152,12 @@ export function JoinedNetCard({
       setForm(snapshot(joined));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joined.harness, joined.model, JSON.stringify(joined.plugins ?? [])]);
+  }, [
+    joined.harness,
+    joined.model,
+    JSON.stringify(joined.plugins ?? []),
+    JSON.stringify(joined.disabledDefaultPlugins ?? []),
+  ]);
 
   // Auto-expand when default flips true (parent decided this card is the hash
   // target). Scroll/focus when focusOn='harness'.
@@ -177,9 +192,13 @@ export function JoinedNetCard({
     mutationFn: () =>
       api.operator.join(joined.manifestCid, {
         ...(joined.name !== undefined ? { name: joined.name } : {}),
+        ...(contractRef !== undefined
+          ? { contract: { id: contractRef.id, version: contractRef.version } }
+          : {}),
         roles: joined.roles,
         ...(form.harness ? { harness: form.harness } : {}),
         plugins: form.plugins,
+        disabledDefaultPlugins: form.disabledDefaultPlugins,
         ...(form.model ? { model: form.model } : {}),
       }),
     onSuccess: (res) => {
@@ -505,62 +524,27 @@ export function JoinedNetCard({
                 Registry catalog has no template for this SolverNet's contract — plugins can't be verified.
               </span>
             ) : (catalogEntry.compatiblePlugins ?? []).length === 0 ? (
-              <span
-                data-testid="joined-net-card-plugins-empty"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                }}
-              >
-                No plugins available for this SolverNet
-              </span>
+              <PluginPicker
+                available={[]}
+                selected={form.plugins}
+                disabledDefaultPlugins={form.disabledDefaultPlugins}
+                onChange={(plugins, disabledDefaultPlugins) =>
+                  setForm((prev) => ({ ...prev, plugins, disabledDefaultPlugins }))
+                }
+                rowTestId="joined-net-card-plugin-row"
+                searchTestId="joined-net-card-plugin-search"
+              />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {(catalogEntry?.compatiblePlugins ?? []).map((p) => {
-                  const checked = form.plugins.includes(p.name);
-                  const id = `joined-${joined.manifestCid}-plugin-${p.name}`;
-                  return (
-                    <label
-                      key={p.name}
-                      htmlFor={id}
-                      data-testid="joined-net-card-plugin-row"
-                      data-plugin={p.name}
-                      data-plugin-active={checked ? 'true' : 'false'}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        padding: '8px 12px',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-1)',
-                        fontFamily: "'JetBrains Mono', monospace",
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        id={id}
-                        type="checkbox"
-                        aria-label={`Plugin: ${p.name}`}
-                        checked={checked}
-                        onChange={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            plugins: prev.plugins.includes(p.name)
-                              ? prev.plugins.filter((n) => n !== p.name)
-                              : [...prev.plugins, p.name],
-                          }))
-                        }
-                        style={{ accentColor: 'var(--accent-sky)' }}
-                      />
-                      <span style={{ fontSize: '13px', color: 'var(--fg)', flex: 1 }}>{p.name}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--fg-dim)' }}>
-                        {p.source} · {p.version}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              <PluginPicker
+                available={catalogEntry?.compatiblePlugins ?? []}
+                selected={form.plugins}
+                disabledDefaultPlugins={form.disabledDefaultPlugins}
+                onChange={(plugins, disabledDefaultPlugins) =>
+                  setForm((prev) => ({ ...prev, plugins, disabledDefaultPlugins }))
+                }
+                rowTestId="joined-net-card-plugin-row"
+                searchTestId="joined-net-card-plugin-search"
+              />
             )}
           </div>
 

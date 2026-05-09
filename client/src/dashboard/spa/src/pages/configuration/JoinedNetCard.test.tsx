@@ -37,6 +37,7 @@ function wrap(ui: JSX.Element): void {
 const ENTRY: JoinedNetEntry = {
   manifestCid: 'bafybeiaaa',
   name: 'Prediction Markets',
+  contract: { id: 'prediction', version: 'v1' },
   roles: ['solver', 'evaluator'],
   harness: 'claude-code-learner',
   model: 'claude-haiku-4-5-20251001',
@@ -174,7 +175,7 @@ describe('<JoinedNetCard />', () => {
           roles: ['solver', 'evaluator'],
           harness: 'codex-code-learner',
           model: 'gpt-5.4-mini',
-          plugins: ['swe-rebench-v2-runtime'],
+          plugins: ['bundled:swe-rebench-v2-runtime'],
         }}
         catalogEntry={SWE_CATALOG}
         defaultExpanded
@@ -194,6 +195,18 @@ describe('<JoinedNetCard />', () => {
     expect(codexModelOptions).toContain('gpt-5.5');
     expect(codexModelOptions).not.toContain('claude-haiku-4-5-20251001');
 
+    const sweRuntimeChips = screen
+      .getAllByTestId('joined-net-card-plugin-row-chip')
+      .filter((chip) => chip.getAttribute('data-plugin') === 'swe-rebench-v2-runtime');
+    expect(sweRuntimeChips).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-trigger'));
+    expect(
+      screen
+        .queryAllByTestId('joined-net-card-plugin-row')
+        .some((row) => row.getAttribute('data-plugin') === 'swe-rebench-v2-runtime' || row.getAttribute('data-plugin') === 'bundled:swe-rebench-v2-runtime'),
+    ).toBe(false);
+
     fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
     const claudeModelOptions = Array.from(modelSelect.options).map((o) => o.value);
     expect(claudeModelOptions).toContain('claude-haiku-4-5-20251001');
@@ -206,29 +219,74 @@ describe('<JoinedNetCard />', () => {
     expect(save.disabled).toBe(true);
 
     // Toggle a plugin → form becomes dirty → Save enables.
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-trigger'));
     const plugA = screen
       .getAllByTestId('joined-net-card-plugin-row')
       .find((el) => el.getAttribute('data-plugin') === 'plug-a');
     expect(plugA).toBeTruthy();
-    fireEvent.click(plugA!.querySelector('input[type="checkbox"]')!);
+    fireEvent.click(plugA!);
     await waitFor(() => expect(save.disabled).toBe(false));
   });
 
   it('Cancel reverts dirty form back to the original snapshot', async () => {
     wrap(<JoinedNetCard joined={ENTRY} catalogEntry={CATALOG} defaultExpanded />);
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-trigger'));
     const plugA = screen
       .getAllByTestId('joined-net-card-plugin-row')
       .find((el) => el.getAttribute('data-plugin') === 'plug-a')!;
-    fireEvent.click(plugA.querySelector('input[type="checkbox"]')!);
-    await waitFor(() =>
-      expect(plugA.getAttribute('data-plugin-active')).toBe('true'),
-    );
+    fireEvent.click(plugA);
+    await waitFor(() => expect(
+      (screen.getByTestId('joined-net-card-save') as HTMLButtonElement).disabled,
+    ).toBe(false));
 
     fireEvent.click(screen.getByTestId('joined-net-card-cancel'));
-    expect(plugA.getAttribute('data-plugin-active')).toBe('false');
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-trigger'));
+    const revertedPlugA = screen
+      .getAllByTestId('joined-net-card-plugin-row')
+      .find((el) => el.getAttribute('data-plugin') === 'plug-a')!;
+    expect(revertedPlugA.getAttribute('data-plugin-active')).toBe('false');
     expect(
       (screen.getByTestId('joined-net-card-save') as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it('warns before disabling a default plugin and persists the opt-out', async () => {
+    vi.mocked(api.operator.join).mockResolvedValue({
+      ok: true,
+      restartRequired: true,
+      manifestCid: 'bafybeiaaa',
+      config: {
+        manifestCid: 'bafybeiaaa',
+        name: 'Prediction Markets',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'claude-code',
+        plugins: [],
+        disabledDefaultPlugins: ['network-tools'],
+        model: 'claude-haiku-4-5-20251001',
+      },
+    });
+
+    wrap(<JoinedNetCard joined={ENTRY} catalogEntry={CATALOG} defaultExpanded />);
+    const removeNetwork = screen
+      .getAllByTestId('joined-net-card-plugin-row-remove')
+      .find((button) => button.getAttribute('data-plugin') === 'network-tools')!;
+    fireEvent.click(removeNetwork);
+    expect(screen.getByTestId('joined-net-card-plugin-row-default-warning')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('joined-net-card-plugin-row-default-warning-confirm'));
+    fireEvent.click(screen.getByTestId('joined-net-card-save'));
+
+    await waitFor(() =>
+      expect(api.operator.join).toHaveBeenCalledWith('bafybeiaaa', {
+        name: 'Prediction Markets',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'claude-code',
+        plugins: [],
+        disabledDefaultPlugins: ['network-tools'],
+        model: 'claude-haiku-4-5-20251001',
+      }),
+    );
   });
 
   it('Save calls api.operator.join with the full body and triggers onRestartPending', async () => {
@@ -242,6 +300,7 @@ describe('<JoinedNetCard />', () => {
         roles: ['solver', 'evaluator'],
         harness: 'legacy-claude',
         plugins: [],
+        disabledDefaultPlugins: [],
         model: 'claude-haiku-4-5-20251001',
       },
     });
@@ -262,9 +321,11 @@ describe('<JoinedNetCard />', () => {
     await waitFor(() =>
       expect(api.operator.join).toHaveBeenCalledWith('bafybeiaaa', {
         name: 'Prediction Markets',
+        contract: { id: 'prediction', version: 'v1' },
         roles: ['solver', 'evaluator'],
         harness: 'legacy-claude',
         plugins: [],
+        disabledDefaultPlugins: [],
         model: 'claude-haiku-4-5-20251001',
       }),
     );

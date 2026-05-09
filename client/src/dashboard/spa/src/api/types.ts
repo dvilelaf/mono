@@ -44,6 +44,22 @@ export interface BootstrapState {
     eth_balance?: string;
     targetWei?: string;
   };
+  solverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    enabled?: boolean;
+    roles?: string[];
+  }>;
+  joinedSolverNets?: Record<string, {
+    name?: string;
+    manifestCid?: string;
+    contract?: { id: string; version: string };
+    roles?: string[];
+    harness?: string;
+    model?: string;
+    plugins?: string[];
+    disabledDefaultPlugins?: string[];
+  }>;
   /** Persisted from the last fatal bootstrap exit. Absent on healthy state. */
   error?: BootstrapErrorEnvelope;
 }

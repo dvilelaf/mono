@@ -18,6 +18,7 @@ import {
   harnessDisplayName,
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
+import { PluginPicker } from '../configuration/PluginPicker.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
@@ -29,7 +30,7 @@ import { formatWeiAmount } from '../launcher-launched/helpers.js';
  *
  * Loads the manifest body via the registry endpoint, lets the operator pick
  * which open roles to take + (for the solver role only) harness / plugins /
- * model, and writes the manifest-keyed entry to `config.solverNets[<cid>]`
+ * model, and writes the manifest-keyed entry to `config.joinedSolverNets[<cid>]`
  * via `POST /v1/operator/join/:cid`. The evaluator role binds harness from
  * the manifest's `contract.evaluationFunction.implementation` — the harness
  * picker is hidden when only `evaluator` is selected.
@@ -50,6 +51,7 @@ interface JoinFormState {
   roles: Role[];
   harness: string;
   plugins: string[];
+  disabledDefaultPlugins: string[];
   model: string;
 }
 
@@ -115,6 +117,7 @@ export function JoinFlow({
     roles: [],
     harness: defaultHarness,
     plugins: [],
+    disabledDefaultPlugins: [],
     model: defaultModel,
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -143,11 +146,15 @@ export function JoinFlow({
     mutationFn: () =>
       api.operator.join(cid!, {
         ...(manifest?.name !== undefined ? { name: manifest.name } : {}),
+        ...(manifest?.contract !== undefined
+          ? { contract: { id: manifest.contract.id, version: manifest.contract.version } }
+          : {}),
         roles: form.roles,
         ...(form.roles.includes('solver')
           ? {
               harness: form.harness,
               plugins: form.plugins,
+              disabledDefaultPlugins: form.disabledDefaultPlugins,
               model: form.model,
             }
           : {}),
@@ -209,18 +216,6 @@ export function JoinFlow({
         ? prev.roles.filter((r) => r !== role)
         : openRoles.filter((r) => r === role || prev.roles.includes(r));
       return { ...prev, roles: nextRoles };
-    });
-  };
-
-  const togglePlugin = (name: string): void => {
-    setForm((prev) => {
-      const has = prev.plugins.includes(name);
-      return {
-        ...prev,
-        plugins: has
-          ? prev.plugins.filter((p) => p !== name)
-          : [...prev.plugins, name],
-      };
     });
   };
 
@@ -438,57 +433,16 @@ export function JoinFlow({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <span style={fieldLabelStyle}>Plugins</span>
-            {(catalogEntry?.compatiblePlugins ?? []).length === 0 ? (
-              <span
-                data-testid="join-plugins-empty"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '12px',
-                  color: 'var(--fg-dim)',
-                }}
-              >
-                No plugins available for this SolverNet
-              </span>
-            ) : (
-              (catalogEntry?.compatiblePlugins ?? []).map((p) => {
-                const checked = form.plugins.includes(p.name);
-                const checkboxId = `join-plugin-${p.name}`;
-                return (
-                  <label
-                    key={p.name}
-                    htmlFor={checkboxId}
-                    data-testid="join-plugin-option"
-                    data-plugin={p.name}
-                    data-plugin-active={checked ? 'true' : 'false'}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '10px 14px',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-2)',
-                      fontFamily: "'JetBrains Mono', monospace",
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      id={checkboxId}
-                      type="checkbox"
-                      aria-label={`Plugin: ${p.name}`}
-                      checked={checked}
-                      onChange={() => togglePlugin(p.name)}
-                      style={{ accentColor: 'var(--accent-sky)' }}
-                    />
-                    <span style={{ fontSize: '14px', color: 'var(--fg)', flex: 1 }}>
-                      {p.name}
-                    </span>
-                    <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
-                      {p.source} · {p.version}
-                    </span>
-                  </label>
-                );
-              })
-            )}
+            <PluginPicker
+              available={catalogEntry?.compatiblePlugins ?? []}
+              selected={form.plugins}
+              disabledDefaultPlugins={form.disabledDefaultPlugins}
+              onChange={(plugins, disabledDefaultPlugins) =>
+                setForm({ ...form, plugins, disabledDefaultPlugins })
+              }
+              rowTestId="join-plugin-option"
+              searchTestId="join-plugin-search"
+            />
           </div>
         </section>
       )}

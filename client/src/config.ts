@@ -430,10 +430,10 @@ export const JinnConfigSchema = z.object({
    * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
    * launched-instance authority across launchers.
    *
-   * Kept structurally separate from `solverNets` for now — Task 22 collapses
-   * the two branches into a single manifest-keyed shape. The daemon-side
-   * runtime does not consume this block yet; it is round-trip-only at this
-   * stage so the SPA's join/leave actions persist correctly across restarts.
+   * Kept structurally separate from legacy `solverNets` for now. The daemon
+   * narrows this block into runtime SolverNet registry entries on restart, and
+   * Task 22 collapses both branches into a single manifest-keyed shape once
+   * the legacy block is fully drained.
    */
   joinedSolverNets: z
     .record(
@@ -441,12 +441,19 @@ export const JinnConfigSchema = z.object({
       z.object({
         manifestCid: z.string().min(1),
         name: z.string().optional(),
+        contract: z
+          .object({
+            id: z.string().min(1),
+            version: z.string().min(1),
+          })
+          .optional(),
         roles: z
           .array(z.enum(['solver', 'evaluator']))
           .min(1, 'each joined SolverNet must enable at least one role'),
         harness: HarnessNameSchema.optional(),
         model: z.string().optional(),
         plugins: z.array(z.string()).default([]),
+        disabledDefaultPlugins: z.array(z.string()).default([]),
       }),
     )
     .optional(),
@@ -482,18 +489,16 @@ export const JinnConfigSchema = z.object({
     .optional(),
 
   /**
-   * Operator-local artifact serving configuration (Phase A.1, jinn-mono-vy37.1).
+   * Operator-local artifact and donation configuration.
    *
-   * Per spec/2026-04-30-phase-a-umbrella.md §1, restoration artifact bytes
-   * stay on the operator's filesystem (served_artifacts) and are dispensed
-   * via the operator's HTTP API with x402 gating when `priceUsdc > 0`. The
-   * envelope's `artifact.access.endpoint` field tells consumers where to
-   * fetch each artifact; `priceUsdc` declares the asking price.
+   * Public testnet donation is IPFS-first: when `donation.enabled` is true,
+   * scrubbed solver/evaluator artifacts are pinned to IPFS and advertised in
+   * signed metadata so peers can discover, verify, and reuse them without an
+   * operator-hosted public endpoint.
    *
-   * `publicEndpoint` is the externally-reachable base URL that gets stamped
-   * into every artifact descriptor. `defaultPriceUsdc` is the fallback price
-   * when neither OUTPUTS.json nor `perArtifactTypePrice` provides a value.
-   * `perArtifactTypePrice` lets operators charge per artifactType.
+   * `publicEndpoint`, `defaultPriceUsdc`, and `perArtifactTypePrice` are kept
+   * as compatibility and future data-market fallback plumbing. They are not
+   * required for the free IPFS donation path used by this release.
    *
    * Resolution precedence in `uploadArtifacts`:
    *   OUTPUTS.json `access.priceUsdc` > `perArtifactTypePrice[artifactType]`
@@ -615,6 +620,8 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
+export const DEFAULT_TESTNET_SUBGRAPH_URL =
+  'https://api.studio.thegraph.com/query/1749489/jinn-testnet/capture-live-20260508183750';
 
 export type ConfigLoadErrorCode =
   | 'config_file_not_found'
@@ -807,6 +814,9 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
+  if (resolvedNetwork === 'testnet' && merged.subgraphUrl === undefined) {
+    merged.subgraphUrl = DEFAULT_TESTNET_SUBGRAPH_URL;
+  }
 
   // Keep the legacy BASE_RPC_URL override for Base mainnet only. Testnet must
   // not silently inherit a mainnet RPC from client/.env during bootstrap.

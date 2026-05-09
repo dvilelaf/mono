@@ -973,6 +973,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           rpcUrl: config.rpcUrl,
           defaultRpcUrl: CHAIN_CONFIG.rpcUrl,
           solverNets: config.solverNets as Record<string, unknown> | undefined,
+          joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
         }),
       },
       // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
@@ -1001,8 +1002,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               state: 'live' as const,
               supportedRoles: ['solving' as const, 'evaluating' as const],
               compatibleHarnesses: [
-                { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
                 { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
               ],
               compatiblePlugins: [
@@ -1445,6 +1446,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  const taskDiscoveryManifestCids = Object.values(config.joinedSolverNets ?? {})
+    .filter((entry) => entry.roles.includes('solver'))
+    .map((entry) => entry.manifestCid);
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrl,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1458,6 +1463,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     chainId: config.network === 'testnet' ? 84532 : 8453,
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
+    taskDiscovery: config.subgraphUrl && taskDiscoveryManifestCids.length > 0
+      ? {
+          subgraphUrl: config.subgraphUrl,
+          solverNetManifestCids: taskDiscoveryManifestCids,
+        }
+      : undefined,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1598,14 +1609,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
-  // Packaging deps: artifact bytes are written to served_artifacts (operator-local
-  // SQLite) and served via the operator's HTTP server with x402 gating per
-  // spec/2026-04-30-phase-a-umbrella.md §1. IPFS only holds the manifest envelope.
-  // The `store` field is filled by Daemon (which owns the SQLite handle); here
-  // we just configure the endpoint + price defaults from `config.operator`
-  // (Phase 3, jinn-mono-vy37.1.3). Operators who don't declare an operator
-  // block fall back to the daemon's local API port so dev/test runs still work
-  // — but the resulting envelopes won't be reachable from outside the host.
+  // Packaging deps: artifacts are always written to served_artifacts
+  // (operator-local SQLite). In public-testnet donation mode, scrubbed artifact
+  // bytes are also pinned to IPFS and advertised as signed donation sources;
+  // that IPFS path is the canonical release path. The HTTP endpoint and price
+  // fields are kept as compatibility/future data-market fallback plumbing.
   const operatorPublicEndpoint =
     config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
   const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
@@ -1616,11 +1624,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     console.warn('[main] operator.donation.enabled is testnet-only; donation disabled on mainnet.');
   }
   if (!config.operator?.publicEndpoint) {
-    console.warn(
-      '[main] config.operator.publicEndpoint not set; defaulting to local API port. ' +
-        'External evaluators will not be able to fetch artifacts from this operator. ' +
-        'Set operator.publicEndpoint (or JINN_OPERATOR_PUBLIC_ENDPOINT) before going live.',
-    );
+    if (donationEnabled) {
+      console.log(
+        '[main] config.operator.publicEndpoint not set; using IPFS donation as the public artifact path. ' +
+          'Direct HTTP artifact fallback will remain local-only.',
+      );
+    } else {
+      console.warn(
+        '[main] operator donation is disabled and config.operator.publicEndpoint is not set; ' +
+          'new artifacts will remain local-only until donation mode is enabled.',
+      );
+    }
   }
   const packagingDeps = {
     operatorEndpoint: operatorPublicEndpoint,
