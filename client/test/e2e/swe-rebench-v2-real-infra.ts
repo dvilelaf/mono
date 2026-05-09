@@ -379,6 +379,7 @@ export async function runSweRebenchV2DockerEvalE2E(): Promise<DockerEvalE2EOutco
   const runner = new PythonEvalRunner({ upstreamRepoDir: upstreamRepo, maxWorkers: 1 });
   try {
     const result = await runner.runEval({
+      instance_id: instanceId,
       image: imageName,
       patch: '--- /dev/null\n+++ /dev/null\n',  // empty patch → must fail FAIL_TO_PASS
       test_patch: String(row['test_patch'] ?? ''),
