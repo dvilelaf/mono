@@ -47,6 +47,11 @@ export interface LiveNowStatusInput {
   activity?: {
     recent?: Array<{ ts: string | null; kind: string }>;
   };
+  taskRuns?: {
+    totals?: { activeTaskRuns?: number };
+    inFlight?: LiveTaskRun[];
+    recentTasks?: LiveTaskRun[];
+  };
   predictionV1?: {
     operator?: {
       diagnostics?: Array<{
@@ -57,15 +62,17 @@ export interface LiveNowStatusInput {
       }>;
     };
     totals?: { activeTaskRuns?: number };
-    recentTasks?: Array<{
-      state: string;
-      taskRole: 'restoration' | 'evaluation' | null;
-      stateUpdatedAt: number;
-    }>;
+    recentTasks?: LiveTaskRun[];
   };
 }
 
 const SERVICE_COMPLETE_STEPS = new Set(['complete', 'safe_binding_pending']);
+
+interface LiveTaskRun {
+  state: string;
+  taskRole: 'restoration' | 'evaluation' | null;
+  stateUpdatedAt: number;
+}
 
 function diagnosticHref(diagnostic: { code: string; configField?: string }): string {
   // Harness-related diagnostics belong on /operator → SolverNets → Joined,
@@ -110,9 +117,7 @@ function formatTimeOfDay(iso: string): string {
   return d.toISOString().slice(11, 16);
 }
 
-function summarizeStages(
-  tasks: NonNullable<LiveNowStatusInput['predictionV1']>['recentTasks'],
-): { line: string; longestMs: number } {
+function summarizeStages(tasks: readonly LiveTaskRun[] | undefined): { line: string; longestMs: number } {
   const inFlight = (tasks ?? []).filter((t) => !TERMINAL_STATES.has(t.state));
   const restoring = inFlight.filter((t) => t.taskRole === 'restoration').length;
   const evaluating = inFlight.filter((t) => t.taskRole === 'evaluation').length;
@@ -172,10 +177,12 @@ export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDe
     };
   }
 
-  // Working: any in-flight task runs.
-  const activeCount = status?.predictionV1?.totals?.activeTaskRuns ?? 0;
+  // Working: any in-flight task runs, regardless of SolverNet.
+  const taskRunStatus = status?.taskRuns;
+  const activeCount = taskRunStatus?.totals?.activeTaskRuns ?? status?.predictionV1?.totals?.activeTaskRuns ?? 0;
   if (activeCount > 0) {
-    const summary = summarizeStages(status?.predictionV1?.recentTasks);
+    const genericInFlight = taskRunStatus?.inFlight ?? taskRunStatus?.recentTasks;
+    const summary = summarizeStages(genericInFlight ?? status?.predictionV1?.recentTasks);
     return {
       state: 'working',
       line: summary.line,

@@ -30,6 +30,12 @@ const server = new McpServer({
 });
 
 const metadataValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+const artifactSourceSchema = z.object({
+  kind: z.literal('ipfs'),
+  cid: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  encoding: z.literal('jinn.artifact.donation.v1'),
+});
 
 // Read task from env vars (passed by ClaudeRunner)
 const task = {
@@ -409,6 +415,7 @@ server.tool(
     }),
     envelopeCid: z.string().optional(),
     artifactType: z.string().optional(),
+    sources: z.array(artifactSourceSchema).optional(),
   },
   async (args) => {
     if (!store) {

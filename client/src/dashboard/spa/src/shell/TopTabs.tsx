@@ -3,7 +3,6 @@ import { Link, useLocation } from 'wouter';
 const TABS = [
   { path: '/overview', label: 'Overview' },
   { path: '/operator', label: 'Operator' },
-  { path: '/captures', label: 'Captures' },
   { path: '/launcher', label: 'Launcher' },
 ] as const;
 

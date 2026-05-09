@@ -1164,6 +1164,7 @@ export class TaskEngine {
           signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
           signerAddress: account.address as `0x${string}`,
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
+          scrub: packagingDepsWithReq.donation?.scrub,
         });
         trajectoryRef = { cid, sha256 };
         console.log(`[harness-engine] ${task.requestId}: trajectory emitted cid=${cid}`);

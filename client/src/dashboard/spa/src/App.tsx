@@ -71,10 +71,11 @@ export default function App(): JSX.Element {
           <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview" component={OverviewPage} />
           <Route path="/operator/join/:cid"><JoinFlow /></Route>
+          <Route path="/operator/execution-data"><CapturesTab /></Route>
           <Route path="/operator">
             <OperatorPage onRestartPending={() => setRestartPending(true)} />
           </Route>
-          <Route path="/captures"><CapturesTab /></Route>
+          <Route path="/captures"><Redirect to="/operator/execution-data" /></Route>
           <Route path="/configuration"><ConfigurationRedirect /></Route>
           <Route path="/launcher/create"><LauncherCreatePage /></Route>
           <Route path="/launcher/launched/:solverNetId">

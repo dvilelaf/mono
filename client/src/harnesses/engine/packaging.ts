@@ -427,10 +427,12 @@ export async function walkArtifacts(
 /**
  * Write all collected artifacts to the operator-local served_artifacts store.
  *
- * Default behavior follows spec/2026-04-30-phase-a-umbrella.md §1: artifact
- * bytes live behind the operator's HTTP server, gated by x402 when priceUsdc
- * > 0. Testnet donation mode is an explicit opt-in exception: scrubbed bytes
- * are also pinned publicly to IPFS and recorded in artifact.sources[].
+ * Default behavior writes artifact bytes to the operator-local artifact store.
+ * Public-testnet donation mode is IPFS-first: scrubbed bytes are pinned
+ * publicly to IPFS and recorded in artifact.sources[] so peers can retrieve
+ * and verify them without a public operator endpoint. The endpoint/price
+ * fields remain compatibility plumbing for direct fallback and future paid
+ * data-market flows.
  *
  * Returns an array of `UploadedArtifact` (= Artifact + localPath).
  */
@@ -446,7 +448,7 @@ export async function uploadArtifacts(
 ): Promise<UploadedArtifact[]> {
   if (!deps.operatorEndpoint) {
     throw new Error(
-      'uploadArtifacts: operatorEndpoint is required (set operator.publicEndpoint in config)',
+      'uploadArtifacts: operatorEndpoint is required for local artifact descriptors',
     );
   }
 
