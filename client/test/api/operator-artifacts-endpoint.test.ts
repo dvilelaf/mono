@@ -54,8 +54,10 @@ describe('GET /v1/operator/artifacts', () => {
     });
 
     const app = new Hono();
+    const configPath = join(mkdtempSync(join(tmpdir(), 'jinn-operator-artifacts-')), 'config.json');
     addOperatorArtifactsRoutes(app, {
       store,
+      configPath,
       operatorConfig: {
         publicEndpoint: 'https://op.example.com',
         defaultPriceUsdc: '0',

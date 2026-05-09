@@ -708,10 +708,17 @@ export class TaskEngine {
         : undefined;
       if (parsedSpec?.success) return null;
 
-      const issues = (parsedSpec ?? parsed).error.issues
+      const specIssuesLookLikeWholeTask =
+        parsedSpec !== undefined &&
+        parsedSpec.error.issues.some((issue) => {
+          const head = issue.path[0];
+          return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
+        });
+      const selected = parsedSpec !== undefined && !specIssuesLookLikeWholeTask ? parsedSpec : parsed;
+      const issues = selected.error.issues
         .map((issue: ZodIssue) => `${issue.path.length > 0 ? issue.path.join('.') : '<root>'}: ${issue.message}`)
         .join('; ');
-      const scope = parsedSpec ? 'task.spec' : 'task';
+      const scope = selected === parsedSpec ? 'task.spec' : 'task';
       return `${ref.id}.${ref.version} ${scope} failed validation: ${issues}`;
     }
     return null;
