@@ -62,6 +62,7 @@ import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
 import { createJinnPublicClient, createJinnWalletClient, createJinnL1PublicClient, createJinnL1WalletClient } from './earning/viem-clients.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { getAddress, type Address } from 'viem';
 import {
   DEFAULT_DISABLED_HARNESSES,
   DEFAULT_HARNESS,
@@ -887,7 +888,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   let predictionGeneratorRef:
     | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
     | undefined;
+  const launchedGeneratorStateBySolverType = new Map<
+    string,
+    () => import('./api/launcher-status.js').LauncherGeneratorStateSnapshot | undefined
+  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
+  let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
   // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
   // The routes register eagerly in startApiServer (Hono freezes its matcher
@@ -987,6 +993,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
                 { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
               ],
             },
+            {
+              name: 'swe-rebench-v2',
+              description: 'Code-issue benchmark tasks from SWE-rebench v2. Solvers submit unified-diff patches; evaluators run the per-instance Docker harness.',
+              contract: { id: 'swe-rebench-v2', version: 'v1' },
+              state: 'live' as const,
+              supportedRoles: ['solving' as const, 'evaluating' as const],
+              compatibleHarnesses: [
+                { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+                { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
+              ],
+              compatiblePlugins: [
+                { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
+              ],
+            },
           ],
         },
       },
@@ -1084,16 +1105,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the creator Safe with the SolverNet's solver_type. The result is a
       // strict superset of the in-flight count (we don't yet drop settled or
       // failed Tasks; that lifecycle tracking lands with the router-watcher
-      // hardening lane, jinn-mono-l2zl.12). Reserved-budget and Safe-balance
-      // remain stubbed and are tracked for Task 8+.
+      // hardening lane, jinn-mono-l2zl.12). Safe balance is read live through
+      // the daemon's viem public client once bootstrap has created it.
+      // Reserved-budget remains unavailable until per-Task payment lifecycle
+      // state is persisted; return an empty string rather than a fake zero so
+      // the UI does not project runway from placeholder data.
       //
       // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
       // narrow `getOpenTaskCount` to states in
       // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
       // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
       // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
-      // (sum of unconsumed claim payments across open Tasks) and
-      // `getSafeBalanceWei` (live `eth_getBalance` against the creator Safe).
+      // (sum of unconsumed claim payments across open Tasks).
       launcher: {
         getConfig: () => ({ solverNets: config.solverNets }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
@@ -1106,8 +1129,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           invalidatePredictionOperatorStatusCache(config);
         },
         getGeneratorState: (netName) => {
-          if (netName !== 'prediction') return undefined;
-          return predictionGeneratorRef?.getState();
+          if (netName === 'prediction') {
+            return predictionGeneratorRef?.getState();
+          }
+          const solverType = config.solverNets?.[netName]?.solverType;
+          if (!solverType) return undefined;
+          return launchedGeneratorStateBySolverType.get(solverType)?.();
         },
         getOpenTaskCount: (netName) => {
           const net = config.solverNets?.[netName];
@@ -1118,8 +1145,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             solverType,
           });
         },
-        getReservedBudgetWei: () => '0',
-        getSafeBalanceWei: () => '0',
+        getReservedBudgetWei: () => '',
+        getSafeBalanceWei: async () => {
+          const safeAddress = safeAddressForLauncher;
+          const publicClient = publicClientForLauncher;
+          if (!safeAddress || !publicClient) return '';
+          try {
+            return (await publicClient.getBalance({
+              address: getAddress(safeAddress) as Address,
+            })).toString();
+          } catch (err) {
+            console.warn(
+              `[main] launcher status Safe balance read failed for ${safeAddress}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+            return '';
+          }
+        },
         safeAddress: () =>
           safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
         tasksDeps: {
@@ -1146,6 +1189,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               taskCid: r.taskCid,
               solverType: r.solverType ?? undefined,
               postedAt: r.postedAt,
+              ...(r.state ? { state: r.state } : {}),
+              ...(r.claims ? { claims: r.claims } : {}),
             }));
           },
         },
@@ -1383,6 +1428,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   );
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
   const publicClient = createJinnPublicClient(config.rpcUrl, NETWORK_CHAIN);
+  publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrl, NETWORK_CHAIN, masterAccount);
 
   const evictionRecovery =
@@ -1899,6 +1945,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       },
     });
     launchedRecordGenerators.push(...wired.generators);
+    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
+      launchedGeneratorStateBySolverType.set(solverType, getState);
+    }
     if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
       predictionGeneratorRef =
         wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;

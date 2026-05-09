@@ -117,6 +117,7 @@ export interface LauncherStatusBudgetView {
 
 export interface LauncherStatusNetEntry {
   name: string;
+  solverType?: string;
   generator: LauncherStatusGeneratorView;
   openTasks: number;
   budget: LauncherStatusBudgetView;
@@ -478,6 +479,14 @@ export interface GeneratorConfig {
   minVolume24hUsd?: string;
   maxYesSpread?: string;
   maxOrderbookAgeSeconds?: number;
+  N_target_successes?: number;
+  N_max_postings_per_task?: number;
+  cooldown_ms?: number;
+  claimPolicy?: {
+    maxClaims?: number;
+    maxClaimsPerOperator?: number;
+    claimLeaseTtlSeconds?: number;
+  };
 }
 
 /**

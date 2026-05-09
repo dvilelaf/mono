@@ -44,7 +44,19 @@ function noopGenerator(): TaskGenerator {
 describe('launched-record generator dispatcher', () => {
   it('dispatches prediction and swe-rebench records, and skips unknown contracts', async () => {
     const predictionGenerator = Object.assign(noopGenerator(), { getState: () => ({}) });
-    const sweGenerator = noopGenerator();
+    const sweGenerator = Object.assign(noopGenerator(), {
+      getState: () => ({
+        kind: 'swe-rebench-v2',
+        lastPollAt: '2026-05-08T10:10:00.000Z',
+        lastPollSummary: { poolSize: 42, posted: 1, skipped: 41 },
+        totalPosted: 4,
+        config: {
+          N_target_successes: 5,
+          N_max_postings_per_task: 15,
+          cooldown_ms: 86_400_000,
+        },
+      }),
+    });
     const factories: LaunchedRecordGeneratorFactories = {
       predictionV1: vi.fn(() => predictionGenerator),
       sweRebenchV2: vi.fn(() => sweGenerator),
@@ -85,10 +97,23 @@ describe('launched-record generator dispatcher', () => {
       recordRef: expect.objectContaining({ current: sweRecord }),
     }));
     expect(result.generators).toEqual([
-      { solverType: 'prediction.v1', generator: predictionGenerator },
-      { solverType: 'swe-rebench-v2.v1', generator: sweGenerator },
+      {
+        solverType: 'prediction.v1',
+        generator: predictionGenerator,
+        getLauncherState: expect.any(Function),
+      },
+      {
+        solverType: 'swe-rebench-v2.v1',
+        generator: sweGenerator,
+        getLauncherState: expect.any(Function),
+      },
     ]);
     expect(result.predictionGeneratorRef).toBe(predictionGenerator);
+    expect(result.generatorStatesBySolverType.get('swe-rebench-v2.v1')?.()).toEqual({
+      cadenceMs: 86_400_000,
+      lastPollAt: '2026-05-08T10:10:00.000Z',
+      lastPollSummary: { evaluated: 42, posted: 1, skipped: 41 },
+    });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unknown.v1'));
     expect(logger.info).toHaveBeenCalledWith(
       '[main] launched-record generator wired: 5474_swe-rebench-v2-v1_edb172d3 (swe-rebench-v2.v1, status=paused)',

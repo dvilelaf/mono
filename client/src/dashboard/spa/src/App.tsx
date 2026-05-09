@@ -12,7 +12,6 @@ import { AgentRail } from './shell/AgentRail.js';
 import { RestartBanner } from './shell/RestartBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
-import { LeaderboardPage } from './pages/leaderboard/Leaderboard.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -82,14 +81,6 @@ export default function App(): JSX.Element {
             <LauncherLaunchedPage />
           </Route>
           <Route path="/launcher"><LauncherPage /></Route>
-          <Route path="/leaderboard/:solverNet">
-            {(params: { solverNet: string }) => (
-              <LeaderboardPage solverNet={params.solverNet} />
-            )}
-          </Route>
-          <Route path="/leaderboard">
-            <Redirect to="/leaderboard/prediction" />
-          </Route>
           <Route><Redirect to="/overview" /></Route>
         </Switch>
       </AppShell>

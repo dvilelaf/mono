@@ -33,12 +33,6 @@ import {
   type PoolTask,
 } from './_swe-rebench-v2-pool.js';
 
-/** Config passed to buildGenerator — sourced from env or TestnetAutoContext. */
-export interface SweRebenchV2AutoConfig {
-  stateDir: string;
-  generatorConfig?: GeneratorConfig;
-}
-
 const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
 const CONTRACT_ID = 'swe-rebench-v2';
@@ -47,7 +41,21 @@ const CONTRACT_VERSION = 'v1';
 /** How long the pool is cached before a full refresh (24 h). */
 const POOL_REFRESH_MS = 24 * 60 * 60 * 1000;
 
-export type SweRebenchV2GeneratorRuntimeConfig = Partial<GeneratorConfig>;
+export interface SweRebenchV2ClaimPolicyRuntimeConfig {
+  maxClaims?: number;
+  maxClaimsPerOperator?: number;
+  claimLeaseTtlSeconds?: number;
+}
+
+export type SweRebenchV2GeneratorRuntimeConfig = Partial<GeneratorConfig> & {
+  claimPolicy?: SweRebenchV2ClaimPolicyRuntimeConfig;
+};
+
+/** Config passed to buildGenerator — sourced from env or TestnetAutoContext. */
+export interface SweRebenchV2AutoConfig {
+  stateDir: string;
+  generatorConfig?: SweRebenchV2GeneratorRuntimeConfig;
+}
 
 export interface SweRebenchV2GeneratorStaticConfig {
   stateDir?: string;
@@ -154,7 +162,7 @@ function repoFromInstanceId(instanceId: string): string {
   return `${org}/${repo}`;
 }
 
-function sweRebenchClaimPolicy(): TaskClaimPolicy {
+function sweRebenchDefaultClaimPolicy(): TaskClaimPolicy {
   const contract = getSolverNetContract({ id: CONTRACT_ID, version: CONTRACT_VERSION });
   const defaults = contract?.claimPolicyDefaults;
   return {
@@ -162,6 +170,30 @@ function sweRebenchClaimPolicy(): TaskClaimPolicy {
     maxClaims: defaults?.maxClaims ?? 50,
     maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
     claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
+  };
+}
+
+function normalizeClaimPolicy(raw: unknown): TaskClaimPolicy {
+  const defaults = sweRebenchDefaultClaimPolicy();
+  const cfg = typeof raw === 'object' && raw !== null
+    ? raw as { claimPolicy?: unknown }
+    : {};
+  const policy = typeof cfg.claimPolicy === 'object' && cfg.claimPolicy !== null
+    ? cfg.claimPolicy as Record<string, unknown>
+    : {};
+  const maxClaims = positiveInt(policy.maxClaims, defaults.maxClaims);
+  const maxClaimsPerOperator = Math.min(
+    maxClaims,
+    positiveInt(policy.maxClaimsPerOperator, defaults.maxClaimsPerOperator),
+  );
+  return {
+    ...defaults,
+    maxClaims,
+    maxClaimsPerOperator,
+    claimLeaseTtlSeconds: positiveInt(
+      policy.claimLeaseTtlSeconds,
+      defaults.claimLeaseTtlSeconds,
+    ),
   };
 }
 
@@ -192,7 +224,7 @@ async function maybeSignTask(
     window: task.window!,
     spec: task.spec ?? {},
     eligibility: task.eligibility ?? {},
-    claimPolicy: task.claimPolicy ?? sweRebenchClaimPolicy(),
+    claimPolicy: task.claimPolicy ?? normalizeClaimPolicy(undefined),
     creator: {
       safeAddress: opts.creator.safeAddress,
       agentEoa: opts.creator.agentEoa,
@@ -253,9 +285,11 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
 
   const tick = async (): Promise<Task | null> => {
     const now = Date.now();
-    const genConfig = normalizeGeneratorConfig(
-      config.getGeneratorConfig ? config.getGeneratorConfig() : config.generatorConfig,
-    );
+    const runtimeConfig = config.getGeneratorConfig
+      ? config.getGeneratorConfig()
+      : config.generatorConfig;
+    const genConfig = normalizeGeneratorConfig(runtimeConfig);
+    const claimPolicy = normalizeClaimPolicy(runtimeConfig);
 
     // Refresh pool if stale or empty
     if (pool.length === 0 || now - poolLoadedAt > POOL_REFRESH_MS) {
@@ -336,7 +370,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         startTs: now,
         endTs: windowEndTs,
       },
-      claimPolicy: sweRebenchClaimPolicy(),
+      claimPolicy,
       spec,
       eligibility: {
         hf_dataset: candidate.hf_dataset,

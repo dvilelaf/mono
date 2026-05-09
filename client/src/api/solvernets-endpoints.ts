@@ -276,6 +276,14 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
     N_target_successes: z.number().int().positive().optional(),
     N_max_postings_per_task: z.number().int().positive().optional(),
     cooldown_ms: z.number().int().nonnegative().optional(),
+    claimPolicy: z
+      .object({
+        maxClaims: z.number().int().positive().max(65_535).optional(),
+        maxClaimsPerOperator: z.number().int().positive().max(65_535).optional(),
+        claimLeaseTtlSeconds: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -290,14 +298,97 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
         message: 'must be >= N_target_successes',
       });
     }
+    if (
+      value.claimPolicy?.maxClaims !== undefined &&
+      value.claimPolicy.maxClaimsPerOperator !== undefined &&
+      value.claimPolicy.maxClaimsPerOperator > value.claimPolicy.maxClaims
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['claimPolicy', 'maxClaimsPerOperator'],
+        message: 'must be <= claimPolicy.maxClaims',
+      });
+    }
   });
+
+function isRecordForContract(
+  record: LaunchedSolverNetRecord,
+  id: string,
+  version: string,
+): boolean {
+  const contract = resolveContractFromSolverNetId(record.solverNetId);
+  return contract?.id === id && contract.version === version;
+}
+
+function defaultSweRebenchV2ClaimPolicy(): {
+  maxClaims: number;
+  maxClaimsPerOperator: number;
+  claimLeaseTtlSeconds: number;
+} {
+  const defaults = getSolverNetContract({
+    id: 'swe-rebench-v2',
+    version: 'v1',
+  })?.claimPolicyDefaults;
+  return {
+    maxClaims: defaults?.maxClaims ?? 50,
+    maxClaimsPerOperator: defaults?.maxClaimsPerOperator ?? 5,
+    claimLeaseTtlSeconds: defaults?.claimLeaseTtlSeconds ?? 60 * 60,
+  };
+}
+
+function mergeGeneratorConfigPatchForRecord(
+  record: LaunchedSolverNetRecord,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const nextConfig: Record<string, unknown> = {
+    ...(record.generatorConfig ?? {}),
+    ...patch,
+  };
+  if (
+    isRecordForContract(record, 'swe-rebench-v2', 'v1') &&
+    typeof patch.claimPolicy === 'object' &&
+    patch.claimPolicy !== null
+  ) {
+    const existingPolicy =
+      typeof record.generatorConfig?.claimPolicy === 'object' &&
+      record.generatorConfig.claimPolicy !== null
+        ? record.generatorConfig.claimPolicy as Record<string, unknown>
+        : {};
+    nextConfig.claimPolicy = {
+      ...existingPolicy,
+      ...patch.claimPolicy as Record<string, unknown>,
+    };
+  }
+  return nextConfig;
+}
+
+function validateSweRebenchV2EffectiveConfig(
+  record: LaunchedSolverNetRecord,
+  config: Record<string, unknown>,
+): string | undefined {
+  if (!isRecordForContract(record, 'swe-rebench-v2', 'v1')) return undefined;
+  const defaults = defaultSweRebenchV2ClaimPolicy();
+  const rawPolicy =
+    typeof config.claimPolicy === 'object' && config.claimPolicy !== null
+      ? config.claimPolicy as Record<string, unknown>
+      : {};
+  const maxClaims = typeof rawPolicy.maxClaims === 'number'
+    ? rawPolicy.maxClaims
+    : defaults.maxClaims;
+  const maxClaimsPerOperator = typeof rawPolicy.maxClaimsPerOperator === 'number'
+    ? rawPolicy.maxClaimsPerOperator
+    : defaults.maxClaimsPerOperator;
+  if (maxClaimsPerOperator > maxClaims) {
+    return 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims';
+  }
+  return undefined;
+}
 
 function parseGeneratorConfigPatchForRecord(
   record: LaunchedSolverNetRecord,
   raw: unknown,
 ): z.SafeParseReturnType<unknown, Record<string, unknown>> {
-  const contract = resolveContractFromSolverNetId(record.solverNetId);
-  if (contract?.id === 'swe-rebench-v2' && contract.version === 'v1') {
+  if (isRecordForContract(record, 'swe-rebench-v2', 'v1')) {
     return SweRebenchV2GeneratorConfigPatchSchema.safeParse(raw);
   }
   return PredictionV1GeneratorConfigPatchSchema.safeParse(raw);
@@ -1129,10 +1220,17 @@ export function registerSolverNetsEndpoints(
 
     // Patch semantics: merge the provided fields over the existing config.
     // Operators editing one field shouldn't have to re-send the rest.
-    const nextConfig: Record<string, unknown> = {
-      ...(record.generatorConfig ?? {}),
-      ...parsed.data,
-    };
+    const nextConfig = mergeGeneratorConfigPatchForRecord(record, parsed.data);
+    const effectiveConfigError = validateSweRebenchV2EffectiveConfig(record, nextConfig);
+    if (effectiveConfigError) {
+      return c.json(
+        {
+          error: 'invalid_body',
+          message: effectiveConfigError,
+        },
+        400,
+      );
+    }
 
     // Persist on disk. The store schema treats generatorConfig as an opaque
     // record; we widen the strongly-typed runtime config back to that shape

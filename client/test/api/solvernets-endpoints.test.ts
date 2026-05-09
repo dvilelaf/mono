@@ -1153,6 +1153,11 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
         N_target_successes: 5,
         N_max_postings_per_task: 15,
         cooldown_ms: 86_400_000,
+        claimPolicy: {
+          maxClaims: 50,
+          maxClaimsPerOperator: 5,
+          claimLeaseTtlSeconds: 3_600,
+        },
       },
     };
     await store.writeRecord(launched);
@@ -1165,7 +1170,13 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
       {
         method: 'PATCH',
         headers: authHeaders(),
-        body: JSON.stringify({ cooldown_ms: 300_000 }),
+        body: JSON.stringify({
+          cooldown_ms: 300_000,
+          claimPolicy: {
+            maxClaims: 10,
+            claimLeaseTtlSeconds: 1_800,
+          },
+        }),
       },
     );
 
@@ -1174,14 +1185,61 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
       N_target_successes: 5,
       N_max_postings_per_task: 15,
       cooldown_ms: 300_000,
+      claimPolicy: {
+        maxClaims: 10,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 1_800,
+      },
     });
     expect(configRef.current).toEqual({
       N_target_successes: 5,
       N_max_postings_per_task: 15,
       cooldown_ms: 300_000,
+      claimPolicy: {
+        maxClaims: 10,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 1_800,
+      },
     });
     const onDisk = await store.loadRecord(launched.solverNetId);
     expect(onDisk?.generatorConfig?.cooldown_ms).toBe(300_000);
+    expect(onDisk?.generatorConfig?.claimPolicy).toEqual({
+      maxClaims: 10,
+      maxClaimsPerOperator: 5,
+      claimLeaseTtlSeconds: 1_800,
+    });
+  });
+
+  it('rejects swe-rebench-v2 claim policy with per-operator claims above max claims', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ claimPolicy: { maxClaims: 3 } }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message?: string };
+    expect(body.message).toMatch(/maxClaimsPerOperator/);
   });
 
   it('rejects unknown record id with 404', async () => {

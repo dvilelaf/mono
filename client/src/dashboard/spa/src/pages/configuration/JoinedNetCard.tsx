@@ -6,7 +6,11 @@ import type {
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
-import { CLAUDE_MODELS, resolveModelOption } from './claudeModels.js';
+import {
+  defaultModelForHarness,
+  modelOptionsForHarness,
+  resolveModelOption,
+} from './claudeModels.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -59,13 +63,13 @@ function snapshot(joined: JoinedNetEntry): FormState {
   return {
     harness: joined.harness ?? '',
     plugins: joined.plugins ?? [],
-    model: joined.model ?? CLAUDE_MODELS[0]!.id,
+    model: joined.model ?? defaultModelForHarness(joined.harness),
   };
 }
 
 function isDirty(form: FormState, joined: JoinedNetEntry): boolean {
   if (form.harness !== (joined.harness ?? '')) return true;
-  if (form.model !== (joined.model ?? CLAUDE_MODELS[0]!.id)) return true;
+  if (form.model !== (joined.model ?? defaultModelForHarness(joined.harness))) return true;
   const a = [...form.plugins].sort();
   const b = [...(joined.plugins ?? [])].sort();
   if (a.length !== b.length) return true;
@@ -147,12 +151,15 @@ export function JoinedNetCard({
     }
   }, [defaultExpanded, focusOn]);
 
-  const compatible = catalogEntry?.compatibleHarnesses ?? [];
+  const compatible = (catalogEntry?.compatibleHarnesses ?? []).filter((h) =>
+    h.supportsRoles.includes('solving'),
+  );
   const compatibleNames = new Set(compatible.map((h) => h.name));
   const harnessIncompatible = form.harness !== '' && compatible.length > 0 && !compatibleNames.has(form.harness);
   const contractLabel = catalogEntry
     ? `${catalogEntry.contract.id}@${catalogEntry.contract.version}`
     : '';
+  const modelOptions = modelOptionsForHarness(form.harness);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -351,7 +358,7 @@ export function JoinedNetCard({
           <span>model</span>
           <span style={{ color: 'var(--fg)' }}>
             {joined.model ? (
-              resolveModelOption(joined.model).label
+              resolveModelOption(joined.model, joined.harness).label
             ) : (
               <span style={{ color: 'var(--fg-dim)' }}>—</span>
             )}
@@ -385,7 +392,7 @@ export function JoinedNetCard({
           <span>model</span>
           <span style={{ color: 'var(--fg)' }}>
             {joined.model ? (
-              resolveModelOption(joined.model).label
+              resolveModelOption(joined.model, joined.harness).label
             ) : (
               <span style={{ color: 'var(--fg-dim)' }}>—</span>
             )}
@@ -405,7 +412,14 @@ export function JoinedNetCard({
               aria-label="Harness implementation"
               data-testid="joined-net-card-harness-select"
               value={form.harness}
-              onChange={(e) => setForm({ ...form, harness: e.target.value })}
+              onChange={(e) => {
+                const harness = e.target.value;
+                setForm((prev) => ({
+                  ...prev,
+                  harness,
+                  model: defaultModelForHarness(harness),
+                }));
+              }}
               style={{
                 ...selectStyle,
                 borderColor: harnessIncompatible ? 'var(--break-red)' : 'var(--border)',
@@ -541,19 +555,19 @@ export function JoinedNetCard({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <span style={fieldLabelStyle}>Model</span>
             <select
-              aria-label="Claude model"
+              aria-label="Model"
               data-testid="joined-net-card-model-select"
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value })}
               style={selectStyle}
             >
-              {CLAUDE_MODELS.map((m) => (
+              {modelOptions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>
               ))}
               {(() => {
-                const resolved = resolveModelOption(form.model);
+                const resolved = resolveModelOption(form.model, form.harness);
                 if (resolved.isCustom) {
                   return (
                     <option key={form.model} value={form.model}>

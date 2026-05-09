@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { LauncherGeneratorStateSnapshot } from '../api/launcher-status.js';
 import type { TaskGenerator } from '../tasks/sources.js';
 import type { PredictionV1GeneratorRuntimeConfig } from '../solver-types/prediction-v1-auto.js';
 import type {
@@ -47,11 +48,13 @@ export interface WireLaunchedRecordGeneratorsOpts {
 export interface WiredLaunchedRecordGenerator {
   solverType: string;
   generator: TaskGenerator;
+  getLauncherState?: () => LauncherGeneratorStateSnapshot | undefined;
 }
 
 export interface WireLaunchedRecordGeneratorsResult {
   generators: WiredLaunchedRecordGenerator[];
   predictionGeneratorRef?: TaskGenerator;
+  generatorStatesBySolverType: Map<string, () => LauncherGeneratorStateSnapshot | undefined>;
 }
 
 function solverTypeFor(id: string, version: string): string {
@@ -135,12 +138,69 @@ function hasGetState(generator: TaskGenerator): boolean {
   return typeof (generator as { getState?: unknown }).getState === 'function';
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnapshot | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const snapshot = raw as Record<string, unknown>;
+  const config = typeof snapshot['config'] === 'object' && snapshot['config'] !== null
+    ? snapshot['config'] as Record<string, unknown>
+    : undefined;
+  const cadenceMs = finiteNumber(snapshot['cadenceMs']) ?? finiteNumber(config?.['cooldown_ms']);
+  if (cadenceMs === undefined) return undefined;
+
+  const projected: LauncherGeneratorStateSnapshot = { cadenceMs };
+  const lastPollAt = optionalString(snapshot['lastPollAt']);
+  if (lastPollAt) projected.lastPollAt = lastPollAt;
+
+  const lastError = typeof snapshot['lastError'] === 'object' && snapshot['lastError'] !== null
+    ? snapshot['lastError'] as Record<string, unknown>
+    : undefined;
+  const lastErrorMessage = optionalString(lastError?.['message']);
+  const lastErrorAt = optionalString(lastError?.['at']);
+  if (lastErrorMessage && lastErrorAt) {
+    projected.lastError = { message: lastErrorMessage, at: lastErrorAt };
+  }
+
+  const rawSummary = typeof snapshot['lastPollSummary'] === 'object' && snapshot['lastPollSummary'] !== null
+    ? snapshot['lastPollSummary'] as Record<string, unknown>
+    : undefined;
+  if (rawSummary) {
+    const evaluated = finiteNumber(rawSummary['evaluated']) ?? finiteNumber(rawSummary['poolSize']);
+    const posted = finiteNumber(rawSummary['posted']);
+    const skipped = finiteNumber(rawSummary['skipped']);
+    if (evaluated !== undefined && posted !== undefined && skipped !== undefined) {
+      projected.lastPollSummary = { evaluated, posted, skipped };
+    }
+  }
+
+  return projected;
+}
+
+function launcherStateReaderFor(
+  generator: TaskGenerator,
+): (() => LauncherGeneratorStateSnapshot | undefined) | undefined {
+  if (!hasGetState(generator)) return undefined;
+  const stateful = generator as TaskGenerator & { getState(): unknown };
+  return () => projectLauncherGeneratorState(stateful.getState());
+}
+
 export async function wireLaunchedRecordGenerators(
   opts: WireLaunchedRecordGeneratorsOpts,
 ): Promise<WireLaunchedRecordGeneratorsResult> {
   const factories = opts.factories ?? await defaultFactories();
   const logger = opts.logger ?? {};
   const generators: WiredLaunchedRecordGenerator[] = [];
+  const generatorStatesBySolverType = new Map<
+    string,
+    () => LauncherGeneratorStateSnapshot | undefined
+  >();
   let predictionGeneratorRef: TaskGenerator | undefined;
 
   for (const pending of opts.pendingGenerators) {
@@ -179,12 +239,17 @@ export async function wireLaunchedRecordGenerators(
       continue;
     }
 
-    generators.push({ solverType: contract.solverType, generator });
+    const getLauncherState = launcherStateReaderFor(generator);
+    if (getLauncherState) {
+      generatorStatesBySolverType.set(contract.solverType, getLauncherState);
+    }
+
+    generators.push({ solverType: contract.solverType, generator, getLauncherState });
     logger.info?.(
       `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
         `(${contract.id}.${contract.version}, status=${pending.record.status})`,
     );
   }
 
-  return { generators, predictionGeneratorRef };
+  return { generators, predictionGeneratorRef, generatorStatesBySolverType };
 }

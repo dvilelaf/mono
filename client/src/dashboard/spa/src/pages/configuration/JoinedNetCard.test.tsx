@@ -59,6 +59,22 @@ const CATALOG: SolverNetCatalogEntry = {
   ],
 };
 
+const SWE_CATALOG: SolverNetCatalogEntry = {
+  name: 'swe-rebench-v2',
+  description: 'SWE-rebench v2',
+  state: 'live',
+  contract: { id: 'swe-rebench-v2', version: 'v1' },
+  supportedRoles: ['solving', 'evaluating'],
+  compatibleHarnesses: [
+    { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+    { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving'] },
+    { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating'] },
+  ],
+  compatiblePlugins: [
+    { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   // Reset the suite-level fail-fast defaults so per-test overrides don't
@@ -146,6 +162,39 @@ describe('<JoinedNetCard />', () => {
     const compatible = { ...ENTRY, harness: 'legacy-claude' };
     wrap(<JoinedNetCard joined={compatible} catalogEntry={CATALOG} defaultExpanded />);
     expect(screen.queryByTestId('joined-net-card-warn-expanded')).toBeNull();
+  });
+
+  it('offers both Codex and Claude learner harnesses for SWE and uses Codex model options', () => {
+    wrap(
+      <JoinedNetCard
+        joined={{
+          manifestCid: 'bafyreibbb',
+          name: 'SWE-rebench v2',
+          roles: ['solver', 'evaluator'],
+          harness: 'codex-code-learner',
+          model: 'gpt-5.4-mini',
+          plugins: ['swe-rebench-v2-runtime'],
+        }}
+        catalogEntry={SWE_CATALOG}
+        defaultExpanded
+      />,
+    );
+
+    const harnessSelect = screen.getByTestId('joined-net-card-harness-select') as HTMLSelectElement;
+    const harnessOptions = Array.from(harnessSelect.options).map((o) => o.value);
+    expect(harnessOptions).toContain('codex-code-learner');
+    expect(harnessOptions).toContain('claude-code-learner');
+
+    const modelSelect = screen.getByTestId('joined-net-card-model-select') as HTMLSelectElement;
+    const codexModelOptions = Array.from(modelSelect.options).map((o) => o.value);
+    expect(codexModelOptions).toContain('gpt-5.4-mini');
+    expect(codexModelOptions).toContain('gpt-5.5');
+    expect(codexModelOptions).not.toContain('claude-haiku-4-5-20251001');
+
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code-learner' } });
+    const claudeModelOptions = Array.from(modelSelect.options).map((o) => o.value);
+    expect(claudeModelOptions).toContain('claude-haiku-4-5-20251001');
+    expect(claudeModelOptions).not.toContain('gpt-5.5');
   });
 
   it('disables Save until the form is dirty', async () => {

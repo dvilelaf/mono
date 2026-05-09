@@ -7,7 +7,12 @@ import type {
   SolverNetCatalogEntry,
   SolverNetsCatalogResponse,
 } from '../../api/types.js';
-import { CLAUDE_MODELS, resolveModelOption } from '../configuration/claudeModels.js';
+import {
+  defaultModelForHarness,
+  modelOptionsForHarness,
+  resolveModelOption,
+} from '../configuration/claudeModels.js';
+import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
  * Operator participation flow keyed by `manifestCid`.
@@ -58,19 +63,6 @@ function findCatalogEntry(
   );
 }
 
-function formatEthFromWei(wei: string | undefined): string {
-  if (!wei || !/^\d+$/.test(wei)) return '—';
-  try {
-    const n = BigInt(wei);
-    const eth = Number(n) / 1e18;
-    if (eth === 0) return '0 ETH';
-    if (eth < 0.0001) return `${eth.toExponential(3)} ETH`;
-    return `${eth.toFixed(eth < 1 ? 6 : 4)} ETH`;
-  } catch {
-    return '—';
-  }
-}
-
 function truncateAddress(address: string): string {
   if (!address) return '';
   if (address.length <= 13) return address;
@@ -105,9 +97,12 @@ export function JoinFlow({
   const catalogEntry = manifest
     ? findCatalogEntry(catalogQuery.data, manifest.contract)
     : undefined;
+  const solverCompatibleHarnesses = (catalogEntry?.compatibleHarnesses ?? []).filter((h) =>
+    h.supportsRoles.includes('solving'),
+  );
   const defaultHarness =
-    catalogEntry?.compatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
-  const defaultModel = CLAUDE_MODELS[0]!.id;
+    solverCompatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
+  const defaultModel = defaultModelForHarness(defaultHarness);
 
   const [form, setForm] = useState<JoinFormState>({
     roles: [],
@@ -123,15 +118,19 @@ export function JoinFlow({
   // shift to that. This is render-time-safe because we only call setForm
   // when the values are unequal — React queues the re-render and bails out
   // from infinite loops automatically.
-  const catalogPreferredHarness = catalogEntry?.compatibleHarnesses[0]?.name;
+  const catalogPreferredHarness = solverCompatibleHarnesses[0]?.name;
   if (
     catalogPreferredHarness &&
     form.harness === DEFAULT_HARNESS &&
-    catalogPreferredHarness !== DEFAULT_HARNESS &&
-    !catalogEntry?.compatibleHarnesses.some((h) => h.name === DEFAULT_HARNESS)
+    catalogPreferredHarness !== DEFAULT_HARNESS
   ) {
-    setForm({ ...form, harness: catalogPreferredHarness });
+    setForm({
+      ...form,
+      harness: catalogPreferredHarness,
+      model: defaultModelForHarness(catalogPreferredHarness),
+    });
   }
+  const modelOptions = modelOptionsForHarness(form.harness);
 
   const submitMutation = useMutation({
     mutationFn: () =>
@@ -268,11 +267,11 @@ export function JoinFlow({
           </span>
           <span>Solution price</span>
           <span style={{ color: 'var(--fg)' }}>
-            {formatEthFromWei(manifest.solutionPriceWei)}
+            {formatWeiAmount(manifest.solutionPriceWei)}
           </span>
           <span>Verdict price</span>
           <span style={{ color: 'var(--fg)' }}>
-            {formatEthFromWei(manifest.verdictPriceWei)}
+            {formatWeiAmount(manifest.verdictPriceWei)}
           </span>
           <span>Open roles</span>
           <span data-testid="join-flow-open-roles" style={{ color: 'var(--fg)' }}>
@@ -380,36 +379,43 @@ export function JoinFlow({
                 aria-label="Harness"
                 data-testid="join-harness-select"
                 value={form.harness}
-                onChange={(e) => setForm({ ...form, harness: e.target.value })}
+                onChange={(e) => {
+                  const harness = e.target.value;
+                  setForm({
+                    ...form,
+                    harness,
+                    model: defaultModelForHarness(harness),
+                  });
+                }}
                 style={selectStyle}
               >
-                {(catalogEntry?.compatibleHarnesses ?? []).map((h) => (
+                {solverCompatibleHarnesses.map((h) => (
                   <option key={h.name} value={h.name}>
                     {h.name}@{h.version}
                   </option>
                 ))}
-                {(!catalogEntry || catalogEntry.compatibleHarnesses.length === 0) && (
+                {(!catalogEntry || solverCompatibleHarnesses.length === 0) && (
                   <option value={form.harness}>{form.harness}</option>
                 )}
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={fieldLabelStyle}>Claude model</span>
+              <span style={fieldLabelStyle}>Model</span>
               <select
-                aria-label="Claude model"
+                aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
                 style={selectStyle}
               >
-                {CLAUDE_MODELS.map((m) => (
+                {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
                   </option>
                 ))}
                 {(() => {
-                  const resolved = resolveModelOption(form.model);
+                  const resolved = resolveModelOption(form.model, form.harness);
                   if (resolved.isCustom) {
                     return (
                       <option key={form.model} value={form.model}>

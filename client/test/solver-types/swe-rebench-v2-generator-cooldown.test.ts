@@ -110,4 +110,38 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord cooldown', () => {
       lastPollSummary: { posted: 0 },
     });
   });
+
+  it('applies launched-record claim policy overrides to newly posted tasks', async () => {
+    vi.setSystemTime(new Date('2026-05-08T12:00:00.000Z'));
+    const recordRef = { current: launchedRecord() };
+    const configRef = {
+      current: {
+        N_target_successes: 1,
+        N_max_postings_per_task: 1,
+        cooldown_ms: 86_400_000,
+        claimPolicy: {
+          maxClaims: 10,
+          maxClaimsPerOperator: 2,
+          claimLeaseTtlSeconds: 1_800,
+        },
+      },
+    };
+    const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
+      recordRef,
+      configRef,
+      staticConfig: { stateDir },
+    });
+
+    const task = await gen();
+
+    expect(task).toMatchObject({
+      solverType: 'swe-rebench-v2.v1',
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 10,
+        maxClaimsPerOperator: 2,
+        claimLeaseTtlSeconds: 1_800,
+      },
+    });
+  });
 });

@@ -177,6 +177,30 @@ describe('JoinFlow — manifest fetch', () => {
     );
   });
 
+  it('formats tiny manifest prices as gwei', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        solutionPriceWei: '10000000000',
+        verdictPriceWei: '5000000000',
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+
+    wrap(<JoinFlow />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+    expect(screen.getByText('10 gwei')).toBeTruthy();
+    expect(screen.getByText('5 gwei')).toBeTruthy();
+    expect(screen.queryByText(/e-/i)).toBeNull();
+  });
+
   it('shows a loading state while the manifest is in flight', () => {
     apiMock.getManifest.mockReturnValue(new Promise(() => undefined));
     wrap(<JoinFlow />);
@@ -222,6 +246,58 @@ describe('JoinFlow — role selection', () => {
 
     expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
     expect(screen.queryByTestId('join-flow-evaluator-info')).toBeNull();
+  });
+
+  it('defaults SWE solver joins to Codex and exposes GPT model choices', async () => {
+    apiMock.getManifest.mockResolvedValue({
+      manifest: {
+        ...baseManifest,
+        name: 'SWE-rebench v2',
+        contract: {
+          ...baseManifest.contract,
+          id: 'swe-rebench-v2',
+          version: 'v1',
+        },
+      },
+      lifecycle: {
+        status: 'launched' as const,
+        statusUpdatedAt: '2026-05-05T00:00:00Z',
+        sourceBlock: 1,
+      },
+    });
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          name: 'swe-rebench-v2',
+          contract: { id: 'swe-rebench-v2', version: 'v1' },
+          compatibleHarnesses: [
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+          compatiblePlugins: [
+            { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-summary')).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() => expect(harnessSelect.value).toBe('codex-code-learner'));
+
+    const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
+    const optionValues = Array.from(modelSelect.options).map((o) => o.value);
+    expect(modelSelect.value).toBe('gpt-5.4-mini');
+    expect(optionValues).toContain('gpt-5.5');
+    expect(optionValues).not.toContain('claude-haiku-4-5-20251001');
   });
 
   it('shows both the harness picker and an evaluator binding note when both roles are selected', async () => {

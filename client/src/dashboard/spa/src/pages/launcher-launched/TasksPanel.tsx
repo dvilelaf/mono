@@ -24,7 +24,7 @@ import { formatTimestamp, truncateCid } from './helpers.js';
  * this is a faithful copy of the predecessor `PostedTasksList` ergonomic.
  */
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 5;
 
 const STATE_TONE: Record<LauncherTaskState, { fg: string; label: string }> = {
   open: { fg: 'var(--accent-sky)', label: 'Open' },

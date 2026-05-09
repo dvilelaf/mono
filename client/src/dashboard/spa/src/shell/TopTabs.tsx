@@ -5,7 +5,6 @@ const TABS = [
   { path: '/operator', label: 'Operator' },
   { path: '/captures', label: 'Captures' },
   { path: '/launcher', label: 'Launcher' },
-  { path: '/leaderboard', label: 'Leaderboard' },
 ] as const;
 
 export function TopTabs(): JSX.Element {

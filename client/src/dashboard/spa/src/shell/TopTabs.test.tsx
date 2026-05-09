@@ -20,6 +20,16 @@ describe('TopTabs', () => {
     expect(launcher.getAttribute('data-active')).toBe('false');
   });
 
+  it('does not render the Leaderboard tab while the leaderboard surface is disabled', () => {
+    const { hook } = memoryLocation({ path: '/overview' });
+    render(
+      <Router hook={hook}>
+        <TopTabs />
+      </Router>,
+    );
+    expect(screen.queryByText('Leaderboard')).toBeNull();
+  });
+
   it('marks Operator active for operator routes', () => {
     const { hook } = memoryLocation({ path: '/operator/join/bafybeiaaa' });
     render(
