@@ -12,6 +12,7 @@ import {
 } from '../harnesses/external-impls/index.js';
 import { buildHarnesses as defaultBuildHarnesses } from '../harnesses/impls/index.js';
 import { PredictionV1BaselineImpl } from '../harnesses/impls/prediction-v1-baseline/index.js';
+import { canonicalHarnessName, harnessNameMatches } from '../harnesses/names.js';
 import type { Harness, ReadyStatus, RuntimePlugin } from '../harnesses/types.js';
 import { TrajectoryCollector } from '../trajectory/collector.js';
 import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/prediction-v1.js';
@@ -316,7 +317,12 @@ export async function buildPredictionOperatorStatus({
     }
 
     const disabledHarnesses = config.harnesses?.disabled ?? [...DEFAULT_DISABLED_HARNESSES];
-    const selectedHarnessDisabled = Boolean(net.harness && disabledHarnesses.includes(net.harness));
+    const selectedHarnessDisabled = Boolean(
+      net.harness &&
+        disabledHarnesses
+          .map((name) => canonicalHarnessName(name))
+          .includes(canonicalHarnessName(net.harness)),
+    );
     const harnesses = buildHarnesses({
       stub: true,
       rpcUrl: config.rpcUrl,
@@ -328,7 +334,7 @@ export async function buildPredictionOperatorStatus({
       disabledNames: disabledHarnesses,
     });
     const selectedHarness = net.harness
-      ? harnesses.find((candidate) => candidate.name === net.harness)
+      ? harnesses.find((candidate) => harnessNameMatches(candidate.name, net.harness))
       : undefined;
     harnessStatus = selectedHarness
       ? await buildHarnessStatus(selectedHarness)

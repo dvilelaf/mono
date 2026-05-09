@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
+import { harnessNameMatches } from '../../harnesses/names.js';
 import {
   loadManifest,
   verifyManifestSignature,
@@ -221,7 +222,7 @@ async function runEnable(ctx: CommandContext, configPath: string, name: string):
     claudeModel: loaded.claudeModel,
     implStateDirRoot: loaded.engine.implStateDirRoot,
     ipfsRegistryUrl: loaded.ipfsRegistryUrl,
-  }).find((candidate) => candidate.name === name);
+  }).find((candidate) => harnessNameMatches(candidate.name, name));
 
   if (!harness) {
     emitError(ctx, 'unknown_harness', `Unknown Harness: ${name}`, { name });

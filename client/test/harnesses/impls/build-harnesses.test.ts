@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
 import type { Harness } from '../../../src/harnesses/types.js';
 
 const ENV = {
@@ -57,13 +58,22 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     expect(a.length).toBe(b.length);
   });
 
-  it('registers codex-code-learner as an explicit peer without moving the default learner', () => {
+  it('registers codex as an explicit peer without moving the default Claude Code harness', () => {
     const impls = buildHarnesses({ ...ENV });
-    const learnerIndex = impls.findIndex((impl) => impl.name === 'claude-code-learner');
-    const codexIndex = impls.findIndex((impl) => impl.name === 'codex-code-learner');
+    const learnerIndex = impls.findIndex((impl) => impl.name === CLAUDE_CODE_HARNESS);
+    const codexIndex = impls.findIndex((impl) => impl.name === CODEX_HARNESS);
 
     expect(learnerIndex).toBeGreaterThanOrEqual(0);
     expect(codexIndex).toBeGreaterThan(learnerIndex);
     expect(impls[codexIndex]!.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
+  });
+
+  it('accepts legacy learner names in disabledNames', () => {
+    const impls = buildHarnesses({
+      ...ENV,
+      disabledNames: ['codex-code-learner'],
+    });
+    expect(impls.some((impl) => impl.name === CODEX_HARNESS)).toBe(false);
+    expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
   });
 });

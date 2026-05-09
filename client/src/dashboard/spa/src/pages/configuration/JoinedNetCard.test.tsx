@@ -94,7 +94,8 @@ describe('<JoinedNetCard />', () => {
     wrap(<JoinedNetCard joined={ENTRY} catalogEntry={CATALOG} />);
     expect(screen.getByTestId('joined-net-card').getAttribute('data-expanded')).toBe('false');
     expect(screen.getByText('Prediction Markets')).toBeTruthy();
-    expect(screen.getByText('claude-code-learner')).toBeTruthy();
+    expect(screen.getByText('Claude Code')).toBeTruthy();
+    expect(screen.queryByText('claude-code-learner')).toBeNull();
     // Collapsed view shows the friendly tier label, not the pinned id.
     expect(screen.getByText('Haiku')).toBeTruthy();
     expect(screen.queryByText('claude-haiku-4-5-20251001')).toBeNull();
@@ -182,8 +183,10 @@ describe('<JoinedNetCard />', () => {
 
     const harnessSelect = screen.getByTestId('joined-net-card-harness-select') as HTMLSelectElement;
     const harnessOptions = Array.from(harnessSelect.options).map((o) => o.value);
-    expect(harnessOptions).toContain('codex-code-learner');
-    expect(harnessOptions).toContain('claude-code-learner');
+    expect(harnessOptions).toContain('codex');
+    expect(harnessOptions).toContain('claude-code');
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Codex 0.1.0');
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toContain('Claude Code 0.1.0');
 
     const modelSelect = screen.getByTestId('joined-net-card-model-select') as HTMLSelectElement;
     const codexModelOptions = Array.from(modelSelect.options).map((o) => o.value);
@@ -191,7 +194,7 @@ describe('<JoinedNetCard />', () => {
     expect(codexModelOptions).toContain('gpt-5.5');
     expect(codexModelOptions).not.toContain('claude-haiku-4-5-20251001');
 
-    fireEvent.change(harnessSelect, { target: { value: 'claude-code-learner' } });
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
     const claudeModelOptions = Array.from(modelSelect.options).map((o) => o.value);
     expect(claudeModelOptions).toContain('claude-haiku-4-5-20251001');
     expect(claudeModelOptions).not.toContain('gpt-5.5');

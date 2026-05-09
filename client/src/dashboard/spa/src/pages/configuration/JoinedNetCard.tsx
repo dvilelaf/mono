@@ -11,6 +11,12 @@ import {
   modelOptionsForHarness,
   resolveModelOption,
 } from './claudeModels.js';
+import {
+  canonicalHarnessName,
+  harnessDisplayName,
+  harnessNamesMatch,
+  harnessOptionLabel,
+} from './harnessNames.js';
 
 /**
  * Per-SolverNet edit card on /operator → SolverNets → Joined.
@@ -60,16 +66,18 @@ interface FormState {
 }
 
 function snapshot(joined: JoinedNetEntry): FormState {
+  const harness = canonicalHarnessName(joined.harness);
   return {
-    harness: joined.harness ?? '',
+    harness,
     plugins: joined.plugins ?? [],
     model: joined.model ?? defaultModelForHarness(joined.harness),
   };
 }
 
 function isDirty(form: FormState, joined: JoinedNetEntry): boolean {
-  if (form.harness !== (joined.harness ?? '')) return true;
-  if (form.model !== (joined.model ?? defaultModelForHarness(joined.harness))) return true;
+  const joinedHarness = canonicalHarnessName(joined.harness);
+  if (form.harness !== joinedHarness) return true;
+  if (form.model !== (joined.model ?? defaultModelForHarness(joinedHarness))) return true;
   const a = [...form.plugins].sort();
   const b = [...(joined.plugins ?? [])].sort();
   if (a.length !== b.length) return true;
@@ -151,11 +159,15 @@ export function JoinedNetCard({
     }
   }, [defaultExpanded, focusOn]);
 
-  const compatible = (catalogEntry?.compatibleHarnesses ?? []).filter((h) =>
-    h.supportsRoles.includes('solving'),
-  );
+  const compatible = (catalogEntry?.compatibleHarnesses ?? [])
+    .filter((h) => h.supportsRoles.includes('solving'))
+    .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+    .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index);
   const compatibleNames = new Set(compatible.map((h) => h.name));
-  const harnessIncompatible = form.harness !== '' && compatible.length > 0 && !compatibleNames.has(form.harness);
+  const harnessIncompatible =
+    form.harness !== '' &&
+    compatible.length > 0 &&
+    ![...compatibleNames].some((name) => harnessNamesMatch(name, form.harness));
   const contractLabel = catalogEntry
     ? `${catalogEntry.contract.id}@${catalogEntry.contract.version}`
     : '';
@@ -340,7 +352,7 @@ export function JoinedNetCard({
         >
           <span>harness</span>
           <span style={{ color: 'var(--fg)' }}>
-            {joined.harness ?? <span style={{ color: 'var(--fg-dim)' }}>—</span>}
+            {joined.harness ? harnessDisplayName(joined.harness) : <span style={{ color: 'var(--fg-dim)' }}>—</span>}
             {harnessIncompatible && (
               <span data-testid="joined-net-card-warn-collapsed" style={{ marginLeft: '10px', color: 'var(--break-red)' }}>
                 ⚠ does not support {contractLabel}
@@ -358,7 +370,7 @@ export function JoinedNetCard({
           <span>model</span>
           <span style={{ color: 'var(--fg)' }}>
             {joined.model ? (
-              resolveModelOption(joined.model, joined.harness).label
+              resolveModelOption(joined.model, canonicalHarnessName(joined.harness)).label
             ) : (
               <span style={{ color: 'var(--fg-dim)' }}>—</span>
             )}
@@ -379,7 +391,7 @@ export function JoinedNetCard({
         >
           <span>harness</span>
           <span style={{ color: 'var(--fg)' }}>
-            {joined.harness ?? <span style={{ color: 'var(--fg-dim)' }}>—</span>}
+            {joined.harness ? harnessDisplayName(joined.harness) : <span style={{ color: 'var(--fg-dim)' }}>—</span>}
           </span>
           <span>plugins</span>
           <span style={{ color: 'var(--fg)' }}>
@@ -392,7 +404,7 @@ export function JoinedNetCard({
           <span>model</span>
           <span style={{ color: 'var(--fg)' }}>
             {joined.model ? (
-              resolveModelOption(joined.model, joined.harness).label
+              resolveModelOption(joined.model, canonicalHarnessName(joined.harness)).label
             ) : (
               <span style={{ color: 'var(--fg-dim)' }}>—</span>
             )}
@@ -428,7 +440,7 @@ export function JoinedNetCard({
               {form.harness === '' && <option value="">—</option>}
               {compatible.map((h) => (
                 <option key={h.name} value={h.name}>
-                  {h.name}@{h.version}
+                  {harnessOptionLabel(h.name, h.version)}
                 </option>
               ))}
               {/* When we have catalog data and the chosen harness isn't in
@@ -436,10 +448,10 @@ export function JoinedNetCard({
                * data (compatible.length === 0) we can't classify, so we
                * just render the current value as-is. */}
               {form.harness && compatible.length > 0 && !compatibleNames.has(form.harness) && (
-                <option value={form.harness}>{form.harness} (incompatible)</option>
+                <option value={form.harness}>{harnessDisplayName(form.harness)} (incompatible)</option>
               )}
               {form.harness && compatible.length === 0 && (
-                <option value={form.harness}>{form.harness}</option>
+                <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
               )}
             </select>
             {harnessIncompatible && (
@@ -458,7 +470,7 @@ export function JoinedNetCard({
                     {' Compatible: '}
                     {compatible.map((h, i) => (
                       <span key={h.name} style={{ color: 'var(--accent-sky)' }}>
-                        {h.name}{i < compatible.length - 1 ? ' · ' : ''}
+                        {harnessDisplayName(h.name)}{i < compatible.length - 1 ? ' · ' : ''}
                       </span>
                     ))}
                   </>

@@ -57,6 +57,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
+import { harnessStateDirName } from '../names.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -885,7 +886,7 @@ export class TaskEngine {
     const resolvedImpl = run.solverType
       ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
       : null;
-    const implStateName = run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default';
+    const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
     const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
     const implStateDir = kindSeg
       ? join(this.paths.implStateDirRoot, implStateName, kindSeg)
@@ -948,8 +949,8 @@ export class TaskEngine {
     const kindSeg = solverType.replace(/[.:]/g, '_');
     const implStateDir = task.implStateDir ?? (
       kindSeg
-        ? join(this.paths.implStateDirRoot, impl.name, kindSeg)
-        : join(this.paths.implStateDirRoot, impl.name)
+        ? join(this.paths.implStateDirRoot, harnessStateDirName(impl.name), kindSeg)
+        : join(this.paths.implStateDirRoot, harnessStateDirName(impl.name))
     );
     const windowEndTs = task.windowEndTs;
 

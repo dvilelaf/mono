@@ -36,6 +36,7 @@ import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js'
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
 import { triggerAgentSpawn } from '../agent/agent-ws.js';
 import { DEFAULT_CONFIG_PATH, DEFAULT_SOLVER_NETS, persistTopLevelConfigValue } from '../config.js';
+import { canonicalHarnessName } from '../harnesses/names.js';
 import {
   installClaudeCodeLocally,
   type ExecFileAsync,
@@ -419,7 +420,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // `role` over `roles`.
       delete existing['role'];
     }
-    if (body.harness !== undefined) existing.harness = body.harness;
+    if (body.harness !== undefined) existing.harness = canonicalHarnessName(body.harness);
     if (body.model !== undefined) existing.model = body.model;
     if (body.plugins !== undefined) existing.plugins = body.plugins;
     solverNets[name] = existing;
@@ -532,7 +533,12 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
     const joinedSolverNets: Record<string, Record<string, unknown>> = {};
     for (const [k, v] of Object.entries(rawJoined)) {
-      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+      if (!isRecord(v)) continue;
+      const entry = { ...v };
+      if (typeof entry['harness'] === 'string') {
+        entry['harness'] = canonicalHarnessName(entry['harness']);
+      }
+      joinedSolverNets[k] = entry;
     }
 
     const entry: Record<string, unknown> = {
@@ -544,7 +550,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     // SPA sent; the daemon-side runtime ignores them when only the
     // `evaluator` role is selected (evaluator harness comes from
     // `manifest.contract.evaluationFunction.implementation`).
-    if (typeof body.harness === 'string') entry['harness'] = body.harness;
+    if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
     if (typeof body.model === 'string') entry['model'] = body.model;
     if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
 

@@ -26,6 +26,7 @@ import { join } from 'node:path';
 
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
 import { checkLearnerCli, readLearnerHarnessE2EConfig } from './learner-harness-config.js';
 
 async function main(): Promise<void> {
@@ -68,9 +69,9 @@ async function main(): Promise<void> {
     const impls = buildHarnesses({
       stub: true,
       rpcUrl: 'http://127.0.0.1:8545',
-      claudePath: learnerConfig.harnessName === 'claude-code-learner' ? learnerConfig.cliPath : 'claude',
+      claudePath: learnerConfig.harnessName === CLAUDE_CODE_HARNESS ? learnerConfig.cliPath : 'claude',
       claudeModel: learnerConfig.model,
-      codexPath: learnerConfig.harnessName === 'codex-code-learner' ? learnerConfig.cliPath : 'codex',
+      codexPath: learnerConfig.harnessName === CODEX_HARNESS ? learnerConfig.cliPath : 'codex',
       codexModel: learnerConfig.model,
     });
     if (impls.length === 0) {

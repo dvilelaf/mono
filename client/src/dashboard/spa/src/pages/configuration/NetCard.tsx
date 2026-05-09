@@ -11,6 +11,7 @@ import {
   modelOptionsForHarness,
   resolveModelOption,
 } from './claudeModels.js';
+import { canonicalHarnessName, harnessDisplayName, harnessOptionLabel } from './harnessNames.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
@@ -93,7 +94,10 @@ export function NetCard(props: NetCardProps): JSX.Element {
 }
 
 function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLegacyProps): JSX.Element {
-  const [draft, setDraft] = useState<NetCardConfig>(config);
+  const [draft, setDraft] = useState<NetCardConfig>({
+    ...config,
+    harness: canonicalHarnessName(config.harness),
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisable, setConfirmDisable] = useState(false);
@@ -101,7 +105,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
   const dirty =
     draft.enabled !== config.enabled ||
     !rolesEqual(draft.roles, config.roles) ||
-    draft.harness !== config.harness ||
+    draft.harness !== canonicalHarnessName(config.harness) ||
     draft.model !== config.model ||
     draft.plugins.join(',') !== config.plugins.join(',');
 
@@ -127,7 +131,10 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
   };
 
   const cancel = (): void => {
-    setDraft(config);
+    setDraft({
+      ...config,
+      harness: canonicalHarnessName(config.harness),
+    });
     setError(null);
     setConfirmDisable(false);
   };
@@ -350,7 +357,7 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
               }}
               style={{
                 background: 'var(--bg)',
-                border: `1px solid ${draft.harness !== config.harness ? 'var(--accent-sky)' : 'var(--border)'}`,
+                border: `1px solid ${draft.harness !== canonicalHarnessName(config.harness) ? 'var(--accent-sky)' : 'var(--border)'}`,
                 borderRadius: '6px',
                 padding: '10px 12px',
                 fontFamily: "'JetBrains Mono', monospace",
@@ -367,9 +374,11 @@ function LegacyNetCard({ catalog, config, onSaved, onRestartPending }: NetCardLe
                     ? true
                     : draft.roles.some((r) => h.supportsRoles.includes(r)),
                 )
+                .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+                .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index)
                 .map((h) => (
                   <option key={h.name} value={h.name}>
-                    {h.name}@{h.version}
+                    {harnessOptionLabel(h.name, h.version)}
                   </option>
                 ))}
             </select>
@@ -718,7 +727,7 @@ function JoinedNetCard({
               data-testid="netcard-joined-harness"
               style={{ color: 'var(--fg)' }}
             >
-              {joined.harness}
+              {harnessDisplayName(joined.harness)}
             </span>
           </>
         )}

@@ -479,7 +479,7 @@ describe('NetCard — manifest-keyed (joined) variant', () => {
     expect(screen.getByTestId('netcard-joined-state').textContent).toMatch(/joined/i);
     expect(screen.getByTestId('netcard-joined-roles').textContent).toBe('solver');
     expect(screen.getByTestId('netcard-joined-harness').textContent).toBe(
-      'claude-code-learner',
+      'Claude Code',
     );
     expect(screen.getByTestId('netcard-joined-manifest-cid').textContent).toBe(
       'bafybeiaaa',

@@ -12,6 +12,12 @@ import {
   modelOptionsForHarness,
   resolveModelOption,
 } from '../configuration/claudeModels.js';
+import {
+  canonicalHarnessName,
+  CLAUDE_CODE_HARNESS,
+  harnessDisplayName,
+  harnessOptionLabel,
+} from '../configuration/harnessNames.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 /**
@@ -29,7 +35,7 @@ import { formatWeiAmount } from '../launcher-launched/helpers.js';
  * picker is hidden when only `evaluator` is selected.
  */
 
-const DEFAULT_HARNESS = 'claude-code-learner';
+const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
 
 export interface JoinFlowProps {
   /** Override the manifest cid for tests (skips wouter route param lookup). */
@@ -97,9 +103,10 @@ export function JoinFlow({
   const catalogEntry = manifest
     ? findCatalogEntry(catalogQuery.data, manifest.contract)
     : undefined;
-  const solverCompatibleHarnesses = (catalogEntry?.compatibleHarnesses ?? []).filter((h) =>
-    h.supportsRoles.includes('solving'),
-  );
+  const solverCompatibleHarnesses = (catalogEntry?.compatibleHarnesses ?? [])
+    .filter((h) => h.supportsRoles.includes('solving'))
+    .map((h) => ({ ...h, name: canonicalHarnessName(h.name) }))
+    .filter((h, index, all) => all.findIndex((candidate) => candidate.name === h.name) === index);
   const defaultHarness =
     solverCompatibleHarnesses[0]?.name ?? DEFAULT_HARNESS;
   const defaultModel = defaultModelForHarness(defaultHarness);
@@ -391,11 +398,11 @@ export function JoinFlow({
               >
                 {solverCompatibleHarnesses.map((h) => (
                   <option key={h.name} value={h.name}>
-                    {h.name}@{h.version}
+                    {harnessOptionLabel(h.name, h.version)}
                   </option>
                 ))}
                 {(!catalogEntry || solverCompatibleHarnesses.length === 0) && (
-                  <option value={form.harness}>{form.harness}</option>
+                  <option value={form.harness}>{harnessDisplayName(form.harness)}</option>
                 )}
               </select>
             </div>

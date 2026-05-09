@@ -9,7 +9,7 @@
  * learner loop semantics.
  *
  * Configure with:
- *   JINN_E2E_LEARNER_HARNESS=claude-code-learner | codex-code-learner
+ *   JINN_E2E_LEARNER_HARNESS=claude-code | codex
  *   JINN_E2E_LEARNER_CLI_PATH=/path/to/claude-or-codex
  *   JINN_E2E_LEARNER_MODEL=...
  *
@@ -30,6 +30,7 @@ import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildHarnesses } from '../../src/harnesses/impls/index.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
 import type { Harness, HarnessContext } from '../../src/harnesses/types.js';
 import type { Task } from '../../src/types/task.js';
 import {
@@ -92,9 +93,9 @@ async function main(): Promise<void> {
   const harness = buildHarnesses({
     stub: true,
     rpcUrl: 'http://stub',
-    claudePath: config.harnessName === 'claude-code-learner' ? config.cliPath : 'claude',
+    claudePath: config.harnessName === CLAUDE_CODE_HARNESS ? config.cliPath : 'claude',
     claudeModel: config.model,
-    codexPath: config.harnessName === 'codex-code-learner' ? config.cliPath : 'codex',
+    codexPath: config.harnessName === CODEX_HARNESS ? config.cliPath : 'codex',
     codexModel: config.model,
   }).find((impl) => impl.name === config.harnessName);
   if (!harness) {

@@ -291,7 +291,11 @@ describe('JoinFlow — role selection', () => {
     fireEvent.click(screen.getByLabelText('Solver'));
 
     const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
-    await waitFor(() => expect(harnessSelect.value).toBe('codex-code-learner'));
+    await waitFor(() => expect(harnessSelect.value).toBe('codex'));
+    expect(Array.from(harnessSelect.options).map((o) => o.textContent)).toEqual([
+      'Codex 0.1.0',
+      'Claude Code 0.1.0',
+    ]);
 
     const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
     const optionValues = Array.from(modelSelect.options).map((o) => o.value);
@@ -345,7 +349,7 @@ describe('JoinFlow — submission', () => {
       expect.objectContaining({
         name: 'Prediction Markets',
         roles: ['solver'],
-        harness: 'claude-code-learner',
+        harness: 'claude-code',
         plugins: ['jinn-prediction-plugin'],
       }),
     );

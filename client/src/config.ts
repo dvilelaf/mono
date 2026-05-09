@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
+import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,8 @@ export interface DefaultSolverNetConfig extends Record<string, unknown> {
  * `joinedSolverNets` block).
  */
 export const DEFAULT_SOLVER_NETS: Record<string, DefaultSolverNetConfig> = {};
+
+const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
 
 export const JinnConfigSchema = z.object({
   /**
@@ -304,8 +307,8 @@ export const JinnConfigSchema = z.object({
    */
   harnesses: z
     .object({
-      default: z.string().optional(),
-      disabled: z.array(z.string()).optional(),
+      default: HarnessNameSchema.optional(),
+      disabled: z.array(HarnessNameSchema).optional(),
       /**
        * Operator-supplied external harness impls.
        *
@@ -401,7 +404,7 @@ export const JinnConfigSchema = z.object({
         .default(['solving'])
         // Deduplicate to keep downstream consumers simple.
         .transform((arr) => Array.from(new Set(arr))),
-      harness: z.string().default('claude-code-learner'),
+      harness: HarnessNameSchema.default(CLAUDE_CODE_HARNESS),
       model: z.string().optional(),
       plugins: z.array(z.union([
         z.string(),
@@ -441,7 +444,7 @@ export const JinnConfigSchema = z.object({
         roles: z
           .array(z.enum(['solver', 'evaluator']))
           .min(1, 'each joined SolverNet must enable at least one role'),
-        harness: z.string().optional(),
+        harness: HarnessNameSchema.optional(),
         model: z.string().optional(),
         plugins: z.array(z.string()).default([]),
       }),

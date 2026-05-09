@@ -442,6 +442,7 @@ describe('loadConfig solverNets roles migration', () => {
     });
     const cfg = loadConfig(configPath);
     expect(cfg.solverNets['prediction']?.roles).toEqual(['solving']);
+    expect(cfg.solverNets['prediction']?.harness).toBe('claude-code');
     // Loader output is the canonical shape — the singular `role` does not
     // re-appear after migration.
     expect((cfg.solverNets['prediction'] as Record<string, unknown>)?.['role']).toBeUndefined();

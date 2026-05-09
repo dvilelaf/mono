@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { canonicalHarnessName, CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../src/harnesses/names.js';
 
-export type LearnerHarnessName = 'claude-code-learner' | 'codex-code-learner';
+export type LearnerHarnessName = typeof CLAUDE_CODE_HARNESS | typeof CODEX_HARNESS;
 
 export interface LearnerHarnessE2EConfig {
   harnessName: LearnerHarnessName;
@@ -12,18 +13,20 @@ const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_CODEX_MODEL = 'gpt-5.4-mini';
 
 export function readLearnerHarnessE2EConfig(env: NodeJS.ProcessEnv = process.env): LearnerHarnessE2EConfig {
-  const rawHarness = env['JINN_E2E_LEARNER_HARNESS'] ?? env['JINN_LEARNER_HARNESS'] ?? 'claude-code-learner';
-  if (rawHarness !== 'claude-code-learner' && rawHarness !== 'codex-code-learner') {
+  const rawHarness = canonicalHarnessName(
+    env['JINN_E2E_LEARNER_HARNESS'] ?? env['JINN_LEARNER_HARNESS'] ?? CLAUDE_CODE_HARNESS,
+  );
+  if (rawHarness !== CLAUDE_CODE_HARNESS && rawHarness !== CODEX_HARNESS) {
     throw new Error(
       `Unsupported JINN_E2E_LEARNER_HARNESS=${JSON.stringify(rawHarness)}; ` +
-        'expected claude-code-learner or codex-code-learner',
+        'expected claude-code or codex',
     );
   }
 
   const cliPath = env['JINN_E2E_LEARNER_CLI_PATH']
-    ?? (rawHarness === 'codex-code-learner' ? 'codex' : 'claude');
+    ?? (rawHarness === CODEX_HARNESS ? 'codex' : 'claude');
   const model = env['JINN_E2E_LEARNER_MODEL']
-    ?? (rawHarness === 'codex-code-learner' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL);
+    ?? (rawHarness === CODEX_HARNESS ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL);
 
   return {
     harnessName: rawHarness,

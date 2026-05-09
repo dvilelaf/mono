@@ -8,6 +8,7 @@
  * fallback option — see `resolveModelOption`. The option set is keyed by
  * Harness because Claude Code and Codex use different model families.
  */
+import { canonicalHarnessName, CODEX_HARNESS } from './harnessNames.js';
 
 export interface LearnerModelOption {
   /** Friendly tier label shown in the dropdown. */
@@ -31,7 +32,7 @@ export const CODEX_MODELS: readonly LearnerModelOption[] = [
 ] as const;
 
 function isCodexHarness(harness: string | undefined): boolean {
-  return harness === 'codex-code-learner' || harness?.startsWith('codex-') === true;
+  return canonicalHarnessName(harness) === CODEX_HARNESS;
 }
 
 export function modelOptionsForHarness(harness: string | undefined): readonly LearnerModelOption[] {

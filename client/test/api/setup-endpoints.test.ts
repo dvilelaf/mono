@@ -670,7 +670,7 @@ describe('POST /v1/setup/solvernets/:name', () => {
 
     expect(res.status).toBe(200);
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(persisted.solverNets.prediction.harness).toBe('claude-code-learner');
+    expect(persisted.solverNets.prediction.harness).toBe('claude-code');
     expect(persisted.solverNets.prediction.model).toBe('claude-haiku-4-5-20251001');
     expect(persisted.solverNets.prediction.plugins).toEqual(['jinn-prediction-plugin']);
   });
@@ -841,7 +841,7 @@ describe('POST /v1/operator/join/:cid', () => {
       manifestCid: 'bafybeiaaa',
       name: 'Prediction',
       roles: ['solver'],
-      harness: 'claude-code-learner',
+      harness: 'claude-code',
       model: 'claude-haiku-4-5-20251001',
       plugins: ['jinn-prediction-plugin'],
     });

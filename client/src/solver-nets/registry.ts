@@ -1,6 +1,7 @@
 import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
+import { canonicalHarnessName } from '../harnesses/names.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
@@ -193,7 +194,7 @@ export async function loadSolverNets(
       solverType: net.solverType,
       roles: rolesFromConfig(net),
       contract,
-      harness: net.harness,
+      harness: canonicalHarnessName(net.harness),
       ...(net.model ? { model: net.model } : {}),
       runtimePlugins,
       taskGenerator: net.taskGenerator,

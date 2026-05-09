@@ -19,6 +19,11 @@ import {
 } from './claude-code-learner/index.js';
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './claude-code-learner/index.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
+import {
+  canonicalHarnessName,
+  canonicalHarnessNameSet,
+  CODEX_HARNESS,
+} from '../names.js';
 
 /**
  * Environment passed to {@link buildHarnesses} — same shape for daemon
@@ -96,7 +101,7 @@ export interface HarnessEnv {
  * Registration order is stable: it matches historical `main.ts` first-match
  * behavior for `HarnessRegistry`.
  *
- * The claude-code-learner Harness is registered as the default peer Harness;
+ * The claude-code Harness is registered as the default peer Harness;
  * it no longer wraps specialists.
  */
 export function buildHarnesses(env: HarnessEnv): Harness[] {
@@ -214,8 +219,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   }));
 
   // Codex-backed peer Harness. It supports the same restoration surface as
-  // claude-code-learner, but is selected only by explicit SolverNet harness
-  // config so historical first-match fallback stays unchanged.
+  // claude-code, but is selected only by explicit SolverNet harness config so
+  // historical first-match fallback stays unchanged.
   const codexLearnerAdapter = new CodexCodeHarnessAdapter({
     codexPath: env.codexPath,
     codexModel: env.codexModel,
@@ -225,13 +230,13 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     corpusEnv: env.corpusEnv,
   });
   out.push(new ClaudeCodeLearnerImpl({
-    name: 'codex-code-learner',
+    name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
   }));
 
   if (env.disabledNames && env.disabledNames.length > 0) {
-    const disabled = new Set(env.disabledNames);
-    return out.filter((impl) => !disabled.has(impl.name));
+    const disabled = canonicalHarnessNameSet(env.disabledNames);
+    return out.filter((impl) => !disabled.has(canonicalHarnessName(impl.name)));
   }
   return out;
 }
