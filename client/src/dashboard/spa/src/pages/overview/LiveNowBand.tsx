@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { api } from '../../api/client.js';
 
 /**
- * Live-now pulse band on /overview. Replaces the static "Node Status" tile
+ * Live-now pulse band for operator activity surfaces. Replaces the static "Node Status" tile
  * and the conditional AlertBand with a single present-tense band that
  * classifies the daemon into one of four states:
  *
@@ -198,14 +198,14 @@ export function deriveLiveNow(status: LiveNowStatusInput | undefined): LiveNowDe
   };
 }
 
-const TONE: Record<LiveNowState, { dot: string; eyebrow: string; border: string }> = {
+export const LIVE_NOW_TONE: Record<LiveNowState, { dot: string; eyebrow: string; border: string }> = {
   bootstrapping: { dot: 'var(--accent-sky)', eyebrow: 'Now · Bootstrapping', border: 'var(--border)' },
   attention: { dot: 'var(--break-red)', eyebrow: 'Now · Needs attention', border: 'var(--border-accent)' },
   working: { dot: 'var(--vow-green)', eyebrow: 'Now · Live', border: 'var(--border)' },
   idle: { dot: 'var(--fg-muted)', eyebrow: 'Now · Live', border: 'var(--border)' },
 };
 
-const STATE_LABEL: Record<LiveNowState, string> = {
+export const LIVE_NOW_STATE_LABEL: Record<LiveNowState, string> = {
   bootstrapping: 'BOOTSTRAPPING',
   attention: 'ATTENTION',
   working: 'WORKING',
@@ -219,8 +219,8 @@ export function LiveNowBand(): JSX.Element {
     refetchInterval: 5_000,
   });
   const derived = deriveLiveNow(data);
-  const tone = TONE[derived.state];
-  const stateLabel = STATE_LABEL[derived.state];
+  const tone = LIVE_NOW_TONE[derived.state];
+  const stateLabel = LIVE_NOW_STATE_LABEL[derived.state];
 
   return (
     <section

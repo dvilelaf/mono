@@ -193,7 +193,7 @@ describe('OverviewPage empty-state gating', () => {
     );
   });
 
-  it('mounts the LiveNowBand below the HeroStats', async () => {
+  it('shows compact live status in the HeroStats row', async () => {
     getStatusMock.mockResolvedValue({
       fleet: { services: [{ index: 0, step: 'complete' }] },
       activity: { recent: [] },
@@ -206,7 +206,8 @@ describe('OverviewPage empty-state gating', () => {
     getBootstrapMock.mockResolvedValue({});
     render(withProviders(<OverviewPage />));
 
-    await waitFor(() => expect(screen.getByTestId('live-now-band')).toBeTruthy());
-    expect(screen.getByTestId('live-now-band').getAttribute('data-state')).toBe('idle');
+    await waitFor(() => expect(screen.getByTestId('overview-status-stat')).toBeTruthy());
+    expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('idle');
+    expect(screen.queryByTestId('live-now-band')).toBeNull();
   });
 });

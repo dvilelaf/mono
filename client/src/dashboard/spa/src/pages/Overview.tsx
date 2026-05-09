@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { HeroStats } from './overview/HeroStats.js';
 import { AlertBand } from './overview/AlertBand.js';
-import { LiveNowBand } from './overview/LiveNowBand.js';
+import { deriveLiveNow, LIVE_NOW_STATE_LABEL, LIVE_NOW_TONE } from './overview/LiveNowBand.js';
 import { NetworkCard } from './overview/NetworkCard.js';
 import { OperatorCard, type OperatorCardRole } from './overview/OperatorCard.js';
 import { QuickActions } from './overview/QuickActions.js';
@@ -208,6 +208,7 @@ export function OverviewPage(): JSX.Element {
   const tasksDelivered = totals.solutions;
   const jinnEarned = formatEth(status?.rewards?.pendingStakingRewardsWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
+  const liveNow = deriveLiveNow(status);
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -215,9 +216,10 @@ export function OverviewPage(): JSX.Element {
         tasksDelivered={tasksDelivered}
         jinnEarned={jinnEarned}
         gasRunwayDays={gasRunwayDays}
+        statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
+        statusState={liveNow.state}
+        statusDot={LIVE_NOW_TONE[liveNow.state].dot}
       />
-
-      <LiveNowBand />
 
       {/* Public counters — always shown when the catalog has prediction. */}
       <NetworkCard name="prediction" totals={totals} />
@@ -229,8 +231,9 @@ export function OverviewPage(): JSX.Element {
        * deep-links to `/operator#solvernets` where the registry catalog
        * is rendered. `detectJoinedSolverNet` accepts the legacy short-name
        * shape and the new manifestCid-keyed shape during the Tasks 21/22
-       * migration window. The diagnostic-attention AlertBand has moved
-       * into <LiveNowBand />; this Get-Started AlertBand stays.
+       * migration window. The diagnostic-attention state is represented in
+       * the compact status tile above and the full live card on /operator;
+       * this Get-Started AlertBand stays.
        */}
       {joined ? (
         <OperatorCard
