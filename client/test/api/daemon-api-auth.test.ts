@@ -192,6 +192,33 @@ describe('daemon-api-auth (bearer middleware)', () => {
     expect(body.error).toMatch(/source sha256/i);
   });
 
+  it('rejects malformed donated IPFS sources with actionable invalid_args response', async () => {
+    const sha256 = 'b'.repeat(64);
+    const res = await fetch(`${baseUrl}/v1/artifacts/acquire`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify({
+        sha256,
+        access: { endpoint: 'https://op.example.com', priceUsdc: '0' },
+        sources: [{
+          kind: 'http',
+          cid: 'https://example.com/not-ipfs',
+          sha256,
+          encoding: 'plain',
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { reason?: string; error?: string; retryable?: boolean };
+    expect(body.reason).toBe('invalid_args');
+    expect(body.retryable).toBe(false);
+    expect(body.error).toMatch(/sources must be donation IPFS artifact source objects/i);
+  });
+
   it('rejects POST /artifacts with no Authorization header → 401', async () => {
     const res = await fetch(`${baseUrl}/artifacts`, {
       method: 'POST',

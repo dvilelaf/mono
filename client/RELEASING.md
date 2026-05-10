@@ -9,13 +9,14 @@ This package is published from the monorepo, but operators consume it as a stand
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `client-vX.Y.Z`.
 
-The release flow has five layers:
+The release flow has six layers:
 
 1. fast CI in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 2. the fork-based local operator gate (`yarn release:operator-gate`)
-3. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
-4. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
-5. the GitHub Release workflows for npm `latest` and GHCR
+3. the cross-operator donated SWE execution-data gate (`yarn release:donation-consumption`)
+4. the contracts release gate (`cd ../contracts && yarn test`, `forge install foundry-rs/forge-std --no-git`, then `forge test --match-contract Invariant`)
+5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
+6. the GitHub Release workflows for npm `latest` and GHCR
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 
@@ -37,6 +38,7 @@ Do this once because the package did not exist on npm initially.
    yarn build
    yarn pack:smoke
    yarn release:operator-gate
+   yarn release:donation-consumption
    cd ../contracts
    yarn test
    forge install foundry-rs/forge-std --no-git

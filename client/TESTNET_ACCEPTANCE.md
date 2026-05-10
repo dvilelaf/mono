@@ -29,11 +29,19 @@ yarn vitest run \
   test/solver-types/swe-rebench-v2-auto.test.ts \
   test/e2e/swe-rebench-v2.test.ts
 yarn build
+yarn release:donation-consumption
 ```
 
 Do not remove tests or lower assertions to pass this gate. If a test exposes a
 real mismatch in the public flow, fix the implementation or explicitly hold the
 release.
+
+`yarn corpus:e2e` and `yarn e2e:donation` remain fast mocked/smoke checks.
+They do not replace `yarn release:donation-consumption`, which is the
+release-blocking proof that another isolated operator can discover and consume
+donated SWE execution data through the real MCP acquisition path, cache it as a
+network artifact, reuse that cache from the learner-facing MCP path, and
+continue through the real SWE solve/evaluate loop.
 
 ## Required Browser Gates
 
@@ -75,12 +83,27 @@ The release is not ready until the live or canary-dry-run proof shows:
 5. Spend/runway values match the launched SolverNet prices and current Safe
    balance.
 6. Donated solver/evaluator artifacts are scrubbed, pinned to IPFS,
-   advertised in envelopes with CIDs and expected hashes, discovered by
-   another operator, verified, and consumed through the actual
-   learner/evaluator flow.
+   advertised in envelopes with artifact and trajectory IPFS sources plus
+   expected hashes, discovered by another operator, verified, acquired through
+   Network Tools/MCP, cached as `network_artifacts`, and followed by a real
+   SWE solve/evaluate loop.
 
-Record task IDs, task CIDs, envelope CIDs, settlement transaction hashes, and
-the redacted donated/acquired artifact evidence.
+Run the live donation proof with:
+
+```bash
+yarn release:donation-consumption
+```
+
+Release mode requires fresh evidence created after the command starts.
+`--reuse-existing` is diagnostics-only and is not valid PR/canary evidence.
+The default isolated consumer home inherits the producer's joined SWE-rebench v2
+SolverNet configuration but uses its own HOME, earning state, database, API
+port, Safe, and agent identity. If you pass `--consumer-config`, that config
+must already be joined as SWE-rebench v2 solver and evaluator with the
+SWE-rebench v2 runtime enabled.
+
+Record task IDs, task CIDs, envelope CIDs, trajectory source CIDs, settlement
+transaction hashes, and the redacted donated/acquired artifact evidence.
 
 ## Donation And Scrubbing Gate
 

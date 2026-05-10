@@ -21,6 +21,7 @@ import {
   uploadArtifacts,
   type PackagingDeps,
 } from './packaging.js';
+import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -47,9 +48,10 @@ import {
   codeDigestSha256ToBytes32,
   modeStringToFlag,
 } from '../../erc8004/index.js';
-import type { Role } from '../../types/envelope.js';
+import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
@@ -357,7 +359,7 @@ export class TaskEngine {
 
   // Transient storage for trajectory CID+sha256 refs produced by runImpl.
   // Keyed by requestId; cleared after successful pack.
-  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string } | null>();
+  private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
@@ -1159,13 +1161,13 @@ export class TaskEngine {
 
     // 1b. Emit trajectory to IPFS now that all artifact spans have been added.
     // Non-fatal — envelope assembly continues with envelope.trajectory = null if upload fails.
-    let trajectoryRef: { cid: string; sha256: string } | null =
+    let trajectoryRef: { cid: string; sha256: string; sources?: ArtifactSource[] } | null =
       this.trajectoryRefs.get(task.requestId) ?? null;
     if (!trajectoryRef && collector && this.envelopeDeps) {
       try {
         const { privateKeyToAccount } = await import('viem/accounts');
         const account = privateKeyToAccount(this.envelopeDeps.agentEoaPrivateKey);
-        const { cid, sha256 } = await emitTrajectory({
+        const { cid, sha256, signed } = await emitTrajectory({
           collector,
           runId: collector.runId,
           signerPrivateKey: this.envelopeDeps.agentEoaPrivateKey,
@@ -1173,7 +1175,23 @@ export class TaskEngine {
           ipfsRegistryUrl: this.envelopeDeps.ipfsRegistryUrl,
           scrub: packagingDepsWithReq.donation?.scrub,
         });
-        trajectoryRef = { cid, sha256 };
+        const sources: ArtifactSource[] = [];
+        if (packagingDepsWithReq.donation?.enabled) {
+          const sourceCid = await uploadToIpfs(packagingDepsWithReq.donation.ipfsRegistryUrl, {
+            schemaVersion: DONATION_ARTIFACT_ENCODING,
+            artifactType: 'jinn.trajectory.v1',
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+            data: Buffer.from(JSON.stringify(signed), 'utf8').toString('base64'),
+          });
+          sources.push({
+            kind: 'ipfs',
+            cid: sourceCid,
+            sha256,
+            encoding: DONATION_ARTIFACT_ENCODING,
+          });
+        }
+        trajectoryRef = { cid, sha256, ...(sources.length > 0 ? { sources } : {}) };
         console.log(`[harness-engine] ${task.requestId}: trajectory emitted cid=${cid}`);
       } catch (err) {
         console.warn(
@@ -1320,6 +1338,9 @@ export class TaskEngine {
       ? {
           sha256: trajectoryRef.sha256,
           access: { endpoint: operatorEndpointForTraj, priceUsdc: '0' },
+          ...(trajectoryRef.sources && trajectoryRef.sources.length > 0
+            ? { sources: trajectoryRef.sources }
+            : {}),
         }
       : null;
 

@@ -171,6 +171,19 @@ describe('swe-rebench-v2 solver round-trip via ClaudeCodeLearnerImpl', () => {
     }
   });
 
+  it('documents SWE execution data retrieval through Network Tools', () => {
+    const skill = readFileSync(
+      join(process.cwd(), 'plugins', 'swe-rebench-v2-runtime', 'skills', 'orient', 'SKILL.md'),
+      'utf8',
+    );
+    expect(skill).toContain('search_records');
+    expect(skill).toContain('inspect_record');
+    expect(skill).toContain('acquire_artifact');
+    expect(skill).not.toContain('.execute/execution-data-retrieval.json');
+    expect(skill).not.toContain('jinn.execution_data_retrieval.v1');
+    expect(skill).not.toContain('corpus.read');
+  });
+
   it('emits a Solution.verdictPayload (validates against SDK) when role=evaluation', async () => {
     // NB: in production swe-rebench-v2 evaluation tasks go to the dedicated
     // SweRebenchV2EvaluatorHarness, not claude-code-learner. This test

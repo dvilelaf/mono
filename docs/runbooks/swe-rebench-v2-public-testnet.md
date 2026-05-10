@@ -91,18 +91,22 @@ Current release path:
 
 ## Consume Donated Data
 
-The learner/evaluator flow must be able to consume donated data from another
-operator without a CLI-only workaround:
+The app-backed solver/evaluator flow must be able to consume donated data from
+another operator without a CLI-only workaround:
 
 1. Operator A runs with donation mode enabled and produces artifacts.
 2. Operator B runs a solver or evaluator on SWE-rebench v2.
-3. Operator B discovers envelopes through the harness corpus tools
+3. Operator B discovers envelopes through Network Tools
    (`search_records` or `inspect_record`).
 4. `acquire_artifact` receives the donated IPFS `sources` from the envelope and
    retrieves the artifact by CID.
 5. The artifact is mirrored into Operator B's network artifact cache with IPFS
    provenance.
-6. Missing, invalid, or hash-mismatched sources return actionable failure
+6. Operator B's learner-facing MCP path reuses that cached artifact after the
+   initial acquisition.
+7. Operator B continues through a real SWE solve/evaluate loop after the
+   donated artifact is available locally.
+8. Missing, invalid, or hash-mismatched sources return actionable failure
    messages instead of silently falling back.
 
 Do not treat a missing `operator.publicEndpoint` as a donation failure. Direct
@@ -129,7 +133,13 @@ yarn vitest run \
   test/solver-types/swe-rebench-v2-auto.test.ts \
   test/e2e/swe-rebench-v2.test.ts
 yarn build
+yarn release:donation-consumption
 ```
+
+`yarn corpus:e2e` and the donation smoke suites are mocked/fast-path coverage.
+They are useful diagnostics, but they are not the release proof for public
+donation mode. The release-blocking proof is `yarn release:donation-consumption`
+with fresh two-operator evidence.
 
 Then browser-verify a fresh daemon/dashboard session:
 
@@ -137,8 +147,9 @@ Then browser-verify a fresh daemon/dashboard session:
    error, and permission states.
 2. `/launcher/launched/:id`: generator status, task rows, claim counts, state
    transitions, spend, and runway.
-3. Donation consumption: cross-operator donated artifact retrieval in the real
-   learner/evaluator flow.
+3. Donation consumption: cross-operator donated artifact retrieval through
+   Network Tools/MCP, network-artifact caching, and the real SWE solve/evaluate
+   loop.
 
 ## Evidence To Retain
 

@@ -438,6 +438,7 @@ server.tool(
           artifactType: out.artifactType,
           source: out.source,
           paidAmountUsdc: out.paidAmountUsdc,
+          fetchedAt: out.fetchedAt,
           ...(out.sourceOperator ? { sourceOperator: out.sourceOperator } : {}),
         }) }],
       };
