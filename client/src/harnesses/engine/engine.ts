@@ -712,7 +712,7 @@ export class TaskEngine {
 
       const specIssuesLookLikeWholeTask =
         parsedSpec !== undefined &&
-        parsedSpec.error.issues.some((issue) => {
+        parsedSpec.error.issues.some((issue: ZodIssue) => {
           const head = issue.path[0];
           return typeof head === 'string' && ['id', 'description', 'solverType', 'window', 'claimPolicy', 'spec'].includes(head);
         });
