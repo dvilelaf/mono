@@ -355,6 +355,22 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     // The pinned-blob CID is surfaced as artifact metadata, not as a typed
     // payload field — preserves the solver/daemon boundary in the schema.
     const verdictArtifact = sol.artifacts?.[0];
+    expect(verdictArtifact?.path).toBe('swe-rebench-v2-verdict.json');
+    const verdictArtifactPayload = JSON.parse(
+      readFileSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(verdictArtifactPayload).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',
+      verdict: {
+        schemaVersion: 'swe-rebench-v2-verdict.v1',
+        score: 1,
+        passed_match: true,
+      },
+      informational: {
+        instance_id: 'unidata__netcdf-c-1925',
+        test_log_cid: 'bafy-test-log-cid',
+      },
+    });
     expect(verdictArtifact?.metadata).toMatchObject({
       score: 1,
       passed_match: true,

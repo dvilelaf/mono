@@ -180,6 +180,11 @@ describe('CodexCodeHarnessAdapter', () => {
       expect(promptArg).toContain('You are executing a Jinn task');
       expect(promptArg).toContain('Use the available skills, plugins, tools, and runtime context exposed by this harness');
       expect(promptArg).toContain('typed SolverNet payload');
+      expect(promptArg).toContain('SWE-rebench v2 restoration requirements:');
+      expect(promptArg).toContain(`Use ${workingDir}/repo as the only task repository checkout`);
+      expect(promptArg).toContain(`clone https://github.com/Unidata/netcdf-c.git into ${workingDir}/repo`);
+      expect(promptArg).toContain('search_records, inspect_record, and acquire_artifact');
+      expect(promptArg).toContain(`${workingDir}/.execute/solution-payload.json`);
       expect(promptArg).not.toContain('claude-code-learner:learn');
       expect(promptArg).not.toContain('Subagent dispatch is available as `spawn_agent`');
       expect(promptArg).not.toContain('Do not pass both `message` and `items`');

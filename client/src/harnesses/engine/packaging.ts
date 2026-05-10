@@ -71,6 +71,32 @@ const OutputsJsonSchema = z.object({
 
 type OutputEntry = z.infer<typeof OutputEntrySchema>;
 
+const SYSTEM_SNAPSHOT_EXCLUDED_DIR_NAMES = new Set([
+  'env',
+  'repo',
+  '.git',
+  '.hg',
+  '.svn',
+  'node_modules',
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '.nox',
+  '.cache',
+  'dist',
+  'build',
+]);
+
+function isExcludedFromSystemSnapshot(relPath: string): boolean {
+  return relPath
+    .split(/[\\/]+/)
+    .some((part) => SYSTEM_SNAPSHOT_EXCLUDED_DIR_NAMES.has(part));
+}
+
 // ── Uploaded artifact ─────────────────────────────────────────────────────────
 
 export interface UploadedArtifact extends Artifact {
@@ -178,20 +204,13 @@ async function createWorkdirTarball(
       const st = statSync(full);
       if (st.isDirectory()) {
         const relDir = relative(workingDir, full);
-        // Security: exclude env/ and everything inside it — env/ contains
-        // secrets written at mode 0o600 by provisionWorkingDir and must never
-        // appear in a publicly-uploaded IPFS tarball. We check both "env" (the
-        // directory itself at workingDir root) and any path that starts with
-        // "env/" (nested contents, though the guard on the directory entry
-        // below already handles recursion).
-        if (relDir === 'env' || relDir.startsWith('env/') || relDir.startsWith('env\\')) continue;
+        if (isExcludedFromSystemSnapshot(relDir)) continue;
         walk(full);
       } else if (st.isFile()) {
         const relPath = relative(workingDir, full);
         // Exclude the tarball itself to prevent self-inclusion
         if (excludeName && relPath === excludeName) continue;
-        // Exclude anything inside env/ (belt-and-suspenders guard)
-        if (relPath.startsWith('env/') || relPath.startsWith('env\\')) continue;
+        if (isExcludedFromSystemSnapshot(relPath)) continue;
         const rawContent = readFileSync(full);
         const content = scrub ? scrubArtifactBytes(rawContent, scrub).bytes : rawContent;
         entries.push({ relPath, content });
@@ -412,7 +431,7 @@ export async function walkArtifacts(
     result.push({
       localPath: tarballPath,
       artifactType: 'system_snapshot',
-      metadata: { description: 'Full workingDir snapshot' },
+      metadata: { description: 'Scrubbed workingDir snapshot excluding secrets, task checkouts, VCS data, dependencies, and caches' },
       access: { priceUsdc: '0' },
     });
   } catch (err) {

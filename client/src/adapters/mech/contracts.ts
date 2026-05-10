@@ -380,6 +380,33 @@ export async function canClaimTask(
   }
 }
 
+const DUMMY_EVALUATION_TASK_CID_DIGEST =
+  '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex;
+
+export async function canClaimEvaluation(
+  publicClient: PublicClient,
+  safeAddress: Address,
+  routerAddress: Address,
+  taskId: string | bigint,
+  attemptIndex: number,
+  evaluatorMech: Address,
+  evaluationTaskCidDigest: Hex = DUMMY_EVALUATION_TASK_CID_DIGEST,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
+  try {
+    await publicClient.simulateContract({
+      account: safeAddress,
+      address: routerAddress,
+      abi: JINN_ROUTER_ABI,
+      functionName: 'claimEvaluation',
+      args: [taskIdBigInt, attemptIndex, evaluatorMech, evaluationTaskCidDigest],
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: flattenErrorMessage(err) };
+  }
+}
+
 const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 

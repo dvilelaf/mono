@@ -45,6 +45,7 @@ import { emitStructured } from './events/emitter.js';
 import { checkClaudeBinary } from './preflight/claude-binary.js';
 import { emitClaudeBinaryPreflightFailure } from './preflight/claude-invocation-envelope.js';
 import { detectAuthContext, probeClaudeAuth } from './preflight/claude-auth.js';
+import { configRequiresClaudeAuth } from './preflight/claude-required.js';
 import { FleetBootstrapper } from './earning/bootstrap.js';
 import { DEFAULT_TESTNET_ARTIFACTS, applyChainGasOverrides, getChainConfig, loadJinnMviConfig } from './earning/contracts.js';
 import { runLegacyAgentIdMigration } from './earning/migrate-agent-id.js';
@@ -1393,29 +1394,34 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     });
   }
 
-  const preflight = await checkClaudeBinary(activeClaudePath);
-  if (!preflight.ok) {
-    emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
-  }
+  const claudeAuthRequired = configRequiresClaudeAuth(config);
+  if (claudeAuthRequired) {
+    const preflight = await checkClaudeBinary(activeClaudePath);
+    if (!preflight.ok) {
+      emitClaudeBinaryPreflightFailure(preflight.detail, activeClaudePath);
+    }
 
-  const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
-  const authProbe = probeClaudeAuth({
-    context: authContext,
-    cwd: process.cwd(),
-    claudePath: activeClaudePath,
-  });
-  if (!authProbe.authenticated) {
-    emitEnvelope({
-      code: 'invalid_invocation',
-      message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
-      hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
-      exampleCli: 'jinn auth',
-      details: {
-        field: 'claude_auth',
-        context: authContext,
-        authenticated: false,
-      },
+    const authContext = detectAuthContext({ cwd: process.cwd(), configuredMode: config.runtimeMode });
+    const authProbe = probeClaudeAuth({
+      context: authContext,
+      cwd: process.cwd(),
+      claudePath: activeClaudePath,
     });
+    if (!authProbe.authenticated) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: 'Claude is not authenticated. Run `jinn auth` in an interactive terminal before starting the daemon.',
+        hint: `Detected context: ${authContext}. The daemon cannot function without Claude authentication.`,
+        exampleCli: 'jinn auth',
+        details: {
+          field: 'claude_auth',
+          context: authContext,
+          authenticated: false,
+        },
+      });
+    }
+  } else {
+    console.log('[main] Claude auth preflight skipped; Claude-backed harnesses are disabled.');
   }
 
   const runner = new ClaudeRunner({

@@ -121,33 +121,55 @@ Run these on the release branch before PR or canary:
 cd client
 yarn typecheck
 yarn vitest run \
-  src/dashboard/spa/src/pages/launcher \
+  src/dashboard/spa/src/pages/Launcher.test.tsx \
+  src/dashboard/spa/src/pages/LauncherCreate.test.tsx \
+  src/dashboard/spa/src/pages/LauncherLaunched.test.tsx \
+  src/dashboard/spa/src/pages/launcher-create \
+  src/dashboard/spa/src/pages/launcher-launched \
   src/dashboard/spa/src/pages/operator-catalog \
   src/dashboard/spa/src/pages/operator/OperatorDataMarket.test.tsx \
+  src/dashboard/spa/src/captures/CapturesTab.test.tsx \
+  test/config.test.ts \
+  test/api/operator-artifacts-endpoint.test.ts \
   test/harnesses/engine/packaging-donation.test.ts \
   test/harnesses/engine/artifact-scrub.test.ts \
+  test/trajectory/processors/path-scrub.test.ts \
   test/trajectory/emit.test.ts \
   test/mcp/search-records-corpus.test.ts \
   test/mcp/acquire-artifact-fast-path.test.ts \
   test/api/daemon-api-auth.test.ts \
+  test/smoke/donation-mode-smoke.test.ts \
   test/solver-types/swe-rebench-v2-auto.test.ts \
-  test/e2e/swe-rebench-v2.test.ts
+  test/e2e/swe-rebench-v2.test.ts \
+  test/adapters/mech/safe-revert.test.ts \
+  test/tx-retry.test.ts \
+  test/adapters/mech/contracts.test.ts \
+  test/harnesses/impls/claude-code-learner/codex-code-adapter.test.ts \
+  test/harnesses/impls/claude-code-learner/swe-rebench-v2-roundtrip.test.ts \
+  test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts
 yarn build
-yarn release:donation-consumption
+yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
 ```
 
 `yarn corpus:e2e` and the donation smoke suites are mocked/fast-path coverage.
 They are useful diagnostics, but they are not the release proof for public
 donation mode. The release-blocking proof is `yarn release:donation-consumption`
 with fresh two-operator evidence.
+The producer daemon prints the handshake key on startup; the gate uses it only
+to read the UI-protected producer artifact inventory.
+For the broader `yarn release:client --prepare` gate on `main`, export
+`JINN_DONATION_PRODUCER_HANDSHAKE_KEY` or
+`JINN_DONATION_PRODUCER_UI_TOKEN` before starting the release script.
 
 Then browser-verify a fresh daemon/dashboard session:
 
 1. `/operator`: Discover, join, joined list, Data donation, loading, empty,
    error, and permission states.
-2. `/launcher/launched/:id`: generator status, task rows, claim counts, state
+2. `/operator/execution-data`: local donated execution data, peer donated data,
+   redaction, and loading, empty, error, and permission states.
+3. `/launcher/launched/:id`: generator status, task rows, claim counts, state
    transitions, spend, and runway.
-3. Donation consumption: cross-operator donated artifact retrieval through
+4. Donation consumption: cross-operator donated artifact retrieval through
    Network Tools/MCP, network-artifact caching, and the real SWE solve/evaluate
    loop.
 
@@ -156,7 +178,8 @@ Then browser-verify a fresh daemon/dashboard session:
 Keep the evidence with the release notes:
 
 1. command outputs for the acceptance gates above;
-2. screenshots of `/operator` and `/launcher/launched/:id`;
+2. screenshots of `/operator`, `/operator/execution-data`, and
+   `/launcher/launched/:id`;
 3. task IDs, task CIDs, claim counts, solution/verdict envelope CIDs, and
    settlement transaction hashes for the live proof;
 4. a redacted donated artifact envelope showing IPFS sources;

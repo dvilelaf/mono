@@ -511,7 +511,7 @@ export const JinnConfigSchema = z.object({
    */
   operator: z
     .object({
-      publicEndpoint: z.string().url(),
+      publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()
         .regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string')

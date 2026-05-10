@@ -15,9 +15,16 @@ Run from `client/` on the exact release branch:
 ```bash
 yarn typecheck
 yarn vitest run \
-  src/dashboard/spa/src/pages/launcher \
+  src/dashboard/spa/src/pages/Launcher.test.tsx \
+  src/dashboard/spa/src/pages/LauncherCreate.test.tsx \
+  src/dashboard/spa/src/pages/LauncherLaunched.test.tsx \
+  src/dashboard/spa/src/pages/launcher-create \
+  src/dashboard/spa/src/pages/launcher-launched \
   src/dashboard/spa/src/pages/operator-catalog \
   src/dashboard/spa/src/pages/operator/OperatorDataMarket.test.tsx \
+  src/dashboard/spa/src/captures/CapturesTab.test.tsx \
+  test/config.test.ts \
+  test/api/operator-artifacts-endpoint.test.ts \
   test/harnesses/engine/packaging-donation.test.ts \
   test/harnesses/engine/artifact-scrub.test.ts \
   test/trajectory/processors/path-scrub.test.ts \
@@ -27,9 +34,15 @@ yarn vitest run \
   test/api/daemon-api-auth.test.ts \
   test/smoke/donation-mode-smoke.test.ts \
   test/solver-types/swe-rebench-v2-auto.test.ts \
-  test/e2e/swe-rebench-v2.test.ts
+  test/e2e/swe-rebench-v2.test.ts \
+  test/adapters/mech/safe-revert.test.ts \
+  test/tx-retry.test.ts \
+  test/adapters/mech/contracts.test.ts \
+  test/harnesses/impls/claude-code-learner/codex-code-adapter.test.ts \
+  test/harnesses/impls/claude-code-learner/swe-rebench-v2-roundtrip.test.ts \
+  test/harnesses/impls/swe-rebench-v2-evaluator/harness.test.ts
 yarn build
-yarn release:donation-consumption
+yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
 ```
 
 Do not remove tests or lower assertions to pass this gate. If a test exposes a
@@ -49,18 +62,23 @@ Start a fresh daemon/dashboard session from the built app, then verify:
 
 1. `/operator`
    - SWE-rebench v2 is visible in Discover when unjoined.
-   - Joining as solver defaults to Claude Code, offers only supported
-     harness/model choices, and default-includes the SWE-rebench v2 runtime
-     plugin with a removal warning.
+   - Joining as solver offers only supported harness/model choices and
+     default-includes Network Tools and the learner plugin; the SWE-rebench v2
+     runtime is recommended and removable only after a warning.
    - Joining as evaluator does not expose a solver-harness choice; evaluator
      dispatch is derived from the SolverNet contract.
    - Joined SolverNets no longer appear in Discover.
-   - Data donation explains the IPFS-first free donation flow, shows local
-     donated data, peer donated data, IPFS publishing state, scrubber state,
-     loading, empty, error, and permission states.
+   - Data donation briefly explains the IPFS-first free donation flow, shows
+     local and peer execution-data status, links to the execution-data review
+     page, and has clear loading, empty, error, and permission states.
    - Public endpoint and paid pricing controls are not presented as required
      for this release; they may appear only as future/fallback architecture.
-2. `/launcher/launched/:id`
+2. `/operator/execution-data`
+   - Donated execution data is visible without exposing secrets, local paths,
+     identity-bearing host metadata, or unsupported paid endpoint controls.
+   - Peer donated data and local donated data have clear empty, loading,
+     error, and permission states.
+3. `/launcher/launched/:id`
    - The launched record is `swe-rebench-v2.v1`.
    - Generated task rows are visible.
    - Claim counts, claim caps, state transitions, spend, and runway are
@@ -91,16 +109,24 @@ The release is not ready until the live or canary-dry-run proof shows:
 Run the live donation proof with:
 
 ```bash
-yarn release:donation-consumption
+yarn release:donation-consumption --producer-handshake-key <daemon-handshake-key>
 ```
 
 Release mode requires fresh evidence created after the command starts.
 `--reuse-existing` is diagnostics-only and is not valid PR/canary evidence.
+The producer daemon's operator artifact inventory is UI-token protected; pass
+the startup handshake key with `--producer-handshake-key` or provide
+`JINN_DONATION_PRODUCER_UI_TOKEN` for an existing UI session.
 The default isolated consumer home inherits the producer's joined SWE-rebench v2
 SolverNet configuration but uses its own HOME, earning state, database, API
 port, Safe, and agent identity. If you pass `--consumer-config`, that config
 must already be joined as SWE-rebench v2 solver and evaluator with the
 SWE-rebench v2 runtime enabled.
+
+When running the broader `yarn release:client --prepare` gate on `main`, export
+`JINN_DONATION_PRODUCER_HANDSHAKE_KEY` or
+`JINN_DONATION_PRODUCER_UI_TOKEN` first so the nested
+`release:donation-consumption` step can read the protected producer inventory.
 
 Record task IDs, task CIDs, envelope CIDs, trajectory source CIDs, settlement
 transaction hashes, and the redacted donated/acquired artifact evidence.

@@ -24,6 +24,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = resolve(__dirname, '..');
 const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 const SWE_SOLUTION_ARTIFACT_TYPE = 'swe-rebench-v2_v1_solution';
+const CONSUMER_CLAUDE_DISABLED_HARNESSES = [
+  'legacy-claude',
+  'claude-code',
+  'claude-mcp-hyperliquid',
+  'claude-mcp-prediction',
+  'claude-mcp-prediction-apy',
+] as const;
 const VERDICT_ARTIFACT_TYPES = new Set([
   'swe-rebench_v2_verdict',
   'swe-rebench-v2_v1_verdict',
@@ -55,6 +62,7 @@ interface LocalConfig {
   pollIntervalMs?: number;
   operator?: JsonRecord;
   engine?: JsonRecord;
+  harnesses?: JsonRecord;
   [key: string]: unknown;
 }
 
@@ -73,6 +81,10 @@ interface VerifiedDonation {
   envelope: JsonRecord;
   redactedEnvelope: JsonRecord;
   subgraphExecution: JsonRecord;
+}
+
+interface HeaderAuth {
+  headers?: Record<string, string>;
 }
 
 class GateFailure extends Error {
@@ -125,6 +137,17 @@ function defaultClientHome(home: string): string {
   return join(home, '.jinn-client');
 }
 
+function engineImplStateRoot(config: LocalConfig, home: string): string {
+  const engine = config.engine && typeof config.engine === 'object' && !Array.isArray(config.engine)
+    ? config.engine as JsonRecord
+    : {};
+  return asString(engine.implStateDirRoot) ?? join(defaultClientHome(home), 'engine', 'impl-state');
+}
+
+function sweEvaluatorStatePath(config: LocalConfig, home: string): string {
+  return join(engineImplStateRoot(config, home), 'swe-rebench-v2-evaluator', 'state.json');
+}
+
 function resolveConfigPath(path: string | undefined): string {
   return path ? resolve(path) : DEFAULT_CONFIG_PATH;
 }
@@ -173,7 +196,7 @@ function decodeBase64(value: unknown, label: string): Buffer {
   return Buffer.from(value, 'base64');
 }
 
-async function querySubgraphExecution(subgraphUrl: string, manifestCid: string): Promise<JsonRecord> {
+async function querySubgraphExecution(subgraphUrl: string, manifestCid: string): Promise<JsonRecord | null> {
   const body = await fetchJson(subgraphUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -202,10 +225,23 @@ async function querySubgraphExecution(subgraphUrl: string, manifestCid: string):
   }
   const executions = ((body.data as JsonRecord | undefined)?.executions ?? []) as JsonRecord[];
   const execution = executions[0];
-  if (!execution) {
-    fail('envelope_not_indexed', 'Donated envelope is not visible in the configured subgraph.', { manifestCid });
+  return execution ?? null;
+}
+
+async function waitForSubgraphExecution(opts: {
+  subgraphUrl: string;
+  manifestCid: string;
+  deadline: number;
+  pollMs: number;
+}): Promise<JsonRecord> {
+  while (Date.now() < opts.deadline) {
+    const execution = await querySubgraphExecution(opts.subgraphUrl, opts.manifestCid);
+    if (execution) return execution;
+    await boundedPollSleep(opts.deadline, opts.pollMs);
   }
-  return execution;
+  fail('envelope_not_indexed', 'Donated envelope is not visible in the configured subgraph.', {
+    manifestCid: opts.manifestCid,
+  });
 }
 
 function redactEnvelope(envelope: JsonRecord): JsonRecord {
@@ -297,6 +333,8 @@ async function verifyDonatedEnvelope(
   artifact: ProducerArtifact,
   ipfsGatewayUrl: string,
   subgraphUrl: string,
+  deadline: number,
+  pollMs: number,
 ): Promise<VerifiedDonation> {
   const envelope = await fetchIpfsJson(ipfsGatewayUrl, artifact.envelopeCid);
   const artifacts = Array.isArray(envelope.artifacts) ? envelope.artifacts as JsonRecord[] : [];
@@ -350,7 +388,12 @@ async function verifyDonatedEnvelope(
     }
   }
   const trajectorySourceCid = await verifyTrajectorySource(envelope, ipfsGatewayUrl);
-  const subgraphExecution = await querySubgraphExecution(subgraphUrl, artifact.envelopeCid);
+  const subgraphExecution = await waitForSubgraphExecution({
+    subgraphUrl,
+    manifestCid: artifact.envelopeCid,
+    deadline,
+    pollMs,
+  });
   return {
     artifact,
     sourceCid: firstCid,
@@ -365,12 +408,13 @@ async function fetchOperatorArtifacts(
   baseUrl: string,
   source: 'served' | 'network',
   artifactType: string,
+  auth: HeaderAuth = {},
 ): Promise<OperatorArtifactsResponse> {
   const url = new URL('/v1/operator/artifacts', baseUrl);
   url.searchParams.set('source', source);
   url.searchParams.set('artifactType', artifactType);
   url.searchParams.set('limit', '50');
-  return fetchJson(url.toString()) as Promise<OperatorArtifactsResponse>;
+  return fetchJson(url.toString(), auth.headers ? { headers: auth.headers } : undefined) as Promise<OperatorArtifactsResponse>;
 }
 
 async function waitForProducerArtifact(opts: {
@@ -379,11 +423,17 @@ async function waitForProducerArtifact(opts: {
   deadline: number;
   reuseExisting: boolean;
   pollMs: number;
+  producerAuth: HeaderAuth;
 }): Promise<ProducerArtifact> {
   let lastError: string | null = null;
   while (Date.now() < opts.deadline) {
     try {
-      const response = await fetchOperatorArtifacts(opts.producerUrl, 'served', SWE_SOLUTION_ARTIFACT_TYPE);
+      const response = await fetchOperatorArtifacts(
+        opts.producerUrl,
+        'served',
+        SWE_SOLUTION_ARTIFACT_TYPE,
+        opts.producerAuth,
+      );
       const artifacts = response.artifacts ?? [];
       const candidate = artifacts.find((row) => {
         if (
@@ -419,7 +469,58 @@ async function waitForProducerArtifact(opts: {
   );
 }
 
-function buildConsumerConfig(opts: {
+async function producerAuthFromHandshake(producerUrl: string, handshakeKey: string): Promise<HeaderAuth> {
+  const url = new URL('/auth/handshake', producerUrl);
+  url.searchParams.set('k', handshakeKey);
+  const response = await fetch(url);
+  if (!response.ok) {
+    fail('producer_handshake_failed', 'Producer UI handshake failed.', {
+      producerUrl,
+      status: response.status,
+    });
+  }
+  const setCookie = response.headers.get('set-cookie');
+  const cookie = setCookie?.split(';')[0]?.trim();
+  if (!cookie) {
+    fail('producer_handshake_cookie_missing', 'Producer UI handshake did not return a session cookie.', {
+      producerUrl,
+    });
+  }
+  return { headers: { cookie } };
+}
+
+async function resolveProducerAuth(opts: {
+  producerUrl: string;
+  producerUiToken?: string;
+  producerHandshakeKey?: string;
+}): Promise<HeaderAuth> {
+  if (opts.producerUiToken) {
+    return { headers: { 'x-jinn-ui-token': opts.producerUiToken } };
+  }
+  if (opts.producerHandshakeKey) {
+    return producerAuthFromHandshake(opts.producerUrl, opts.producerHandshakeKey);
+  }
+  return {};
+}
+
+function buildConsumerHarnesses(raw: unknown): JsonRecord {
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as JsonRecord) }
+    : {};
+  const disabled = new Set<string>();
+  for (const entry of Array.isArray(base.disabled) ? base.disabled : []) {
+    if (typeof entry === 'string' && entry.trim()) disabled.add(entry.trim());
+  }
+  for (const name of CONSUMER_CLAUDE_DISABLED_HARNESSES) disabled.add(name);
+  delete base.externalImpls;
+  return {
+    ...base,
+    default: 'codex',
+    disabled: [...disabled],
+  };
+}
+
+export function buildConsumerConfig(opts: {
   producerConfig: LocalConfig;
   consumerHome: string;
   consumerPort: number;
@@ -427,6 +528,7 @@ function buildConsumerConfig(opts: {
   ipfsGatewayUrl: string;
 }): LocalConfig {
   const clientHome = defaultClientHome(opts.consumerHome);
+  const solverNets = cloneSolverNetsForConsumer(opts.producerConfig.solverNets);
   const base: LocalConfig = {
     network: opts.producerConfig.network ?? 'testnet',
     rpcUrl: opts.producerConfig.rpcUrl,
@@ -447,7 +549,8 @@ function buildConsumerConfig(opts: {
     ...(opts.producerConfig.claudeModel ? { claudeModel: opts.producerConfig.claudeModel } : {}),
     ...(opts.producerConfig.runtimeMode ? { runtimeMode: opts.producerConfig.runtimeMode } : {}),
     ...(opts.producerConfig.harness ? { harness: opts.producerConfig.harness } : {}),
-    ...(opts.producerConfig.harnesses ? { harnesses: opts.producerConfig.harnesses } : {}),
+    harnesses: buildConsumerHarnesses(opts.producerConfig.harnesses),
+    ...(solverNets ? { solverNets } : {}),
     ...(opts.producerConfig.joinedSolverNets ? { joinedSolverNets: opts.producerConfig.joinedSolverNets } : {}),
     engine: {
       workingDirRoot: join(clientHome, 'engine', 'work'),
@@ -469,6 +572,64 @@ function buildConsumerConfig(opts: {
     if (opts.producerConfig[key] !== undefined) base[key] = opts.producerConfig[key];
   }
   return base;
+}
+
+export function ensureConsumerSweEvaluatorState(opts: {
+  producerConfig: LocalConfig;
+  producerHome: string;
+  consumerConfig: LocalConfig;
+  consumerHome: string;
+  evidenceDir?: string;
+}): string {
+  const consumerStatePath = sweEvaluatorStatePath(opts.consumerConfig, opts.consumerHome);
+  const consumerState = readJsonFile(consumerStatePath);
+  const existingUpstream = asString(consumerState.upstreamRepoDir);
+  if (consumerState.schemaVersion === 'swe-rebench-v2-evaluator-state.v1' && existingUpstream && existsSync(existingUpstream)) {
+    return consumerStatePath;
+  }
+
+  const producerStatePath = sweEvaluatorStatePath(opts.producerConfig, opts.producerHome);
+  const producerState = readJsonFile(producerStatePath);
+  const upstreamRepoDir = asString(producerState.upstreamRepoDir);
+  if (producerState.schemaVersion !== 'swe-rebench-v2-evaluator-state.v1' || !upstreamRepoDir || !existsSync(upstreamRepoDir)) {
+    fail('consumer_evaluator_setup_required', 'Consumer SWE evaluator is not enabled and no reusable producer evaluator checkout was found.', {
+      producerStatePath,
+      consumerStatePath,
+      remedy:
+        'Run `jinn harnesses enable swe-rebench-v2-evaluator` for the producer or the consumer config, then rerun the donation-consumption gate.',
+    });
+  }
+
+  const nextState = {
+    schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+    enabled: true,
+    enabledAt: new Date().toISOString(),
+    upstreamRepoDir,
+  };
+  writeJson(consumerStatePath, nextState);
+  if (opts.evidenceDir) {
+    writeJson(join(opts.evidenceDir, 'consumer-evaluator-state.json'), {
+      consumerStatePath,
+      sourceStatePath: producerStatePath,
+      upstreamRepoDir,
+    });
+  }
+  return consumerStatePath;
+}
+
+function cloneSolverNetsForConsumer(raw: unknown): JsonRecord | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: JsonRecord = {};
+  for (const [name, value] of Object.entries(raw as JsonRecord)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const entry = { ...(value as JsonRecord) };
+    const taskGenerator = entry.taskGenerator && typeof entry.taskGenerator === 'object' && !Array.isArray(entry.taskGenerator)
+      ? { ...(entry.taskGenerator as JsonRecord), enabled: false }
+      : { enabled: false };
+    entry.taskGenerator = taskGenerator;
+    out[name] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function sourceName(value: unknown): string | undefined {
@@ -508,11 +669,25 @@ function assertConsumerConfiguredForSwe(config: LocalConfig, configPath: string)
   const evaluatorEntries = sweEntries.filter((entry) => (
     Array.isArray(entry.roles) && entry.roles.includes('evaluator')
   ));
-  const runtimeEnabled = solverEntries.some((entry) => (
+  const joinedRuntimeEnabled = solverEntries.some((entry) => (
     !disablesSweRuntime(entry.disabledDefaultPlugins) || includesSweRuntimePlugin(entry.plugins)
   ));
-  const hasSolver = solverEntries.length > 0;
-  const hasEvaluator = evaluatorEntries.length > 0;
+  const solverNets = config.solverNets && typeof config.solverNets === 'object' && !Array.isArray(config.solverNets)
+    ? Object.values(config.solverNets as Record<string, JsonRecord>)
+    : [];
+  const legacySweEntries = solverNets.filter((entry) => (
+    entry.enabled !== false && entry.solverType === 'swe-rebench-v2.v1'
+  ));
+  const legacyHasSolver = legacySweEntries.some((entry) => (
+    !Array.isArray(entry.roles) || entry.roles.includes('solving')
+  ));
+  const legacyHasEvaluator = legacySweEntries.some((entry) => (
+    Array.isArray(entry.roles) && entry.roles.includes('evaluating')
+  ));
+  const legacyRuntimeEnabled = legacySweEntries.some((entry) => includesSweRuntimePlugin(entry.plugins));
+  const hasSolver = solverEntries.length > 0 || legacyHasSolver;
+  const hasEvaluator = evaluatorEntries.length > 0 || legacyHasEvaluator;
+  const runtimeEnabled = joinedRuntimeEnabled || legacyRuntimeEnabled;
   if (!hasSolver || !hasEvaluator || !runtimeEnabled) {
     fail('consumer_swe_join_required', 'Consumer config is not joined to SWE-rebench v2 for the live donation gate.', {
       configPath,
@@ -525,23 +700,46 @@ function assertConsumerConfiguredForSwe(config: LocalConfig, configPath: string)
   }
 }
 
-function childEnv(home: string, apiToken: string): NodeJS.ProcessEnv {
-  return {
+export function resolveConsumerCodexHome(raw?: string): string | undefined {
+  const explicit = raw?.trim() || process.env['JINN_DONATION_CONSUMER_CODEX_HOME']?.trim();
+  if (explicit) return resolve(explicit);
+  const envHome = process.env['CODEX_HOME']?.trim();
+  if (envHome) return resolve(envHome);
+  const defaultPath = join(homedir(), '.codex');
+  return existsSync(join(defaultPath, 'auth.json')) ? defaultPath : undefined;
+}
+
+function assertConsumerCodexAuthAvailable(codexHome: string | undefined): void {
+  if (process.env['OPENAI_API_KEY']?.trim()) return;
+  if (codexHome && existsSync(join(codexHome, 'auth.json'))) return;
+  fail('consumer_codex_auth_required', 'Consumer Codex harness auth is missing for the live donation gate.', {
+    codexHome,
+    remedy:
+      'Set OPENAI_API_KEY, CODEX_HOME, JINN_DONATION_CONSUMER_CODEX_HOME, or pass --consumer-codex-home pointing at a Codex home with auth.json.',
+  });
+}
+
+export function buildConsumerChildEnv(home: string, apiToken: string, codexHome?: string): NodeJS.ProcessEnv {
+  const corepackHome = process.env['COREPACK_HOME'] ?? join(homedir(), '.cache', 'node', 'corepack');
+  const env = {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: join(home, '.config'),
     XDG_DATA_HOME: join(home, '.local', 'share'),
     XDG_CACHE_HOME: join(home, '.cache'),
+    COREPACK_HOME: corepackHome,
     DAEMON_API_TOKEN: apiToken,
     JINN_NO_UI: '1',
     NO_COLOR: '1',
   };
+  if (codexHome) env.CODEX_HOME = codexHome;
+  return env;
 }
 
-function runFundingPreflight(configPath: string, home: string, apiToken: string, evidenceDir: string): void {
+function runFundingPreflight(configPath: string, home: string, apiToken: string, evidenceDir: string, codexHome?: string): void {
   const result = spawnSync('yarn', ['jinn', 'fund-requirements', '--json', '--config', configPath], {
     cwd: clientRoot,
-    env: childEnv(home, apiToken),
+    env: buildConsumerChildEnv(home, apiToken, codexHome),
     encoding: 'utf8',
     stdio: 'pipe',
   });
@@ -571,6 +769,7 @@ function startConsumerDaemon(opts: {
   home: string;
   apiToken: string;
   evidenceDir: string;
+  codexHome?: string;
 }): ChildProcessWithoutNullStreams {
   const child = spawn('yarn', [
     'jinn',
@@ -583,7 +782,7 @@ function startConsumerDaemon(opts: {
     opts.configPath,
   ], {
     cwd: clientRoot,
-    env: childEnv(opts.home, opts.apiToken),
+    env: buildConsumerChildEnv(opts.home, opts.apiToken, opts.codexHome),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (chunk) => {
@@ -595,17 +794,32 @@ function startConsumerDaemon(opts: {
   return child;
 }
 
-async function waitForStatus(baseUrl: string, deadline: number, pollMs: number): Promise<void> {
-  while (Date.now() < deadline) {
+async function waitForStatus(opts: {
+  baseUrl: string;
+  deadline: number;
+  pollMs: number;
+  consumerProcess?: ChildProcessWithoutNullStreams | null;
+  evidenceDir?: string;
+}): Promise<void> {
+  while (Date.now() < opts.deadline) {
+    const child = opts.consumerProcess;
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      fail('consumer_daemon_exited', 'Consumer daemon exited before it became reachable.', {
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        stdoutPath: opts.evidenceDir ? join(opts.evidenceDir, 'consumer-daemon.stdout') : undefined,
+        stderrPath: opts.evidenceDir ? join(opts.evidenceDir, 'consumer-daemon.stderr') : undefined,
+      });
+    }
     try {
-      const response = await fetch(new URL('/v1/status', baseUrl));
+      const response = await fetch(new URL('/v1/status', opts.baseUrl));
       if (response.ok) return;
     } catch {
       // not up yet
     }
-    await boundedPollSleep(deadline, pollMs);
+    await boundedPollSleep(opts.deadline, opts.pollMs);
   }
-  fail('consumer_daemon_unreachable', 'Consumer daemon did not become reachable before timeout.', { consumerUrl: baseUrl });
+  fail('consumer_daemon_unreachable', 'Consumer daemon did not become reachable before timeout.', { consumerUrl: opts.baseUrl });
 }
 
 async function callMcpTool(opts: {
@@ -644,7 +858,15 @@ async function callMcpTool(opts: {
       .filter((entry) => entry.type === 'text' && entry.text)
       .map((entry) => entry.text)
       .join('\n');
-    return JSON.parse(text) as JsonRecord;
+    try {
+      return JSON.parse(text) as JsonRecord;
+    } catch (err) {
+      fail('consumer_mcp_non_json_response', `MCP tool ${opts.name} returned non-JSON text.`, {
+        tool: opts.name,
+        text,
+        parseError: err instanceof Error ? err.message : String(err),
+      });
+    }
   } finally {
     await client.close();
   }
@@ -774,8 +996,13 @@ Options:
   --producer-config <path>   Producer config (default: ~/.jinn-client/config.json)
   --consumer-config <path>   Consumer config (default: <consumer-home>/.jinn-client/config.json)
   --producer-url <url>       Producer daemon URL (default from producer apiPort)
+  --producer-ui-token <tok>  Producer UI token for /v1/operator/artifacts
+  --producer-handshake-key <k>
+                             Exchange daemon handshake key for producer UI auth
   --consumer-url <url>       Attach to an existing consumer daemon instead of starting one
   --consumer-home <path>     Isolated consumer HOME (default: client/.acceptance/donation-consumer)
+  --consumer-codex-home <p>  Codex auth/config home for the consumer harness
+                             (default: CODEX_HOME or ~/.codex when auth.json exists)
   --consumer-port <port>     Consumer daemon port when started by this script (default: 7333)
   --timeout-ms <ms>          Gate timeout (default: 1800000)
   --poll-ms <ms>             Poll interval (default: 10000)
@@ -788,7 +1015,8 @@ evidence created after this command starts. --reuse-existing is not valid
 release evidence. The consumer must be joined to SWE-rebench v2 as solver and
 evaluator with the SWE runtime enabled; the default isolated consumer config
 inherits that SolverNet selection from the producer config while keeping a
-separate HOME, DB, Safe, and agent identity.
+separate HOME, DB, Safe, and agent identity. The Codex harness still requires
+a real Codex/OpenAI credential via OPENAI_API_KEY or a usable CODEX_HOME.
 `);
 }
 
@@ -799,8 +1027,11 @@ async function main(): Promise<void> {
       'producer-config': { type: 'string' },
       'consumer-config': { type: 'string' },
       'producer-url': { type: 'string' },
+      'producer-ui-token': { type: 'string' },
+      'producer-handshake-key': { type: 'string' },
       'consumer-url': { type: 'string' },
       'consumer-home': { type: 'string' },
+      'consumer-codex-home': { type: 'string' },
       'consumer-port': { type: 'string' },
       'timeout-ms': { type: 'string' },
       'poll-ms': { type: 'string' },
@@ -827,12 +1058,24 @@ async function main(): Promise<void> {
 
   const producerConfigPath = resolveConfigPath(parsed.values['producer-config']);
   const producerConfig = loadLocalConfig(producerConfigPath);
+  const producerHome = dirname(dirname(producerConfigPath));
   const producerPort = configApiPort(producerConfig, 7331);
   const producerUrl = parsed.values['producer-url'] ?? `http://127.0.0.1:${producerPort}`;
+  const producerUiToken = asString(parsed.values['producer-ui-token'])
+    ?? process.env['JINN_DONATION_PRODUCER_UI_TOKEN']?.trim();
+  const producerHandshakeKey = asString(parsed.values['producer-handshake-key'])
+    ?? process.env['JINN_DONATION_PRODUCER_HANDSHAKE_KEY']?.trim();
+  const producerAuth = await resolveProducerAuth({
+    producerUrl,
+    producerUiToken,
+    producerHandshakeKey,
+  });
   const subgraphUrl = asString(producerConfig.subgraphUrl) ?? DEFAULT_TESTNET_SUBGRAPH_URL;
   const ipfsGatewayUrl = asString(producerConfig.ipfsGatewayUrl) ?? DEFAULT_IPFS_GATEWAY_URL;
 
   const consumerHome = resolve(parsed.values['consumer-home'] ?? join(clientRoot, '.acceptance', 'donation-consumer'));
+  const consumerCodexHome = resolveConsumerCodexHome(parsed.values['consumer-codex-home']);
+  assertConsumerCodexAuthAvailable(consumerCodexHome);
   const consumerPort = asInt(parsed.values['consumer-port'], 7333);
   const consumerConfigPath = resolve(
     parsed.values['consumer-config'] ?? join(defaultClientHome(consumerHome), 'config.json'),
@@ -861,6 +1104,13 @@ async function main(): Promise<void> {
   const consumerDbPath = configDbPath(consumerConfig, consumerHome);
   const consumerEarningDir = configEarningDir(consumerConfig, consumerHome);
   assertConsumerConfiguredForSwe(consumerConfig, consumerConfigPath);
+  const consumerEvaluatorStatePath = ensureConsumerSweEvaluatorState({
+    producerConfig,
+    producerHome,
+    consumerConfig,
+    consumerHome,
+    evidenceDir,
+  });
 
   writeJson(join(evidenceDir, 'inputs.json'), {
     startedAt: startedAt.toISOString(),
@@ -869,12 +1119,16 @@ async function main(): Promise<void> {
     reuseExisting,
     releaseEvidence: !reuseExisting,
     producerConfigPath,
+    producerHome,
     producerUrl,
+    producerAuth: producerAuth.headers ? '<configured>' : '<none>',
     consumerConfigPath,
     consumerUrl,
     consumerHome,
+    consumerCodexHome: consumerCodexHome ?? '<OPENAI_API_KEY>',
     consumerDbPath,
     consumerEarningDir,
+    consumerEvaluatorStatePath,
     subgraphUrl,
     ipfsGatewayUrl,
   });
@@ -887,8 +1141,10 @@ async function main(): Promise<void> {
     deadline,
     reuseExisting,
     pollMs,
+    producerAuth,
   });
-  const donationProof = await verifyDonatedEnvelope(producerArtifact, ipfsGatewayUrl, subgraphUrl);
+  console.log('[donation-consumption] verifying producer IPFS envelope and subgraph indexing');
+  const donationProof = await verifyDonatedEnvelope(producerArtifact, ipfsGatewayUrl, subgraphUrl, deadline, pollMs);
   writeJson(join(evidenceDir, 'producer-proof.json'), {
     artifact: donationProof.artifact,
     sourceCid: donationProof.sourceCid,
@@ -900,17 +1156,24 @@ async function main(): Promise<void> {
   let consumerProcess: ChildProcessWithoutNullStreams | null = null;
   if (!attachConsumerUrl) {
     console.log('[donation-consumption] running consumer funding preflight');
-    runFundingPreflight(consumerConfigPath, consumerHome, consumerApiToken, evidenceDir);
+    runFundingPreflight(consumerConfigPath, consumerHome, consumerApiToken, evidenceDir, consumerCodexHome);
     console.log('[donation-consumption] starting isolated consumer daemon');
     consumerProcess = startConsumerDaemon({
       configPath: consumerConfigPath,
       home: consumerHome,
       apiToken: consumerApiToken,
       evidenceDir,
+      codexHome: consumerCodexHome,
     });
   }
   try {
-    await waitForStatus(consumerUrl, deadline, pollMs);
+    await waitForStatus({
+      baseUrl: consumerUrl,
+      deadline,
+      pollMs,
+      consumerProcess,
+      evidenceDir,
+    });
 
     console.log('[donation-consumption] checking consumer MCP discovery');
     const searchResult = await callMcpTool({
@@ -1002,13 +1265,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  if (err instanceof GateFailure) {
-    console.error(`[donation-consumption] FAILED ${err.code}: ${err.message}`);
-    console.error(JSON.stringify(err.details, null, 2));
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    if (err instanceof GateFailure) {
+      console.error(`[donation-consumption] FAILED ${err.code}: ${err.message}`);
+      console.error(JSON.stringify(err.details, null, 2));
+      process.exit(1);
+    }
+    console.error('[donation-consumption] FAILED unexpected error');
+    console.error(err);
     process.exit(1);
-  }
-  console.error('[donation-consumption] FAILED unexpected error');
-  console.error(err);
-  process.exit(1);
-});
+  });
+}

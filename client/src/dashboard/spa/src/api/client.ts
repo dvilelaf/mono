@@ -281,7 +281,7 @@ export const api = {
       if (opts.limit !== undefined) q.set('limit', String(opts.limit));
       const qs = q.toString();
       return jfetch<OperatorArtifactsResponse>(
-        `/v1/operator/artifacts${qs ? `?${qs}` : ''}`,
+        `/v1/operator/execution-data${qs ? `?${qs}` : ''}`,
       );
     },
     updatePricing: (pricing: OperatorPricingConfig) =>

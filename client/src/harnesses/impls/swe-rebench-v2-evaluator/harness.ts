@@ -299,6 +299,20 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       passed_match: graded.passed_match,
       evaluator_cost_usd: 0,
     };
+    const verdictArtifactPayload = {
+      schemaVersion: 'swe-rebench-v2-verdict-artifact.v1',
+      verdict: verdictPayload,
+      informational: {
+        instance_id: task.instance_id,
+        round_month: task.round_month,
+        test_log_cid,
+      },
+    };
+    await writeFile(
+      join(ctx.workingDir, 'swe-rebench-v2-verdict.json'),
+      `${JSON.stringify(verdictArtifactPayload, null, 2)}\n`,
+      'utf8',
+    );
 
     return {
       venueRef: { name: 'swe-rebench-v2' },

@@ -40,6 +40,7 @@ import {
   getTaskCidDigest,
   callDeliverToMarketplace,
   canClaimTask,
+  canClaimEvaluation,
   type RouterTaskPolicy,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
@@ -568,6 +569,22 @@ export class MechAdapter implements ExecutionAdapter {
     solution: PendingEvaluationSolution,
   ): Promise<TaskAnnouncement | undefined> {
     const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
+    const claimable = await canClaimEvaluation(
+      this.publicClient,
+      this.config.safeAddress,
+      this.config.routerAddress,
+      solution.taskId,
+      solution.attemptIndex,
+      this.config.mechContractAddress,
+    );
+    if (!claimable.ok) {
+      console.log(
+        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}`,
+      );
+      this.forgetPendingEvaluationSolution(solution.requestId);
+      return undefined;
+    }
+
     const restorationEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,

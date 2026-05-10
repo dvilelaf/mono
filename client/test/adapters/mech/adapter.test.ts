@@ -65,6 +65,7 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
     blockNumber: 124,
   }),
   canClaimTask: vi.fn().mockResolvedValue({ ok: true }),
+  canClaimEvaluation: vi.fn().mockResolvedValue({ ok: true }),
   claimEvaluation: vi.fn().mockResolvedValue({
     taskId: '1',
     attemptIndex: 0,
@@ -403,6 +404,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
   it('watchForTasks yields evaluation opportunities and claimTask claims them as evaluator work', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {
+      canClaimEvaluation,
       claimEvaluation,
       decodeSolutionDeliveryClaimedLogs,
       findLatestDeliveryDataHexForRequest,
@@ -471,6 +473,14 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.ipfsGatewayUrl,
       TASK_CID,
     );
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '1',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
     expect(claimEvaluation).not.toHaveBeenCalled();
 
     const request = await adapter.claimTask(value!.taskId);
@@ -496,6 +506,51 @@ describe('MechAdapter TaskCoordinator flow', () => {
       task: { role: 'evaluation', restorationRequestId: REQUEST_ID },
       taskCid: 'QmFakeCid',
     });
+
+    await adapter.stop();
+  });
+
+  it('drops stale evaluation opportunities before yielding them to the daemon', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      findLatestDeliveryDataHexForRequest,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    vi.mocked(canClaimEvaluation).mockResolvedValueOnce({
+      ok: false,
+      reason: 'TCAttemptAlreadyFinalized(1, 0)',
+    });
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(false);
+    expect(canClaimEvaluation).toHaveBeenCalledWith(
+      expect.anything(),
+      TEST_CONFIG.safeAddress,
+      TEST_CONFIG.routerAddress,
+      '1',
+      0,
+      TEST_CONFIG.mechContractAddress,
+    );
+    expect(getMarketplaceRequestDeliveryMech).not.toHaveBeenCalled();
+    expect(findLatestDeliveryDataHexForRequest).not.toHaveBeenCalled();
+    expect(fetchFromIpfs).not.toHaveBeenCalled();
 
     await adapter.stop();
   });

@@ -823,6 +823,17 @@ describe('operator config (jinn-mono-vy37.1.3)', () => {
     expect(cfg.operator?.perArtifactTypePrice).toEqual({});
   });
 
+  it('accepts donation-mode operator config without publicEndpoint', async () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    const configPath = await writeOpConfigFile({
+      operator: { donation: { enabled: true } },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.operator?.publicEndpoint).toBeUndefined();
+    expect(cfg.operator?.defaultPriceUsdc).toBe('0');
+    expect(cfg.operator?.donation.enabled).toBe(true);
+  });
+
   it('honours per-artifact-type prices from the file', async () => {
     for (const k of ENV_KEYS) delete process.env[k];
     const configPath = await writeOpConfigFile({

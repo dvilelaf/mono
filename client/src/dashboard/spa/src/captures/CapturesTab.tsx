@@ -62,6 +62,37 @@ function sameSelection(a: ExecutionDataSelection | undefined, b: ExecutionDataSe
   return false;
 }
 
+function queryErrorMessage(error: unknown): string {
+  if (!error) return 'Unknown error';
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isPermissionError(error: unknown): boolean {
+  return /\b(401|403)\b|unauthorized|forbidden/i.test(queryErrorMessage(error));
+}
+
+function ExecutionDataNotice({ kind, message }: { kind: 'permission' | 'error'; message?: string }): JSX.Element {
+  const copy = kind === 'permission'
+    ? 'Permission required to view execution data. Open the dashboard from the daemon handshake URL or refresh an authenticated session.'
+    : `Execution data could not be loaded${message ? `: ${message}` : '.'}`;
+  return (
+    <div
+      role="alert"
+      data-testid={kind === 'permission' ? 'execution-data-permission' : 'execution-data-error'}
+      style={{
+        marginBottom: 12,
+        padding: '12px 14px',
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        background: 'var(--panel)',
+        color: kind === 'permission' ? 'var(--accent-warn)' : 'var(--accent-danger)',
+      }}
+    >
+      {copy}
+    </div>
+  );
+}
+
 function captureRow(capture: CaptureSummary): ExecutionDataRow {
   return {
     id: `capture:${capture.sessionId}`,
@@ -173,6 +204,13 @@ export function CapturesTab(): JSX.Element {
     ? artifacts.find((artifact) => artifact.source === selected.source && artifact.sha256 === selected.sha256)
     : undefined;
   const loading = listQuery.isLoading || servedQuery.isLoading || networkQuery.isLoading;
+  const listErrors = [
+    listQuery.isError ? listQuery.error : listQuery.failureReason,
+    servedQuery.isError ? servedQuery.error : servedQuery.failureReason,
+    networkQuery.isError ? networkQuery.error : networkQuery.failureReason,
+  ].filter(Boolean);
+  const listPermissionError = listErrors.find(isPermissionError);
+  const listError = listPermissionError ?? listErrors[0];
 
   useEffect(() => {
     if (rows.length === 0) {
@@ -213,6 +251,12 @@ export function CapturesTab(): JSX.Element {
     <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '360px 1fr', gap: 24 }}>
       <aside>
         <h1 style={{ margin: '0 0 12px', fontSize: 24 }}>Execution data</h1>
+        {listError ? (
+          <ExecutionDataNotice
+            kind={listPermissionError ? 'permission' : 'error'}
+            message={listPermissionError ? undefined : queryErrorMessage(listError)}
+          />
+        ) : null}
         {loading && rows.length === 0 ? (
           <div style={{ padding: 24, color: 'var(--fg-muted)' }}>
             Loading execution data.
@@ -255,7 +299,12 @@ export function CapturesTab(): JSX.Element {
         )}
       </aside>
       <main>
-        {selected?.kind === 'capture' && detailQuery.data ? (
+        {detailQuery.error ? (
+          <ExecutionDataNotice
+            kind={isPermissionError(detailQuery.error) ? 'permission' : 'error'}
+            message={isPermissionError(detailQuery.error) ? undefined : queryErrorMessage(detailQuery.error)}
+          />
+        ) : selected?.kind === 'capture' && detailQuery.data ? (
           <CaptureDrillIn
             detail={detailQuery.data}
             approving={approve.isPending}
