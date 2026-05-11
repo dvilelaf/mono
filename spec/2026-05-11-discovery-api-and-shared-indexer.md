@@ -1,10 +1,12 @@
 # Discovery API and shared indexer
 
-- **Date:** 2026-05-11 (v0.1 draft) → 2026-05-11 (v0.2 — collapse standalone indexer into daemon-in-embedded-mode)
+- **Date:** 2026-05-11 (v0.1 → v0.2 → v0.3)
 - **Author:** Oak with Opus
 - **Status:** Design draft — ready for review
-- **Version:** 0.2
-- **v0.2 changes:** (a) Removed the standalone-indexer deployment shape. The "shared indexer" is now a daemon running in embedded mode with its Ponder GraphQL port published externally (`discovery.publishIndexer: true`). One deployment artifact (`client/Dockerfile`), three configuration variants per §8. (b) Added §13 (Operator UX surface) defining the minimum SPA controls + status surface required to make discovery operator-visible.
+- **Version:** 0.3
+- **v0.3 change (revert):** Backed out the v0.2 "daemon-is-the-indexer" collapse. The indexer is a standalone Ponder service deployed via standard Ponder patterns (`deploy/README.md`); the daemon talks to it via GraphQL. Dropped the snapshot-publication-to-IPFS subsystem, the `publishIndexer` config flag, and the near-term scope of embedded mode (moved to §15 Deferred future work). The simpler design matches canonical Ponder deployment and removes engineering that was solving problems Ponder already solves (rolling deploys via `DATABASE_SCHEMA` + views; health endpoints; multi-replica HTTP scaling).
+- **v0.2 change (superseded):** Removed the standalone-indexer deployment shape. Reverted in v0.3.
+- **v0.1 → v0.2 was a misread of the user's deployment intent.** Recording the reversal for posterity.
 - **Related:**
   - `spec/2026-04-30-phase-a-umbrella.md` (corpus library as the "first app" / programmatic library; `routeResolver` seam)
   - `spec/2026-05-05-solvernet-creation-and-launch.md` §13 (registry client interface designed to be swappable)
@@ -18,7 +20,7 @@
 
 Define how the daemon performs read-side discovery (claimable tasks, SolverNet manifests, corpus envelopes) without a runtime dependency on a third-party hosted subgraph that requires a centralized API key.
 
-The decision: introduce a `DiscoveryAPI` interface, ship two implementations of it (HTTP-to-shared-indexer, embedded-Ponder), and keep a direct on-chain RPC path as the always-available fallback. The "shared indexer" is not a separate service — it is a daemon running in embedded mode with its Ponder GraphQL port published externally. The default daemon configuration points at one such instance, **privately operated by the daemon's current maintainer** (Oak), running the same daemon image as everyone else with `publishIndexer: true`. It is not protocol infrastructure and not Jinn-the-project-operated. Operators who want full autonomy flip a config flag to run embedded mode locally; operators who later prefer a different default point at a different URL; operators who want to be public indexers themselves flip the same `publishIndexer` flag.
+The decision: introduce a `DiscoveryAPI` interface, ship two concrete implementations (`HttpDiscoveryAPI` that talks GraphQL to a Ponder service; `OnchainDiscoveryAPI` that reads directly from RPC), and run Ponder as a standalone service that the daemon consumes over HTTP. The daemon's default configuration points at a Ponder instance **privately operated by the daemon's current maintainer** (Oak), deployed using the canonical Ponder deployment pattern (Postgres-backed, GraphQL endpoint, rolling deploys via `DATABASE_SCHEMA` + views — see `packages/indexer/deploy/README.md`). It is not protocol infrastructure and not Jinn-the-project-operated. Operators who want a different default point at a different URL; operators who want maximum trust-minimisation pin `discovery.mode: 'onchain'` and use the on-chain floor only.
 
 ## 2. Problem
 
@@ -57,10 +59,10 @@ A hosted Graph subgraph with an API key gives the daemon: indexed task tables wi
 
 ## 4. Decision summary
 
-1. **One interface, three implementations.** A new `DiscoveryAPI` interface in `client/src/discovery/` abstracts the read-side queries the daemon currently issues against the subgraph. Three implementations ship: `HttpDiscoveryAPI` (calls a public indexer over HTTP/GraphQL), `EmbeddedPonderDiscoveryAPI` (runs Ponder in-process; same code path supports private autonomy and public-indexer roles via a config flag), and `OnchainDiscoveryAPI` (direct RPC `getLogs` + multicall; the fallback path).
-2. **One artifact, one deployment shape.** Ponder lives in `packages/indexer/` and is bundled into the daemon image (`client/Dockerfile`) when the daemon imports it. There is no separate indexer Dockerfile or service. The "shared indexer" deployment is a daemon running with `discovery.mode: 'embedded'` + `publishIndexer: true`. Public-indexer operators and private-autonomy operators run the same image; the difference is one config flag.
-3. **HTTP-to-shared-indexer is the default.** Default daemon configuration points at the URL of a daemon-in-embedded-mode privately operated by the daemon's current maintainer (Oak). This is one operator's app, not protocol infrastructure. Operators flip a config field to switch to embedded mode locally, point at a different host, or become a public indexer themselves.
-4. **On-chain fallback is always live.** If the chosen primary implementation fails (VPS unreachable, embedded Ponder still syncing, hosted subgraph 5xx), the daemon falls back to `OnchainDiscoveryAPI` for the duration of the outage. Slower but functional. Operators stay live during indexer outages.
+1. **One interface, two concrete implementations + a transitional one.** A new `DiscoveryAPI` interface in `client/src/discovery/` abstracts the read-side queries the daemon currently issues against the subgraph. Shipped: `HttpDiscoveryAPI` (calls a Ponder service over GraphQL), `OnchainDiscoveryAPI` (direct RPC; the always-live floor), and `HttpSubgraphDiscoveryAPI` (transitional, retained for the migration window only).
+2. **Indexer is a standalone Ponder service.** `packages/indexer/` is deployed using Ponder's canonical patterns (Postgres + `DATABASE_SCHEMA` + views for zero-downtime rolling deploys). Not bundled into the daemon. Not invented infrastructure. Standard `Dockerfile` at `packages/indexer/deploy/Dockerfile`; deployment guide at `packages/indexer/deploy/README.md`.
+3. **HTTP-to-Ponder is the default.** Default daemon configuration points at the URL of a Ponder instance privately operated by the daemon's current maintainer (Oak). This is one operator's deployment, not protocol infrastructure. Operators flip `discovery.mode: 'onchain'` for maximum trust-minimisation, or change `discovery.url` to point at a different operator's deployment.
+4. **On-chain fallback is always live.** If the configured HTTP indexer is unreachable (5xx, timeout, 429), the daemon falls back to `OnchainDiscoveryAPI` for the duration of the outage. Slower but functional. Operators stay live during indexer outages.
 5. **Hosted Graph subgraph is removed, not retained as a fallback.** Once `DiscoveryAPI` ships, `subgraphUrl` callsites move to the new interface. The Graph dependency leaves the runtime.
 
 ## 5. The DiscoveryAPI interface
@@ -115,39 +117,21 @@ Notes:
 
 ### 6.1 `HttpDiscoveryAPI` — default
 
-Thin HTTP client. Lives at `client/src/discovery/http.ts`. Talks GraphQL to a remote daemon running in embedded mode with its Ponder endpoint published externally (§6.2). The current default points at an instance run by the daemon's maintainer (Oak) on personal VPS infrastructure. Default URL ships in `client/src/config.ts` (`DEFAULT_TESTNET_DISCOVERY_URL`, `DEFAULT_MAINNET_DISCOVERY_URL`), env-overridable via `JINN_DISCOVERY_URL` so any operator can repoint at a different host without touching the binary.
+Thin HTTP client. Lives at `client/src/discovery/http.ts`. Talks GraphQL to a standalone Ponder service (`@jinn-network/indexer` deployed via `packages/indexer/deploy/`). The current default points at an instance privately operated by the daemon's maintainer (Oak). Default URL ships in `client/src/config.ts` (`DEFAULT_TESTNET_DISCOVERY_URL`, `DEFAULT_MAINNET_DISCOVERY_URL`), env-overridable via `JINN_DISCOVERY_URL` so any operator can repoint at a different host without touching the binary.
 
-The GraphQL queries that the daemon issues are vendored in `http.ts` itself — symmetric to how `onchain.ts` vendors its own event-scan queries against the same on-chain data. The `@jinn-network/indexer` package contains the schema those queries target but does not ship a TypeScript client; the wire contract is implicit in matching schemas across daemon versions.
+The GraphQL queries that the daemon issues are vendored in `http.ts` itself — symmetric to how `onchain.ts` vendors its own event-scan queries against the same on-chain data. The `@jinn-network/indexer` package contains the schema those queries target; both sides depend on a matching schema shape and update in lockstep.
 
-API stability: the HTTP endpoint is a real versioned API. Breaking changes require a new path prefix (`/v2/...`) and a deprecation window for `/v1/...`. The daemon pins to a major version; minor changes are additive. Because the public indexer is just someone's daemon with the indexer endpoint published, the operator running that daemon owns the API contract — operators who point at a third-party host inherit that host's stability discipline, which is a per-host trust decision.
+API stability: the HTTP endpoint is a real versioned API. Breaking changes require a new path prefix (`/v2/...`) and a deprecation window for `/v1/...`. The operator running the Ponder service owns the API contract — operators who point at a third-party host inherit that host's stability discipline, which is a per-host trust decision. Ponder ships built-in `/health` (process started) and `/ready` (caught up to realtime) endpoints; the daemon's fallback chain treats a non-200 `/ready` as unhealthy.
 
-### 6.2 `EmbeddedPonderDiscoveryAPI` — opt-in autonomy and the public-indexer enabler
-
-Runs Ponder in-process as an additional daemon loop. The same code path supports two operator intents:
-
-- **Private/autonomy**: operator sets `discovery.mode: 'embedded'` and runs the indexer purely for their own daemon's reads. Ponder's GraphQL port is not published externally. No third party can query it.
-- **Public/maintainer**: operator sets `discovery.mode: 'embedded'` AND `discovery.publishIndexer: true` (or equivalent), which publishes Ponder's GraphQL port externally. Other operators' daemons (`mode: 'http'`) can now query this daemon. This is how the "shared indexer" the rest of the spec talks about actually gets deployed: it is the maintainer's daemon, not a separate service.
-
-Operator UX (both intents):
-
-- Cold start: pulls a recent indexed-state snapshot from IPFS (CID published in the daemon release artifact) and replays from snapshot height. New operators reach head in minutes, not hours.
-- Steady state: tails events via the operator's configured `rpcUrl`. Uses HyperSync as the upstream when available; falls back to plain RPC.
-- Storage: PGlite under `~/.jinn-client/indexer/` for local autonomy; Postgres (via `DATABASE_URL`) recommended when running as a public indexer. Schema version baked into the path so daemon upgrades that change the schema re-sync cleanly from snapshot.
-- RAM: ~300 MB steady state, ~600 MB during initial sync, regardless of whether the port is published.
-
-Failure mode: if embedded Ponder is mid-sync or has crashed, the daemon's fallback chain routes its own reads to `OnchainDiscoveryAPI` until embedded mode reports `head_within_n_blocks`. The daemon never blocks on indexer sync. When `publishIndexer: true` and the indexer is unhealthy, the HTTP endpoint returns a 503 so consumer daemons fall through to their own configured fallback.
-
-**Architectural consequence:** collapsing standalone indexer + daemon into one process means there is no separate "indexer Dockerfile." The daemon's `client/Dockerfile` is the one deployment target. The indexer package (`@jinn-network/indexer`) is bundled into the daemon image when the daemon depends on it (lands with this task in the migration plan).
-
-### 6.3 `OnchainDiscoveryAPI` — fallback
+### 6.2 `OnchainDiscoveryAPI` — fallback floor
 
 Direct RPC via viem `getLogs` + multicall, no indexer state. Implements the same interface but with caveats:
 
-- `findClaimableTasks`: enumerates `TaskCreated` events from a known start block, multicalls current `finalized` / `refunded` state, enumerates `AttemptSubmitted` events and groups client-side. Bounded result set (only active claim windows), but slow on cold scans. Caches results in the daemon's existing SQLite for the duration of the daemon process.
+- `findClaimableTasks`: enumerates `TaskCreated` events from a known start block, multicalls current `finalized` / `refunded` state, enumerates `TaskAttemptCreated` events and groups client-side. Bounded result set (only active claim windows), but slow on cold scans. Caches results in the daemon's existing SQLite for the duration of the daemon process.
 - `listLaunchedSolverNets` / `getLifecycleStatus`: reads `IdentityRegistry.MetadataSet` events directly (the same path `corpus/onchain-query.ts` already implements), folds via `most-recent-wins.ts`.
 - `queryEnvelopes`: delegates to the existing `runOnchainCorpusQuery` in `corpus/onchain-query.ts`.
 
-The on-chain implementation is the **always-live floor**. The daemon ships with it enabled and uses it as the primary if no other implementation is configured. This is the property that lets the daemon boot working even before any VPS is deployed.
+The on-chain implementation is the **always-live floor**. The daemon ships with it enabled and uses it as the primary if no Ponder service URL is configured. This is the property that lets the daemon boot working even before the maintainer's Ponder instance is up.
 
 ## 7. Ponder schema
 
@@ -162,36 +146,30 @@ The Ponder package indexes four event sources, each producing one entity:
 
 The schema is **deliberately narrow at v0.1**: it replaces today's three subgraph callsites and nothing more. Phase B.2 reputation entities, Phase C marketplace-specific entities, and any other future query domains are additive — they slot in as new entities + handlers without renaming or restructuring the existing four.
 
-Schema version is bumped on any breaking change to existing entities and triggers a re-sync from the bundled snapshot. Pure-additive changes do not bump the version.
+Schema version is bumped on any breaking change to existing entities; re-syncs go through Ponder's canonical rolling-deploy pattern (`DATABASE_SCHEMA` + views — see `packages/indexer/deploy/README.md`). Pure-additive changes do not bump the version; Ponder handles them automatically.
 
 ## 8. Deployment shapes
 
-There is exactly one deployment artifact in this design: the daemon (`client/Dockerfile`). The three shapes below are configuration variants of the same image.
+Two services exist in this design: the **indexer** (a standalone Ponder app) and the **daemon** (the operator's process). They are deployed independently.
 
-### 8.1 Maintainer's daemon (the default shared indexer)
+### 8.1 Indexer (standalone Ponder service)
 
-- The daemon's current maintainer (Oak) deploys the daemon image on a personal VPS with `discovery.mode: 'embedded'` and `discovery.publishIndexer: true`.
-- The daemon's Ponder GraphQL port is published externally. Other operators' daemons point `discovery.url` at this VPS.
-- Domain: operator-chosen; current default URL ships in `config.ts` and is operator-overridable. Not anchored to a `jinn.network` subdomain — the indexer is not protocol infrastructure and should not appear to be.
-- Backed by: HyperSync upstream, Postgres for steady state (via `DATABASE_URL`), S3 (or equivalent) for snapshot publishing.
-- Snapshot cron publishes the indexed-state snapshot to IPFS once per epoch; CID is committed on-chain via the maintainer's EOA so embedded-mode operators can verify it.
+- The daemon's maintainer (Oak) privately deploys `@jinn-network/indexer` on a personal VPS using `packages/indexer/deploy/Dockerfile`.
+- Domain: maintainer-chosen; current default URL ships in `config.ts` and is operator-overridable. Not anchored to a `jinn.network` subdomain — the indexer is not protocol infrastructure and should not appear to be.
+- Backed by: HyperSync-backed RPC URL (recommended) for fast cold-start, Postgres for steady state (via `DATABASE_URL`), `DATABASE_SCHEMA` per deployment for rolling deploys via Ponder's canonical views pattern.
+- Ponder's built-in `/health` and `/ready` endpoints are the liveness/readiness signals. No custom snapshot publication subsystem.
 - Cost owner: the maintainer personally. Not material at current scale (~$20-200/month). The protocol does not subsidise it and Jinn-the-project carries no obligation for its uptime.
+- Anyone who wants to be a public indexer for other operators deploys this same package the same way.
 
-### 8.2 Operator daemon in embedded mode (private autonomy)
+### 8.2 Operator daemon in HTTP mode (default)
 
-- Operator sets `discovery.mode: 'embedded'` and leaves `publishIndexer` unset (or false).
-- Daemon spawns Ponder in-process on boot, restores from the bundled snapshot, then tails events.
-- No external service dependency. RPC quota is the operator's own. No HTTP exposure of the indexer.
+- Operator sets `discovery.mode: 'http'` and `discovery.url: <chosen-indexer-host>`.
+- Daemon issues GraphQL queries to the configured URL via `client/src/discovery/http.ts`.
+- Smallest resource footprint. No indexer runs in this daemon.
 
-### 8.3 Operator daemon in HTTP mode (consumes someone's public indexer)
+### 8.3 On-chain (always-live floor)
 
-- Operator sets `discovery.mode: 'http'` and `discovery.url: <maintainer-or-other-host>`.
-- Daemon issues GraphQL queries to the configured URL via the vendored client at `client/src/discovery/http.ts`.
-- No indexer runs in this operator's daemon. Smallest resource footprint.
-
-### 8.4 On-chain (always-live floor)
-
-- Daemon falls back to this automatically when the configured primary is unhealthy, regardless of which primary mode is selected.
+- Daemon falls back to this automatically when the configured HTTP primary is unhealthy.
 - Operators can pin to on-chain mode explicitly via `discovery.mode: 'onchain'`; useful for testing, air-gapped setups, or maximum-trust-minimisation operators willing to eat latency.
 
 ## 9. Daemon-side integration
@@ -203,10 +181,9 @@ Two new fields under a single `discovery` block (replaces today's loose `subgrap
 ```jsonc
 {
   "discovery": {
-    "mode": "http" | "embedded" | "onchain", // default: "http"
-    "url": "https://<operator-chosen-host>",  // when mode = http
-    "fallbackToOnchain": true,                // default: true; on-chain floor always honored
-    "publishIndexer": false                   // when mode = embedded: publish Ponder GraphQL externally
+    "mode": "http" | "onchain",              // default: "http"
+    "url": "https://<operator-chosen-host>", // when mode = http
+    "fallbackToOnchain": true                // default: true; on-chain floor always honored
   }
 }
 ```
@@ -224,7 +201,7 @@ Three current callsites move from "construct subgraph client; pass URL" to "inje
 ### 9.3 Fallback chain
 
 ```
-primary = build(mode)                  // http | embedded | onchain
+primary = build(mode)                  // http | onchain
 floor   = build('onchain')             // always
 discovery = withFallback(primary, floor, { unhealthyThreshold, retryAfter })
 ```
@@ -236,7 +213,7 @@ discovery = withFallback(primary, floor, { unhealthyThreshold, retryAfter })
 What each implementation guarantees:
 
 - **`HttpDiscoveryAPI`**: trusts the operator of the configured URL to report tasks and envelopes accurately. Worst-case lie: hide existing tasks/envelopes from the operator (denial of opportunity) or surface stale entries (wasted claim attempts). Cannot fabricate envelopes that pass downstream verification — the corpus library hash-verifies content against the manifest at retrieval time. Cannot fabricate task state that passes downstream verification — the daemon multicalls the JinnRouter contract before claiming (`canClaimTask` in `adapter.ts`).
-- **`EmbeddedPonderDiscoveryAPI`**: trusts only the operator's own RPC endpoint (and HyperSync if configured). No third-party in the discovery path.
+- **`EmbeddedPonderDiscoveryAPI`** (deferred — see §14): would trust only the operator's own RPC endpoint. No third-party in the discovery path. Not in current scope.
 - **`OnchainDiscoveryAPI`**: trusts only the operator's RPC endpoint.
 
 Hash-verification at the content layer (corpus library) and on-chain state verification at the claim layer (`canClaimTask`) bound the damage any discovery-layer dishonesty can do. This is the property that makes the default `HttpDiscoveryAPI` mode safe for the network: a misbehaving shared indexer can degrade UX but cannot corrupt outcomes.
@@ -245,12 +222,12 @@ Hash-verification at the content layer (corpus library) and on-chain state verif
 
 Detailed steps land as beads issues. The shape:
 
-1. **Ponder package + schema.** Stand up `packages/indexer/` with the four-entity schema. CI builds it. No deployment yet.
-2. **DiscoveryAPI interface + OnchainDiscoveryAPI.** Land the interface and the always-live floor implementation in `client/src/discovery/`. Wire it behind a feature flag; existing subgraph paths untouched.
-3. **Callsite migration.** Move the three callsites (task discovery, SolverNet registry, corpus) to consume `DiscoveryAPI`. Subgraph paths become one implementation of the interface, gated by `discovery.mode: 'http-subgraph'` (a transitional implementation that delegates to the existing subgraph client — kept only for the migration window).
-4. **HttpDiscoveryAPI client.** Land `client/src/discovery/http.ts` and wire `discovery.mode: 'http'` through the factory. The wire-contract queries are vendored in the daemon (Option A). No VPS deployment yet — the maintainer's daemon doesn't exist until step 5.
-5. **EmbeddedPonderDiscoveryAPI + public-indexer support.** Wire Ponder as an in-process daemon loop. Add `discovery.publishIndexer` config flag to expose Ponder's GraphQL port externally. Update `client/Dockerfile` to bundle `@jinn-network/indexer` and its deps. Snapshot publication + verification pipeline. The maintainer's VPS deployment is a configuration of this same daemon image (`mode: 'embedded'` + `publishIndexer: true`); cut over the default `discovery.url` once the maintainer's instance is live.
-6. **Remove subgraph callsites.** Drop `task-subgraph.ts`, the subgraph branch in `corpus/index.ts`, the subgraph fetcher in `registry-client-erc8004.ts`, the `subgraphUrl` config field, the transitional `http-subgraph` mode, and the stub `erc8004/subgraph.ts`. The Graph API key dependency leaves the system.
+1. **Ponder package + schema.** Stand up `packages/indexer/` with the four-entity schema. CI builds it. ✅ Shipped (jinn-mono-280n.1).
+2. **DiscoveryAPI interface + OnchainDiscoveryAPI.** Land the interface and the always-live floor implementation in `client/src/discovery/`. Wire it behind a feature flag; existing subgraph paths untouched. ✅ Shipped (jinn-mono-280n.2).
+3. **Callsite migration.** Move the three callsites (task discovery, SolverNet registry, corpus) to consume `DiscoveryAPI`. Subgraph paths become one implementation of the interface, gated by `discovery.mode: 'http-subgraph'` (a transitional implementation that delegates to the existing subgraph client — kept only for the migration window). ✅ Shipped (jinn-mono-280n.3).
+4. **HttpDiscoveryAPI client.** Land `client/src/discovery/http.ts` and wire `discovery.mode: 'http'` through the factory. The wire-contract queries are vendored in the daemon. ✅ Shipped (jinn-mono-280n.4, client portion).
+5. **Deploy `@jinn-network/indexer` to a VPS.** Standard Ponder deployment using `packages/indexer/deploy/Dockerfile`. Postgres backend; `DATABASE_SCHEMA` for rolling deploys; Ponder's built-in `/health` and `/ready` for monitoring. Cut over the default `discovery.url` in `client/src/config.ts` once the instance is live. **Operator-side ops work; no daemon code changes required.** (jinn-mono-280n.4, deployment portion — checklist in `packages/indexer/deploy/README.md`.)
+6. **Remove subgraph callsites.** Drop `task-subgraph.ts`, the subgraph branch in `corpus/index.ts`, the subgraph fetcher in `registry-client-erc8004.ts`, the `subgraphUrl` config field, the transitional `http-subgraph` mode, and the stub `erc8004/subgraph.ts`. The Graph API key dependency leaves the system. (jinn-mono-280n.6.)
 
 ## 12. Federation path (out of scope for v0.1)
 
@@ -260,99 +237,37 @@ This matters: there is no "Jinn-operated indexer" anywhere in the runtime. The p
 
 When a second party wants to run their own public indexer, they:
 
-1. Deploy the daemon image (`client/Dockerfile`) on their VPS with `discovery.mode: 'embedded'` and `discovery.publishIndexer: true`.
+1. Deploy `@jinn-network/indexer` on their VPS using `packages/indexer/deploy/Dockerfile`. Standard Ponder deployment, no special protocol involvement.
 2. Operators who want to align with that party set `discovery.url: 'https://<their-host>/'`.
 
-There is no separate indexer service to stand up — the daemon *is* the indexer in embedded mode. Anyone running a daemon can choose to be a public indexer by flipping configuration.
-
-No protocol changes. No coordination. This is the headless-brand shape made literal: protocol stays minimal, surfaces vary, operators choose alignment. Multiple privately-operated indexers can coexist on the same protocol from day one — the only thing v0.1 doesn't ship is a *discovery-of-discovery* layer to help operators find alternatives. They find them by word-of-mouth or by reading config docs, which is fine for the current participant count.
+No protocol changes. No coordination. This is the headless-brand shape: protocol stays minimal, surfaces vary, operators choose alignment. Multiple privately-operated indexers can coexist on the same protocol from day one — the only thing v0.1 doesn't ship is a *discovery-of-discovery* layer to help operators find alternatives. They find them by word-of-mouth or by reading config docs, which is fine for the current participant count.
 
 A future spec may introduce a discovery-of-discovery layer (a list of known indexer endpoints anchored on-chain or in IPFS, possibly weighted by some operator-signal). v0.1 does not need it; pointing at a URL is enough.
 
 ## 13. Operator UX surface
 
-Discovery is config-file-only today. The SPA dashboard (`client/src/dashboard/spa/`) does not expose any discovery state or controls. This section defines the minimum useful UX so an operator can see what mode they're in, what's working, and what to change — without editing JSON.
+Discovery is config-file-only today. The SPA dashboard (`client/src/dashboard/spa/`) does not expose any discovery state or controls. With the simplified design (HTTP-to-Ponder + RPC floor; no embedded mode in scope), the UX is small:
 
-This section is **scoped for v0.2** of the SPA, landing alongside `jinn-mono-280n.5`. The polished version (snapshot cadence controls, connected-consumer counts, federated-host directory) is deferred until there's a demand signal.
+1. **Status indicator** (somewhere visible — shell header or Overview): shows whether the configured indexer URL is reachable. Two states suffice — `Discovery: healthy` (HTTP primary responding) and `Discovery: degraded — using RPC fallback` (fallback chain engaged).
+2. **Configuration page surface**: one editable field for `discovery.url`, one toggle for `fallbackToOnchain`, one read-only display showing current mode. No multi-mode picker needed — there are two practical states (`http` with a URL, or `onchain`-only when no URL is configured).
+3. **Error states**: toast on transition into and out of fallback; inline validation in Configuration on save.
 
-### 13.1 Status badge (shell header)
+That's it. Polished features (mode selector with rich tradeoff descriptions, snapshot controls, federated-host directory) are deferred until either embedded mode lands or operator demand justifies the build. Today's scope is "make the URL + reachability visible without editing JSON."
 
-A persistent indicator in the dashboard shell, visible from every page. Three primary states:
+## 14. Deferred future work
 
-- `Discovery: HTTP · healthy · <N> blocks behind head` — `mode: 'http'` with the configured indexer responding within the lag threshold.
-- `Discovery: Embedded · syncing <pct>% · ETA <duration>` — `mode: 'embedded'` while initial restore + tail is below head.
-- `Discovery: On-chain only · degraded` — fallback chain engaged; the configured primary is unhealthy.
+The following were in v0.1/v0.2 scope and have been deferred to a future spec because they were over-engineering for the current need:
 
-Click-through opens a small panel:
-- Current mode and (if HTTP) URL.
-- Last successful query timestamp + p50 latency.
-- Which path served the last N queries (HTTP / floor) — visibility into how often fallback engages.
-- Banner when fallback active: "Indexer at \<host\> unreachable since \<time\> — using RPC fallback. Discovery slower until recovered."
+- **`EmbeddedPonderDiscoveryAPI` (Ponder in-process inside the daemon).** Would let operators run an indexer locally for full trust-minimisation. Real demand for this hasn't materialised. If/when an operator asks, the implementation is: add `@jinn-network/indexer` as a daemon dep, spawn Ponder as a child process, point it at local PGlite. The `DiscoveryAPI` interface is already shaped to accommodate this implementation. No interface changes required.
+- **Snapshot publication and verification.** Would let new operators skip the cold-start sync time. Ponder's canonical answer is to use a HyperSync-backed RPC URL — cold sync from genesis becomes minutes. If that's insufficient, a Postgres dump/restore pipeline could be added; the snapshot-on-IPFS-with-on-chain-CID scheme was over-engineered for the actual need.
+- **Operator dashboard polish.** Multi-mode selector with rich tradeoff descriptions, connected-consumer counts when running as a public indexer, federated-host directory. All depend on either embedded mode or genuine federation, neither of which is in current scope.
 
-### 13.2 Configuration page: new "Discovery" section
+## 15. Open questions
 
-Three top-level choices, each with the cost-and-tradeoff one-liner an operator needs to make the decision:
+1. **Telemetry on fallback engagement.** Should the daemon report when it's falling back to on-chain mode? Likely yes (operator visibility), via the existing telemetry channel. Confirm shape during integration.
+2. **What to do with `erc8004/subgraph.ts`.** The stub references bead `jinn-mono-fud` for an upcoming Jinn-specific subgraph. Either roll that work into the Ponder schema (preferred — it's the same data domain) or close the bead as superseded. Decide during implementation.
 
-```
-○ Use a public indexer (recommended)            [mode: 'http']
-   URL: https://<configured-host>  [Change]
-   Fastest discovery. You trust the indexer operator to surface tasks accurately.
-
-○ Run my own indexer (advanced)                 [mode: 'embedded']
-   ~300MB RAM, syncs in ~5min from snapshot.
-   Fully autonomous — no third party in discovery path.
-
-○ Direct RPC reads (minimal)                    [mode: 'onchain']
-   No indexer at all. Discovery is slow on cold scans.
-   Use this if you don't trust any indexer.
-
-▢ Fall back to RPC when primary is unhealthy    [fallbackToOnchain]
-  (recommended; on by default)
-```
-
-When `mode: 'embedded'` is selected, an additional toggle appears:
-
-```
-▢ Publish my indexer to other operators         [publishIndexer]
-  Other operators can point their daemon at your URL.
-  Public port: 42069
-  Health endpoint: /health
-```
-
-### 13.3 Onboarding moment
-
-First-run experience for new operators (the very first time the daemon's dashboard loads against a fresh config):
-
-- Default to `mode: 'http'` pointing at the maintainer's URL.
-- One-sentence dismissable banner on the Overview page: "Discovery powered by \<maintainer-host\>. Switch to embedded mode in Configuration for full autonomy."
-- No forced flow — operators who don't care never touch this.
-
-### 13.4 Error states
-
-- Toast on mode transition: "Switched to RPC fallback — indexer unreachable."
-- Toast on recovery: "Indexer recovered, switched back."
-- Inline validation in Configuration on save: "mode 'http' requires url" (clear, actionable).
-
-### 13.5 Out of scope for v0.2
-
-Deferred until federation or operator demand justifies the build:
-
-- Connected-consumer count when `publishIndexer: true` (requires bookkeeping in the daemon's GraphQL layer).
-- Snapshot cadence settings beyond on/off (defaults are fine until proven otherwise).
-- Federated-host directory ("here are some other operators' indexers you could point at").
-- Snapshot CID verification visibility (chain commitment + IPFS hash visible in the panel).
-
-The corresponding backend data (telemetry on fallback engagement, head_lag_seconds health metric, mode transitions) lands as part of `jinn-mono-280n.5` regardless of whether the UI consumes it on day one — `.5` is the sensible host for both the daemon's reporting surface and the SPA's consumption surface.
-
-## 14. Open questions
-
-1. **GraphQL vs. JSON-RPC-style HTTP for the wire format.** Ponder ships GraphQL natively; the daemon already speaks GraphQL today. Default to GraphQL unless a concrete reason to differ surfaces in implementation. Worth a one-line answer in v0.2.
-2. **Snapshot frequency and size.** What's an acceptable lag for embedded-mode cold start — daily? hourly? The size of the indexed state per release dictates this. Decide during implementation; not gating for v0.1.
-3. **Telemetry on fallback engagement.** Should the daemon report when it's falling back to on-chain mode? Likely yes (operator visibility), via the existing telemetry channel. Confirm shape during integration.
-4. **HyperSync availability and pricing model.** Embedded mode benefits massively from HyperSync but inherits its availability. Need to confirm current SLA / pricing / contingency for the embedded path. Not blocking; plain RPC works as a slower upstream.
-5. **What to do with `erc8004/subgraph.ts`.** The stub references bead `jinn-mono-fud` for an upcoming Jinn-specific subgraph. Either roll that work into the Ponder schema (preferred — it's the same data domain) or close the bead as superseded. Decide during implementation.
-
-## 15. References
+## 16. References
 
 - `spec/2026-04-30-phase-a-umbrella.md` — corpus library as the first programmatic-library "app"; `routeResolver` seam that this spec generalises into `DiscoveryAPI`.
 - `spec/2026-05-05-solvernet-creation-and-launch.md` §13 — registry client interface designed to be swappable; the day-1 subgraph backing this spec replaces.

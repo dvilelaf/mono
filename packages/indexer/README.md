@@ -4,30 +4,13 @@ Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
 SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
 Base Sepolia and Base mainnet.
 
-## Architecture: consumed by the daemon, not deployed standalone
+## Architecture: a standalone Ponder service
 
-This package is the indexer's schema, handlers, and Ponder runtime. **It does
-not ship a standalone deployment shape.** The daemon (`@jinn-network/client`)
-runs this package in-process when `discovery.mode: 'embedded'` is set
-(`jinn-mono-280n.5`). The daemon's own Dockerfile (`client/Dockerfile`) is the
-deployment target; whoever wants to be a "public indexer" for other operators
-runs a daemon with embedded mode enabled and the Ponder GraphQL port published
-externally.
+This package is a normal Ponder app. It runs as its own service — Node process, Postgres backend, GraphQL endpoint on port 42069. Deploy it like any other web service. The canonical patterns (Postgres + `DATABASE_SCHEMA` + views for zero-downtime rolling deploys) are described in `deploy/README.md` and come straight from Ponder's [Self-hosting docs](https://ponder.sh/docs/production/self-hosting). We do not ship custom subsystems on top.
 
-This collapses what would otherwise be two deployment shapes (standalone Ponder
-+ daemon) into one (daemon, optionally publishing its embedded Ponder
-endpoint). It also matches the headless-brand framing: anyone running a daemon
-can become a public indexer by flipping configuration; the protocol stays
-minimal, surfaces vary by operator choice.
+The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapter at `client/src/discovery/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
 
-The daemon-side adapter that talks to a remote indexer's GraphQL lives at
-`client/src/discovery/http.ts` — that's the path operators take when their
-daemon points at someone else's daemon-with-embedded-indexer.
-
-Schema-only consumers (e.g. ad-hoc analytics jobs that want to run a Ponder
-instance against the same schema) can still install this package directly and
-run `yarn dev` / `yarn start`, but that is a development convenience, not the
-production deployment shape.
+Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
 ## Running locally (PGlite, no external database)
 
@@ -47,40 +30,37 @@ yarn dev
 
 The GraphQL explorer is available at http://localhost:42069/graphql by default.
 
-### Health check
+### Built-in health endpoints
+
+Ponder ships two health endpoints out of the box:
 
 ```bash
-curl http://localhost:42069/health
-# {"ok":true,"service":"@jinn-network/indexer","version":"0.1.0"}
+curl http://localhost:42069/health   # 200 once the process has started
+curl http://localhost:42069/ready    # 200 once indexing has caught up to realtime
 ```
 
-## Running in production (Postgres + HyperSync)
+Use `/ready` as the gate before swapping a load balancer onto a new deployment.
 
-```bash
-# Set the Postgres connection string
-export DATABASE_URL=postgresql://user:password@localhost:5432/jinn_indexer
+## Running in production
 
-# For HyperSync performance, use a HyperSync-backed RPC URL from Envio
-# (https://envio.dev). Ponder treats it as a standard JSON-RPC endpoint.
-export PONDER_RPC_URL_8453=https://base.hypersync.xyz/<your-envio-api-key>
-export PONDER_RPC_URL_84532=https://base-sepolia.hypersync.xyz/<your-envio-api-key>
+See `deploy/README.md` for the full production deployment guide. The short version:
 
-# Build and start
-yarn build
-yarn serve
-```
+- Postgres (managed or self-hosted).
+- `DATABASE_URL` + `DATABASE_SCHEMA` env vars (per-deployment schema isolation enables rolling deploys via the views pattern).
+- HyperSync-backed RPC URL recommended for fast cold-start sync.
+- `docker build -t jinn-indexer -f deploy/Dockerfile .` then `docker run --env-file deploy/.env -p 42069:42069 jinn-indexer`.
 
 ## Schema-version policy
 
 Any **breaking change** to an existing entity — renaming or removing a column,
-changing a column type — bumps the schema version and requires a re-sync.
-Re-sync from a snapshot is the intended path: pull the snapshot CID published
-in the latest daemon release, restore it under `.ponder/`, then restart with
-`PONDER_START_BLOCK=<snapshot-height>`. Snapshot publishing infrastructure
-arrives with `jinn-mono-280n.4`.
+changing a column type — requires a re-sync of the indexed state. The canonical
+Ponder pattern for this is rolling deploys via `DATABASE_SCHEMA` + views (see
+`deploy/README.md` §"Zero-downtime rolling deploys"): the new schema indexes
+from genesis in its own Postgres schema while the old version keeps serving;
+swap when ready.
 
 **Pure-additive changes** (new columns with defaults, new entities, new indexes)
-do not bump the schema version and do not require a re-sync.
+do not require a re-sync — Ponder handles them automatically.
 
 ## Known limitations (v0.1)
 
