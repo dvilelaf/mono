@@ -128,10 +128,30 @@ describe('createDiscoveryAPI(mode=http-subgraph)', () => {
 // ── mode: 'http' ───────────────────────────────────────────────────────────────
 
 describe('createDiscoveryAPI(mode=http)', () => {
-  it('throws because HttpDiscoveryAPI is not yet shipped (280n.4)', () => {
+  it('returns a DiscoveryAPI with all four methods when url is provided', () => {
+    const api = createDiscoveryAPI(
+      { mode: 'http', url: 'https://discovery.example.com', fallbackToOnchain: true },
+      baseDeps,
+    );
+
+    expect(typeof api.findClaimableTasks).toBe('function');
+    expect(typeof api.listLaunchedSolverNets).toBe('function');
+    expect(typeof api.getLifecycleStatus).toBe('function');
+    expect(typeof api.queryEnvelopes).toBe('function');
+  });
+
+  it('returns the primary directly when fallbackToOnchain is false', () => {
+    const api = createDiscoveryAPI(
+      { mode: 'http', url: 'https://discovery.example.com', fallbackToOnchain: false },
+      baseDeps,
+    );
+    expect(typeof api.findClaimableTasks).toBe('function');
+  });
+
+  it('throws DiscoveryUnavailableError when url is missing', () => {
     expect(() =>
-      createDiscoveryAPI({ mode: 'http', url: 'https://discovery.example.com' }, baseDeps),
-    ).toThrow(/280n\.4/);
+      createDiscoveryAPI({ mode: 'http' }, baseDeps),
+    ).toThrow(/discovery\.url/);
   });
 });
 

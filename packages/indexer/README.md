@@ -4,11 +4,20 @@ Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
 SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
 Base Sepolia and Base mainnet.
 
-Ships two consumption surfaces:
+## Architecture: server-side only
+
+This package is pure server-side — schema definitions, event handlers, and the
+Ponder runtime that serves a GraphQL endpoint. The daemon-side client that
+consumes that endpoint lives at `client/src/discovery/http.ts` (in the
+`@jinn-network/client` package), not here. This split keeps the daemon's
+dependency footprint clean — daemon consumers never install Ponder transitively.
+
+Any third party running their own Jinn-shaped indexer should deploy this
+package as-is; their operators' daemons already contain the GraphQL client that
+conforms to this schema.
+
+Ships one consumption surface:
 - Ponder's auto-generated GraphQL endpoint at `/graphql`
-- `createDiscoveryAPIClient` adapter in `src/api/discovery-adapter.ts` that
-  wraps the GraphQL endpoint and implements the `DiscoveryAPI` interface from
-  `client/src/discovery/types.ts`
 
 The same package is deployed in two shapes:
 - `jinn-mono-280n.4` — VPS deployment, privately operated, Postgres backend
@@ -111,16 +120,16 @@ Native HyperSync transport support may arrive in a later Ponder release.
 
 ### `SolverNetManifestSummary` is a partial mirror
 
-The adapter's `listLaunchedSolverNets` returns a 5-field summary
-(`manifestCid`, `launcherAgentId`, `status`, `statusUpdatedAt`, `anchorBlock`)
-derived entirely from on-chain index data. The canonical
+The GraphQL endpoint exposes 6 on-chain-derivable fields per SolverNet
+(`manifestCid`, `solverNetId`, `launcherAgentId`, `status`, `statusUpdatedAt`,
+`anchorBlock`) derived entirely from on-chain index data. The canonical
 `SolverNetManifestSummary` in `client/src/solvernets/registry-client.ts` has
-13 fields; the remaining 8 (`name`, `network`, `launcherSafeAddress`,
+14 fields; the remaining 8 (`name`, `network`, `launcherSafeAddress`,
 `contractId`, `contractVersion`, `solutionPriceWei`, `verdictPriceWei`,
 `openRoles`) live in the IPFS manifest body and are not stored in the indexer.
 
-Consumers (e.g. the daemon's `HttpDiscoveryAPI` in `jinn-mono-280n.4`) are
-responsible for enriching with the IPFS body when those fields are needed. This
+The daemon's `HttpDiscoveryAPI` (at `client/src/discovery/http.ts`) fills
+these 8 fields with sentinel values and leaves enrichment to the caller. This
 matches how `solvernets/registry-client-erc8004.ts:listLaunched` already works
 post-`280n.3`: it fetches the IPFS manifest for each summary row.
 
@@ -146,5 +155,8 @@ yarn start     # Ponder production server (indexer + HTTP, requires DATABASE_URL
 yarn serve     # Ponder production HTTP server only (no indexer, requires DATABASE_URL)
 yarn codegen   # Regenerate ponder-env.d.ts type artifacts
 yarn typecheck # TypeScript check (no emit)
-yarn test      # Vitest unit tests (adapter only, no Ponder runtime)
+yarn test      # Vitest unit tests — currently zero tests in this package;
+               # the GraphQL adapter tests moved to client/test/discovery/http.test.ts
+               # as part of jinn-mono-280n.4. Handler integration tests will live
+               # in the daemon's integration suite.
 ```

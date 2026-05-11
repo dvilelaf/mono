@@ -27,5 +27,8 @@ export type { OnchainDiscoveryAPIOptions, OnchainCursorCache } from './onchain.j
 export { createHttpSubgraphDiscoveryAPI } from './http-subgraph.js';
 export type { HttpSubgraphDiscoveryAPIOptions } from './http-subgraph.js';
 
+export { createHttpDiscoveryAPI } from './http.js';
+export type { HttpDiscoveryAPIOptions } from './http.js';
+
 export { createDiscoveryAPI } from './factory.js';
 export type { DiscoveryFactoryDeps, DiscoveryConfig } from './factory.js';

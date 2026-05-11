@@ -1,18 +1,15 @@
 /**
- * GraphQL→DiscoveryAPI adapter for the Jinn protocol indexer.
+ * HTTP-backed `DiscoveryAPI` implementation that talks GraphQL to a Ponder
+ * indexer at a configured URL. Sibling to `onchain.ts` which talks RPC
+ * directly.
  *
- * Exports `createDiscoveryAPIClient(opts)` which returns an object implementing
- * the DiscoveryAPI interface (mirrored in ../types.ts) backed by the Ponder
- * indexer's auto-generated GraphQL endpoint.
+ * Moved from `packages/indexer/src/api/discovery-adapter.ts` into the daemon
+ * source tree as part of jinn-mono-280n.4. The indexer package is now purely
+ * server-side (schema + handlers + Ponder runtime); this file is the
+ * daemon-side client that consumes that GraphQL endpoint.
  *
- * This is the wire-contract layer: it translates the four DiscoveryAPI methods
- * into GraphQL queries and parses responses. Any GraphQL errors or network
- * failures wrap into DiscoveryUnavailableError so the daemon's withFallback
- * chain can engage the OnchainDiscoveryAPI floor.
- *
- * The adapter is self-contained in the indexer package — no dependency on
- * @jinn-network/client. The daemon's future HttpDiscoveryAPI will import
- * createDiscoveryAPIClient from this package.
+ * Any GraphQL errors or network failures wrap into DiscoveryUnavailableError
+ * so the daemon's withFallback chain can engage the OnchainDiscoveryAPI floor.
  *
  * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §6.1.
  */
@@ -23,8 +20,8 @@ import type {
   SolverNetLifecycleStatus,
   EnvelopeRef,
   CorpusQuery,
-} from '../types.js';
-import { DiscoveryUnavailableError } from '../types.js';
+} from './types.js';
+import { DiscoveryUnavailableError } from './types.js';
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 
@@ -261,7 +258,7 @@ interface EnvelopePage {
 
 // ── Client options ────────────────────────────────────────────────────────────
 
-export interface DiscoveryAPIClientOptions {
+export interface HttpDiscoveryAPIOptions {
   /** URL of the Ponder GraphQL endpoint, e.g. http://localhost:42069/graphql */
   url: string;
   /**
@@ -329,15 +326,15 @@ async function postGql<T>(
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 /**
- * Create a DiscoveryAPI client backed by a Ponder GraphQL endpoint.
+ * Create a DiscoveryAPI backed by a Ponder GraphQL endpoint.
  *
- * Usage (future HttpDiscoveryAPI in daemon):
+ * Usage:
  *
- *   import { createDiscoveryAPIClient } from '@jinn-network/indexer/discovery-adapter';
- *   const discovery = createDiscoveryAPIClient({ url: 'https://my-indexer.example/graphql' });
+ *   import { createHttpDiscoveryAPI } from './discovery/http.js';
+ *   const discovery = createHttpDiscoveryAPI({ url: 'https://my-indexer.example/graphql' });
  *   const tasks = await discovery.findClaimableTasks({ ... });
  */
-export function createDiscoveryAPIClient(opts: DiscoveryAPIClientOptions): DiscoveryAPI {
+export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): DiscoveryAPI {
   const gqlUrl = opts.url.endsWith('/graphql') ? opts.url : `${opts.url}/graphql`;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
@@ -544,7 +541,7 @@ export function createDiscoveryAPIClient(opts: DiscoveryAPIClientOptions): Disco
     // query.solverType is intentionally ignored: solverType lives in the IPFS
     // manifest body, not in the on-chain envelope payload, so the indexer has
     // no column for it. Callers must filter by solverType client-side after
-    // fetching the IPFS manifests. See README.md §Known limitations.
+    // fetching the IPFS manifests. See packages/indexer/README.md §Known limitations.
     const variables: Record<string, unknown> = {
       kind: null,        // null = no filter on kind in the current schema
       evidenceTier: query.evidenceTier ?? null,

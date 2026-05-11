@@ -9,9 +9,11 @@
  */
 
 import type { DiscoveryAPI } from './types.js';
+import { DiscoveryUnavailableError } from './types.js';
 import { withFallback } from './with-fallback.js';
 import { createOnchainDiscoveryAPI } from './onchain.js';
 import { createHttpSubgraphDiscoveryAPI } from './http-subgraph.js';
+import { createHttpDiscoveryAPI } from './http.js';
 import type { SubgraphClient } from '../solvernets/registry-client-erc8004.js';
 
 // ── Deps bag ──────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ export interface DiscoveryConfig {
  * Modes:
  *   - 'onchain'       → returns the floor alone (no fallback needed)
  *   - 'http-subgraph' → wraps the transitional subgraph adapter with the floor
- *   - 'http'          → not yet shipped (280n.4); throws at boot
+ *   - 'http'          → HttpDiscoveryAPI backed by a Ponder GraphQL endpoint (280n.4)
  *   - 'embedded'      → not yet shipped (280n.5); throws at boot
  *
  * When `fallbackToOnchain` is true (default), the primary is wrapped in
@@ -92,12 +94,26 @@ export function createDiscoveryAPI(
   }
 
   if (mode === 'http') {
-    // TODO(280n.4): instantiate HttpDiscoveryAPI once it ships.
-    throw new Error(
-      'discovery.mode="http" is not yet available. ' +
-      'HttpDiscoveryAPI ships in jinn-mono-280n.4. ' +
-      'Use mode="http-subgraph" (transitional) or mode="onchain" for now.',
-    );
+    if (!config.url) {
+      // Misconfiguration, not a transient discovery failure — use Error so
+      // withFallback does not engage the floor for a boot-time problem.
+      // TODO: set a default URL once the maintainer's VPS is live (jinn-mono-280n.4 deployment).
+      throw new Error(
+        'discovery.mode="http" requires discovery.url to be set. ' +
+        'Configure a Ponder indexer URL, e.g. https://indexer.example.com/graphql',
+      );
+    }
+
+    const primary = createHttpDiscoveryAPI({
+      url: config.url,
+      fetchImpl: deps.fetchImpl,
+    });
+
+    if (!fallbackToOnchain) {
+      return primary;
+    }
+
+    return withFallback(primary, floor);
   }
 
   if (mode === 'embedded') {

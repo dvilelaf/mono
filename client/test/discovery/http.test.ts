@@ -1,5 +1,6 @@
 /**
- * Tests for the GraphQL→DiscoveryAPI adapter.
+ * Tests for HttpDiscoveryAPI — the GraphQL→DiscoveryAPI adapter backed by a
+ * Ponder indexer endpoint.
  *
  * Tests:
  *   - Each of the four DiscoveryAPI methods builds the correct GraphQL query
@@ -10,10 +11,14 @@
  *
  * The Ponder indexer itself is NOT run in tests — the adapter is the
  * testable seam. Tests mock globalThis.fetch with a stub fetchImpl.
+ *
+ * Moved from packages/indexer/test/discovery-adapter.test.ts as part of
+ * jinn-mono-280n.4 (HttpDiscoveryAPI in client/, indexer becomes server-side
+ * only).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createDiscoveryAPIClient } from '../src/api/discovery-adapter.js';
-import { DiscoveryUnavailableError } from '../src/types.js';
+import { createHttpDiscoveryAPI } from '../../src/discovery/http.js';
+import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -49,7 +54,7 @@ const BASE_URL = 'http://localhost:42069';
 describe('findClaimableTasks', () => {
   it('returns empty array when no manifest CIDs provided', async () => {
     const { impl } = mockFetch({ data: { tasks: { items: [], pageInfo: { hasNextPage: false } } } });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.findClaimableTasks({
       solverNetManifestCids: [],
       operatorAddress: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
@@ -113,7 +118,7 @@ describe('findClaimableTasks', () => {
       });
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.findClaimableTasks({
       solverNetManifestCids: ['bafyreiabc123'],
       operatorAddress: '0x2222222222222222222222222222222222222222',
@@ -172,7 +177,7 @@ describe('findClaimableTasks', () => {
       return new Response(JSON.stringify(attemptsResponse), { status: 200, headers: { 'content-type': 'application/json' } });
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.findClaimableTasks({
       solverNetManifestCids: ['bafyreiabc123'],
       operatorAddress: OPERATOR as `0x${string}`,
@@ -219,7 +224,7 @@ describe('findClaimableTasks', () => {
       return new Response(JSON.stringify(attemptsResponse), { status: 200, headers: { 'content-type': 'application/json' } });
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.findClaimableTasks({
       solverNetManifestCids: ['bafyreiabc123'],
       operatorAddress: '0x3333333333333333333333333333333333333333',
@@ -246,7 +251,7 @@ describe('findClaimableTasks', () => {
     const { impl } = mockFetch({
       errors: [{ message: 'internal server error' }],
     });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(
       client.findClaimableTasks({
         solverNetManifestCids: ['bafyreiabc123'],
@@ -256,7 +261,7 @@ describe('findClaimableTasks', () => {
   });
 
   it('throws DiscoveryUnavailableError on network failure', async () => {
-    const client = createDiscoveryAPIClient({
+    const client = createHttpDiscoveryAPI({
       url: BASE_URL,
       fetchImpl: networkErrorFetch() as unknown as typeof fetch,
     });
@@ -270,7 +275,7 @@ describe('findClaimableTasks', () => {
 
   it('throws DiscoveryUnavailableError on HTTP 5xx', async () => {
     const { impl } = mockFetch('Internal Server Error', 500);
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(
       client.findClaimableTasks({
         solverNetManifestCids: ['bafyreiabc123'],
@@ -302,7 +307,7 @@ describe('listLaunchedSolverNets', () => {
       },
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.listLaunchedSolverNets();
 
     expect(result).toHaveLength(1);
@@ -312,9 +317,9 @@ describe('listLaunchedSolverNets', () => {
     expect(result[0].anchorBlock).toBe(12345);
   });
 
-  it('populates all 13 SolverNetManifestSummary fields with sentinels for IPFS-only fields', async () => {
-    // Critical 3 regression: the indexer adapter must return all 13 fields of
-    // SolverNetManifestSummary (not just the 5 on-chain fields). The 8 IPFS-only
+  it('populates all 14 SolverNetManifestSummary fields with sentinels for IPFS-only fields', async () => {
+    // Critical 3 regression: the indexer adapter must return all 14 fields of
+    // SolverNetManifestSummary (not just the 6 on-chain fields). The 8 IPFS-only
     // fields are set to sentinel values so callers can detect and enrich them.
     const { impl } = mockFetch({
       data: {
@@ -334,7 +339,7 @@ describe('listLaunchedSolverNets', () => {
       },
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.listLaunchedSolverNets();
 
     expect(result).toHaveLength(1);
@@ -369,7 +374,7 @@ describe('listLaunchedSolverNets', () => {
       );
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await client.listLaunchedSolverNets({ launcherAgentId: '99' });
 
     expect(calls).toHaveLength(1);
@@ -379,12 +384,12 @@ describe('listLaunchedSolverNets', () => {
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
     const { impl } = mockFetch({ errors: [{ message: 'timeout' }] });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(client.listLaunchedSolverNets()).rejects.toThrow(DiscoveryUnavailableError);
   });
 
   it('throws DiscoveryUnavailableError on network failure', async () => {
-    const client = createDiscoveryAPIClient({
+    const client = createHttpDiscoveryAPI({
       url: BASE_URL,
       fetchImpl: networkErrorFetch() as unknown as typeof fetch,
     });
@@ -406,7 +411,7 @@ describe('getLifecycleStatus', () => {
       },
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.getLifecycleStatus('bafyreifoo');
 
     expect(result).toBeDefined();
@@ -417,7 +422,7 @@ describe('getLifecycleStatus', () => {
 
   it('returns undefined when manifest not found', async () => {
     const { impl } = mockFetch({ data: { solverNetManifest: null } });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.getLifecycleStatus('bafyreinone');
     expect(result).toBeUndefined();
   });
@@ -432,7 +437,7 @@ describe('getLifecycleStatus', () => {
       );
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await client.getLifecycleStatus('bafyreimycid');
 
     expect(calls).toHaveLength(1);
@@ -442,12 +447,12 @@ describe('getLifecycleStatus', () => {
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
     const { impl } = mockFetch({ errors: [{ message: 'not found' }] });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(client.getLifecycleStatus('bafyreifoo')).rejects.toThrow(DiscoveryUnavailableError);
   });
 
   it('throws DiscoveryUnavailableError on network failure', async () => {
-    const client = createDiscoveryAPIClient({
+    const client = createHttpDiscoveryAPI({
       url: BASE_URL,
       fetchImpl: networkErrorFetch() as unknown as typeof fetch,
     });
@@ -475,7 +480,7 @@ describe('queryEnvelopes', () => {
       },
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     const result = await client.queryEnvelopes({ limit: 10 });
 
     expect(result).toHaveLength(1);
@@ -495,7 +500,7 @@ describe('queryEnvelopes', () => {
       );
     });
 
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await client.queryEnvelopes({ evidenceTier: 'committed', limit: 20 });
 
     expect(calls).toHaveLength(1);
@@ -506,12 +511,12 @@ describe('queryEnvelopes', () => {
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
     const { impl } = mockFetch({ errors: [{ message: 'database error' }] });
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
   });
 
   it('throws DiscoveryUnavailableError on network failure', async () => {
-    const client = createDiscoveryAPIClient({
+    const client = createHttpDiscoveryAPI({
       url: BASE_URL,
       fetchImpl: networkErrorFetch() as unknown as typeof fetch,
     });
@@ -520,7 +525,7 @@ describe('queryEnvelopes', () => {
 
   it('throws DiscoveryUnavailableError when response has no data field', async () => {
     const { impl } = mockFetch({});
-    const client = createDiscoveryAPIClient({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
     await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
   });
 });
@@ -530,7 +535,7 @@ describe('queryEnvelopes', () => {
 describe('URL normalization', () => {
   it('appends /graphql to base URL that does not end with it', async () => {
     const calls: string[] = [];
-    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, _init?: RequestInit) => {
       calls.push(url);
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
@@ -538,14 +543,14 @@ describe('URL normalization', () => {
       );
     });
 
-    const client = createDiscoveryAPIClient({ url: 'http://my-indexer.example', fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: 'http://my-indexer.example', fetchImpl: impl as unknown as typeof fetch });
     await client.queryEnvelopes({});
     expect(calls[0]).toBe('http://my-indexer.example/graphql');
   });
 
   it('does not double-append /graphql when URL already ends with it', async () => {
     const calls: string[] = [];
-    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, _init?: RequestInit) => {
       calls.push(url);
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
@@ -553,7 +558,7 @@ describe('URL normalization', () => {
       );
     });
 
-    const client = createDiscoveryAPIClient({ url: 'http://my-indexer.example/graphql', fetchImpl: impl as unknown as typeof fetch });
+    const client = createHttpDiscoveryAPI({ url: 'http://my-indexer.example/graphql', fetchImpl: impl as unknown as typeof fetch });
     await client.queryEnvelopes({});
     expect(calls[0]).toBe('http://my-indexer.example/graphql');
   });

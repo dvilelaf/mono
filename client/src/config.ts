@@ -155,12 +155,16 @@ export const JinnConfigSchema = z.object({
    * Spec: spec/2026-05-11-discovery-api-and-shared-indexer.md §9.1.
    *
    * mode:
-   *   'http'           — HTTP client pointing at a shared indexer (default per spec §4, but
-   *                      requires 280n.4's HttpDiscoveryAPI — throws at boot until that ships).
+   *   'http'           — HTTP client pointing at a shared Ponder indexer (ships in 280n.4).
    *   'http-subgraph'  — transitional: wraps the existing hosted The Graph subgraph behind
    *                      the DiscoveryAPI interface (ships with 280n.3). Removed in 280n.6.
    *   'embedded'       — embedded Ponder in-process (ships in 280n.5 — throws until then).
    *   'onchain'        — direct RPC getLogs; always-live floor; no indexer required.
+   *
+   * Default URLs for mode='http' (intentionally undefined until the maintainer's VPS is live):
+   *   // TODO: set once maintainer's VPS is live (jinn-mono-280n.4 deployment)
+   *   // DEFAULT_TESTNET_DISCOVERY_URL = 'https://...'  // Base Sepolia
+   *   // DEFAULT_MAINNET_DISCOVERY_URL = 'https://...'  // Base mainnet
    *
    * TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands and a
    * default URL is configured.
