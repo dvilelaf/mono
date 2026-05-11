@@ -4,24 +4,30 @@ Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
 SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
 Base Sepolia and Base mainnet.
 
-## Architecture: server-side only
+## Architecture: consumed by the daemon, not deployed standalone
 
-This package is pure server-side — schema definitions, event handlers, and the
-Ponder runtime that serves a GraphQL endpoint. The daemon-side client that
-consumes that endpoint lives at `client/src/discovery/http.ts` (in the
-`@jinn-network/client` package), not here. This split keeps the daemon's
-dependency footprint clean — daemon consumers never install Ponder transitively.
+This package is the indexer's schema, handlers, and Ponder runtime. **It does
+not ship a standalone deployment shape.** The daemon (`@jinn-network/client`)
+runs this package in-process when `discovery.mode: 'embedded'` is set
+(`jinn-mono-280n.5`). The daemon's own Dockerfile (`client/Dockerfile`) is the
+deployment target; whoever wants to be a "public indexer" for other operators
+runs a daemon with embedded mode enabled and the Ponder GraphQL port published
+externally.
 
-Any third party running their own Jinn-shaped indexer should deploy this
-package as-is; their operators' daemons already contain the GraphQL client that
-conforms to this schema.
+This collapses what would otherwise be two deployment shapes (standalone Ponder
++ daemon) into one (daemon, optionally publishing its embedded Ponder
+endpoint). It also matches the headless-brand framing: anyone running a daemon
+can become a public indexer by flipping configuration; the protocol stays
+minimal, surfaces vary by operator choice.
 
-Ships one consumption surface:
-- Ponder's auto-generated GraphQL endpoint at `/graphql`
+The daemon-side adapter that talks to a remote indexer's GraphQL lives at
+`client/src/discovery/http.ts` — that's the path operators take when their
+daemon points at someone else's daemon-with-embedded-indexer.
 
-The same package is deployed in two shapes:
-- `jinn-mono-280n.4` — VPS deployment, privately operated, Postgres backend
-- `jinn-mono-280n.5` — embedded in the daemon process, PGlite backend
+Schema-only consumers (e.g. ad-hoc analytics jobs that want to run a Ponder
+instance against the same schema) can still install this package directly and
+run `yarn dev` / `yarn start`, but that is a development convenience, not the
+production deployment shape.
 
 ## Running locally (PGlite, no external database)
 
@@ -63,13 +69,6 @@ export PONDER_RPC_URL_84532=https://base-sepolia.hypersync.xyz/<your-envio-api-k
 yarn build
 yarn serve
 ```
-
-### Docker / VPS
-
-The indexer is a standard Node.js process. Any environment that runs Node 22+
-with network access to the configured RPC endpoints and a reachable Postgres
-instance can host it. Ponder's zero-downtime deployment support is available
-when using Postgres with the `DATABASE_SCHEMA` env var for schema isolation.
 
 ## Schema-version policy
 
