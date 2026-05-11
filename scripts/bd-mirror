@@ -110,7 +110,9 @@ BD_PRIORITY="$(echo "$BD_JSON" | jq -r '.priority // 2')"
 BD_PARENT="$(echo "$BD_JSON" | jq -r '.parent // ""')"
 # `.assignee` is set by `bd update <id> --claim` and bd's CLI flows; falls back to the legacy
 # email-shaped `.owner` and finally to "human" so the agent: label always has a value.
-BD_OWNER="$(echo "$BD_JSON" | jq -r '.assignee // .owner // "human"')"
+# Note: jq's `//` only triggers on null/false, not empty strings. Some bd versions may emit
+# `""` for unset string fields; the explicit filter handles both `null` and `""`.
+BD_OWNER="$(echo "$BD_JSON" | jq -r '[.assignee, .owner, "human"] | map(select(. != null and . != "")) | .[0]')"
 BD_EXTERNAL_REF="$(echo "$BD_JSON" | jq -r '.external_ref // ""')"
 
 # Idempotency check: if external-ref points at a Jinn-Network/mono Issue, no-op.
