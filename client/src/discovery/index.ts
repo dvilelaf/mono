@@ -20,3 +20,12 @@ export { DiscoveryUnavailableError } from './types.js';
 
 export { withFallback } from './with-fallback.js';
 export type { WithFallbackOptions } from './with-fallback.js';
+
+export { createOnchainDiscoveryAPI } from './onchain.js';
+export type { OnchainDiscoveryAPIOptions, OnchainCursorCache } from './onchain.js';
+
+export { createHttpSubgraphDiscoveryAPI } from './http-subgraph.js';
+export type { HttpSubgraphDiscoveryAPIOptions } from './http-subgraph.js';
+
+export { createDiscoveryAPI } from './factory.js';
+export type { DiscoveryFactoryDeps, DiscoveryConfig } from './factory.js';
