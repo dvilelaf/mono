@@ -4,7 +4,7 @@
 - **Author:** Oak with Opus
 - **Status:** Design draft — ready for review
 - **Version:** 0.2
-- **v0.2 change:** Removed the standalone-indexer deployment shape. The "shared indexer" is now a daemon running in embedded mode with its Ponder GraphQL port published externally (`discovery.publishIndexer: true`). One deployment artifact (`client/Dockerfile`), three configuration variants per §8.
+- **v0.2 changes:** (a) Removed the standalone-indexer deployment shape. The "shared indexer" is now a daemon running in embedded mode with its Ponder GraphQL port published externally (`discovery.publishIndexer: true`). One deployment artifact (`client/Dockerfile`), three configuration variants per §8. (b) Added §13 (Operator UX surface) defining the minimum SPA controls + status surface required to make discovery operator-visible.
 - **Related:**
   - `spec/2026-04-30-phase-a-umbrella.md` (corpus library as the "first app" / programmatic library; `routeResolver` seam)
   - `spec/2026-05-05-solvernet-creation-and-launch.md` §13 (registry client interface designed to be swappable)
@@ -269,7 +269,82 @@ No protocol changes. No coordination. This is the headless-brand shape made lite
 
 A future spec may introduce a discovery-of-discovery layer (a list of known indexer endpoints anchored on-chain or in IPFS, possibly weighted by some operator-signal). v0.1 does not need it; pointing at a URL is enough.
 
-## 13. Open questions
+## 13. Operator UX surface
+
+Discovery is config-file-only today. The SPA dashboard (`client/src/dashboard/spa/`) does not expose any discovery state or controls. This section defines the minimum useful UX so an operator can see what mode they're in, what's working, and what to change — without editing JSON.
+
+This section is **scoped for v0.2** of the SPA, landing alongside `jinn-mono-280n.5`. The polished version (snapshot cadence controls, connected-consumer counts, federated-host directory) is deferred until there's a demand signal.
+
+### 13.1 Status badge (shell header)
+
+A persistent indicator in the dashboard shell, visible from every page. Three primary states:
+
+- `Discovery: HTTP · healthy · <N> blocks behind head` — `mode: 'http'` with the configured indexer responding within the lag threshold.
+- `Discovery: Embedded · syncing <pct>% · ETA <duration>` — `mode: 'embedded'` while initial restore + tail is below head.
+- `Discovery: On-chain only · degraded` — fallback chain engaged; the configured primary is unhealthy.
+
+Click-through opens a small panel:
+- Current mode and (if HTTP) URL.
+- Last successful query timestamp + p50 latency.
+- Which path served the last N queries (HTTP / floor) — visibility into how often fallback engages.
+- Banner when fallback active: "Indexer at \<host\> unreachable since \<time\> — using RPC fallback. Discovery slower until recovered."
+
+### 13.2 Configuration page: new "Discovery" section
+
+Three top-level choices, each with the cost-and-tradeoff one-liner an operator needs to make the decision:
+
+```
+○ Use a public indexer (recommended)            [mode: 'http']
+   URL: https://<configured-host>  [Change]
+   Fastest discovery. You trust the indexer operator to surface tasks accurately.
+
+○ Run my own indexer (advanced)                 [mode: 'embedded']
+   ~300MB RAM, syncs in ~5min from snapshot.
+   Fully autonomous — no third party in discovery path.
+
+○ Direct RPC reads (minimal)                    [mode: 'onchain']
+   No indexer at all. Discovery is slow on cold scans.
+   Use this if you don't trust any indexer.
+
+▢ Fall back to RPC when primary is unhealthy    [fallbackToOnchain]
+  (recommended; on by default)
+```
+
+When `mode: 'embedded'` is selected, an additional toggle appears:
+
+```
+▢ Publish my indexer to other operators         [publishIndexer]
+  Other operators can point their daemon at your URL.
+  Public port: 42069
+  Health endpoint: /health
+```
+
+### 13.3 Onboarding moment
+
+First-run experience for new operators (the very first time the daemon's dashboard loads against a fresh config):
+
+- Default to `mode: 'http'` pointing at the maintainer's URL.
+- One-sentence dismissable banner on the Overview page: "Discovery powered by \<maintainer-host\>. Switch to embedded mode in Configuration for full autonomy."
+- No forced flow — operators who don't care never touch this.
+
+### 13.4 Error states
+
+- Toast on mode transition: "Switched to RPC fallback — indexer unreachable."
+- Toast on recovery: "Indexer recovered, switched back."
+- Inline validation in Configuration on save: "mode 'http' requires url" (clear, actionable).
+
+### 13.5 Out of scope for v0.2
+
+Deferred until federation or operator demand justifies the build:
+
+- Connected-consumer count when `publishIndexer: true` (requires bookkeeping in the daemon's GraphQL layer).
+- Snapshot cadence settings beyond on/off (defaults are fine until proven otherwise).
+- Federated-host directory ("here are some other operators' indexers you could point at").
+- Snapshot CID verification visibility (chain commitment + IPFS hash visible in the panel).
+
+The corresponding backend data (telemetry on fallback engagement, head_lag_seconds health metric, mode transitions) lands as part of `jinn-mono-280n.5` regardless of whether the UI consumes it on day one — `.5` is the sensible host for both the daemon's reporting surface and the SPA's consumption surface.
+
+## 14. Open questions
 
 1. **GraphQL vs. JSON-RPC-style HTTP for the wire format.** Ponder ships GraphQL natively; the daemon already speaks GraphQL today. Default to GraphQL unless a concrete reason to differ surfaces in implementation. Worth a one-line answer in v0.2.
 2. **Snapshot frequency and size.** What's an acceptable lag for embedded-mode cold start — daily? hourly? The size of the indexed state per release dictates this. Decide during implementation; not gating for v0.1.
@@ -277,7 +352,7 @@ A future spec may introduce a discovery-of-discovery layer (a list of known inde
 4. **HyperSync availability and pricing model.** Embedded mode benefits massively from HyperSync but inherits its availability. Need to confirm current SLA / pricing / contingency for the embedded path. Not blocking; plain RPC works as a slower upstream.
 5. **What to do with `erc8004/subgraph.ts`.** The stub references bead `jinn-mono-fud` for an upcoming Jinn-specific subgraph. Either roll that work into the Ponder schema (preferred — it's the same data domain) or close the bead as superseded. Decide during implementation.
 
-## 14. References
+## 15. References
 
 - `spec/2026-04-30-phase-a-umbrella.md` — corpus library as the first programmatic-library "app"; `routeResolver` seam that this spec generalises into `DiscoveryAPI`.
 - `spec/2026-05-05-solvernet-creation-and-launch.md` §13 — registry client interface designed to be swappable; the day-1 subgraph backing this spec replaces.
