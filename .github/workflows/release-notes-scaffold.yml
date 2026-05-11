@@ -179,21 +179,24 @@ jobs:
           BODY_FILE: ${{ steps.body.outputs.body_file }}
         shell: bash
         run: |
-          # Use a draft-only tag name that won't conflict with the eventual published v-tag.
-          DRAFT_TAG="v${SUGGESTED}-draft"
-          # If a draft for this version already exists, update it instead of creating a new one.
-          EXISTING="$(gh release view "$DRAFT_TAG" --json id,isDraft --jq '.id' 2>/dev/null || true)"
+          # The draft uses the eventual published tag directly. GitHub does not materialize the
+          # git tag until the draft is published, so multiple unpublished drafts with different
+          # tags (one per scheduled cut) coexist safely. When Captain clicks Publish, the tag
+          # `v<SUGGESTED>` is created in git, which is what npm-publish.yml (release: published)
+          # and the dual-tag policy (jinn-mono-2cl.6) expect.
+          TAG="v${SUGGESTED}"
+          EXISTING="$(gh release view "$TAG" --json id,isDraft --jq '.id' 2>/dev/null || true)"
           if [ -n "$EXISTING" ]; then
-            gh release edit "$DRAFT_TAG" \
+            gh release edit "$TAG" \
               --title "v$SUGGESTED — Build Notes (draft)" \
               --notes-file "$BODY_FILE"
-            echo "Updated existing draft: $DRAFT_TAG"
+            echo "Updated existing draft: $TAG"
           else
-            gh release create "$DRAFT_TAG" \
+            gh release create "$TAG" \
               --draft \
               --title "v$SUGGESTED — Build Notes (draft)" \
               --notes-file "$BODY_FILE" \
               --target main
-            echo "Created new draft: $DRAFT_TAG"
+            echo "Created new draft: $TAG"
           fi
           echo "::notice::Release draft v$SUGGESTED ready for Captain review at https://github.com/${{ github.repository }}/releases"

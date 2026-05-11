@@ -52,7 +52,7 @@ jobs:
             echo ""
             echo "## $HEADING"
             echo ""
-            echo "_Released $DATE_"
+            echo "_Released ${DATE}_"
             echo ""
             echo "$RELEASE_BODY"
           } > /tmp/new-section.md

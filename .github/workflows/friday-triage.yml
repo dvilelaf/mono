@@ -125,7 +125,7 @@ print((today + datetime.timedelta(days=days_ahead)).isoformat())
           while IFS= read -r id; do
             if [ -z "$id" ]; then continue; fi
             echo "→ Mirroring $id"
-            if ! cargo/scripts/bd-mirror "$id" "$SPRINT_DATE"; then
+            if ! scripts/bd-mirror "$id" "$SPRINT_DATE"; then
               echo "::warning::Mirror failed for $id"
               FAILED=$((FAILED + 1))
             fi

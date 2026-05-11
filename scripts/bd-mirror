@@ -104,7 +104,9 @@ if [[ -n "$BD_EXTERNAL_REF" && "$BD_EXTERNAL_REF" == *"$REPO"* ]]; then
 fi
 
 # Curate the body: strip captain-only lines and "needs-design-session" framing.
-CURATED_BODY="$(echo "$BD_DESCRIPTION" | grep -v '^captain-only:' | sed '/needs-design-session/Id')"
+# Use grep -iv (BSD/GNU compatible) instead of sed /I (GNU-only) so this works on
+# macOS where this script is also run manually by Captain.
+CURATED_BODY="$(echo "$BD_DESCRIPTION" | grep -v '^captain-only:' | grep -iv 'needs-design-session')"
 
 # Compose the epic label from the parent id (if present).
 EPIC_LABEL=""
