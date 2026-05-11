@@ -91,7 +91,10 @@ jobs:
           # GitHub's native close keywords: close, closes, closed, fix, fixes, fixed,
           # resolve, resolves, resolved. Case-insensitive. Pair with jinn-mono-<id>.
           # The id pattern accepts dots (e.g. 2cl.13, uy6v.1.1).
-          grep -oiE '(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
+          # `\b` anchor on the left prevents substring matches like `disclosed` (matches `closed`),
+          # `prefixed` (matches `fixed`), `unresolved` (matches `resolved`). GitHub's native close-
+          # keyword parser requires the keyword to be a whole word; this matches that behaviour.
+          grep -oiE '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
             "${{ steps.body.outputs.body_file }}" 2>/dev/null \
             | grep -oiE 'jinn-mono-[a-z0-9]+(\.[a-z0-9]+)*' \
             | sort -u > /tmp/bd-ids.txt || true
@@ -134,8 +137,18 @@ jobs:
         run: |
           # bd uses an embedded Dolt sql-server. Configure the remote so we can pull
           # the latest state, apply our closes, then push back.
-          set -e
-          bd dolt remote add origin "${BD_DOLT_REMOTE_URL}" 2>/dev/null || true
+          # `set -o pipefail` ensures a `bd dolt pull` failure isn't masked by the
+          # `tail -10` pipe; `set -e` aborts the step (and downstream `bd close` /
+          # `bd dolt push` won't run, preventing a divergent-state push).
+          set -eo pipefail
+
+          # Remove-then-add ensures the remote always reflects the current secret
+          # value (in case of credential rotation or URL change). `remote add` alone
+          # fails silently if a remote with the same name already exists, leaving
+          # the previous URL in place.
+          bd dolt remote remove origin 2>/dev/null || true
+          bd dolt remote add origin "${BD_DOLT_REMOTE_URL}"
+
           bd dolt pull origin 2>&1 | tail -10
 
       - name: Close referenced bd issues
