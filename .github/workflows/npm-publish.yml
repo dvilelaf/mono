@@ -22,6 +22,11 @@ jobs:
     name: Publish package
     if: github.event_name == 'push' || startsWith(github.event.release.tag_name, 'client-v')
     runs-on: ubuntu-latest
+    # Stable publish runs the release-gate suite (jinn-mono-2cl.7): ~40-45 min for both gates
+    # + ~5-7 min for build/test + buffer for npm publish. 90 min upper bound catches gate
+    # hangs (e.g., Anvil port-bind failure) without cutting legitimate runs short. Canary
+    # publish completes in ~5-7 min, well under the cap.
+    timeout-minutes: 90
     environment: npm-publish
     env:
       JINN_BUILD_COMMIT: ${{ github.sha }}

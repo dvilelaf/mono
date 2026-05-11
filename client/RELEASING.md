@@ -18,7 +18,7 @@ The release flow has six layers:
 5. the manual app-first SWE-rebench v2 and data-donation testnet acceptance gate, with Docker diagnostics retained as supporting evidence (see [TESTNET_ACCEPTANCE.md](./TESTNET_ACCEPTANCE.md))
 6. the GitHub Release workflows for npm `latest` and GHCR
 
-The package's `prepublishOnly` script (`yarn typecheck && yarn build && yarn test`) runs on every `npm publish` — both canary (auto on main merge) and stable (Monday cut). It's a fast (~5 min) package-level safety net. The heavy gates in layers 2 and 3 only fire on stable publishes via the workflow, keeping the canary channel fast.
+The package's `prepublishOnly` script (`yarn typecheck`) runs on every `npm publish` as a final type-check safety net. The workflow (`npm-publish.yml`) explicitly runs `yarn typecheck`, `yarn build`, and `yarn test` as unconditional steps before publish, and on stable publishes additionally runs layers 2 and 3 above. Keeping `prepublishOnly` to just `yarn typecheck` avoids a redundant rebuild in CI between the gate steps and the actual `npm publish` call — the artifact npm packs is the same one the gates validated. **If you run `npm publish` locally (e.g. from a clean checkout), make sure to `yarn build` first** — the workflow handles this automatically.
 
 The old host-installed full acceptance run remains available only as a secondary debug path:
 
