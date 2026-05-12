@@ -68,8 +68,8 @@
  * If the impl emits a numeric score in `[0, 1]` separate from verdict, the
  * caller should pre-multiply it by 100 and pass `scoreDecimals=2`.
  *
- * Address constants (cross-checked against `subgraph/networks.json` and
- * `client/src/earning/contracts.ts` IdentityRegistry entries):
+ * Address constants (cross-checked against `client/src/earning/contracts.ts`
+ * IdentityRegistry entries):
  *
  *   Base mainnet  0x8004BAa17C55a88189AE136b182e5fdA19dE9b63
  *   Base Sepolia  0x8004B663056A597Dffe9eCcC1965A193B7388713

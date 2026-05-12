@@ -101,8 +101,20 @@ export function buildOperatorClientConfig({ rpcUrl, clientHome, runIdSuffix, env
     },
   };
 
+  // Discovery: the daemon's config loader defaults testnet to the privately-
+  // operated Ponder indexer with on-chain fallback (see client/src/config.ts),
+  // so an explicit block is only needed to repoint at a different host or pin
+  // the RPC-only floor.
+  const discoveryUrl = env['JINN_TESTNET_ACCEPTANCE_DISCOVERY_URL'];
+  const discoveryMode = env['JINN_TESTNET_ACCEPTANCE_DISCOVERY_MODE'];
+  if (discoveryUrl || discoveryMode) {
+    config.discovery = {
+      ...(discoveryMode ? { mode: discoveryMode } : {}),
+      ...(discoveryUrl ? { url: discoveryUrl } : {}),
+    };
+  }
+
   const optionalMap = [
-    ['JINN_TESTNET_ACCEPTANCE_SUBGRAPH_URL', 'subgraphUrl'],
     ['JINN_TESTNET_ACCEPTANCE_IPFS_GATEWAY_URL', 'ipfsGatewayUrl'],
     ['JINN_TESTNET_ACCEPTANCE_IPFS_REGISTRY_URL', 'ipfsRegistryUrl'],
     ['JINN_TESTNET_ACCEPTANCE_CLAUDE_PATH', 'claudePath'],

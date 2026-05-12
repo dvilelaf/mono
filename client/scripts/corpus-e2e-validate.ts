@@ -21,11 +21,17 @@
  *
  * Status (Phase 4): the full Anvil-based fixture is out-of-band from this
  * phase; the integration test suite at `client/test/corpus/integration.test.ts`
- * covers the full pipeline (subgraph -> manifest fetch -> x402 -> hash-verify
+ * covers the full pipeline (discovery -> manifest fetch -> x402 -> hash-verify
  * -> cache hit) via mocks. This script is the placeholder entry point for the
  * subsequent phase that wires up the real two-daemon fixture; today it
  * exercises the corpus library end-to-end against in-memory stubs to confirm
  * the public API surface is wired correctly.
+ *
+ * NOTE: this placeholder predates the corpus->DiscoveryAPI migration
+ * (jinn-mono-280n) and no longer matches the current `createCorpus` /
+ * `Corpus.query` surface — see the follow-up bead for a rewrite-or-remove
+ * decision. The discovery stub below is an in-memory DiscoveryAPI, so
+ * nothing in client/scripts/ depends on the retired hosted Graph indexer.
  */
 
 import { createHash } from 'node:crypto';
@@ -101,24 +107,21 @@ async function main() {
   const store = new Store(':memory:');
 
   let acquireCalls = 0;
-  const fakeFetch = async (_url: string | URL | Request, _init?: RequestInit) => {
-    return new Response(
-      JSON.stringify({
-        data: {
-          executions: [
-            {
-              id: '1-0xabc',
-              manifestCid: 'bafyManifest',
-              manifestHash: '0x' + 'a'.repeat(64),
-              tier: 'COMMITTED',
-              publishedAt: String(Math.floor(Date.now() / 1000)),
-              operator: { id: '1', agentId: '1', owner: operatorA, agentWallet: operatorA },
-            },
-          ],
-        },
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+  // In-memory DiscoveryAPI stub standing in for the Ponder indexer / on-chain
+  // floor — returns one COMMITTED envelope ref from operator A.
+  const fakeDiscovery = {
+    findClaimableTasks: async () => [],
+    listLaunchedSolverNets: async () => [],
+    getLifecycleStatus: async () => undefined,
+    queryEnvelopes: async () => [
+      {
+        manifestCid: 'bafyManifest',
+        manifestHash: '0x' + 'a'.repeat(64),
+        operator: { agentId: '1', safeAddress: operatorA },
+        evidenceTier: 'committed' as const,
+        publishedAt: Math.floor(Date.now() / 1000),
+      },
+    ],
   };
 
   const fakeFetchFromIpfs = async (_g: string, _cid: string) =>
@@ -137,17 +140,17 @@ async function main() {
 
   const corpus = createCorpus(
     {
-      subgraphUrl: 'https://subgraph.test/graphql',
+      discovery: fakeDiscovery,
       ipfsGatewayUrl: 'https://gateway.test',
       store,
       signer: { privateKey: TEST_KEY },
       selfSafeAddress: operatorB,
     },
-    { fetch: fakeFetch as typeof globalThis.fetch, fetchFromIpfs: fakeFetchFromIpfs, acquireFn: fakeAcquire },
+    { fetchFromIpfs: fakeFetchFromIpfs, acquireFn: fakeAcquire },
   );
 
   // First read — should hit origin.
-  const first = await corpus.read({ query: { kind: 'prediction.v0', limit: 5 } });
+  const first = await corpus.read({ query: { solverType: 'prediction.v0', limit: 5 } });
   if (first.length !== 1) throw new Error(`expected 1 envelope, got ${first.length}`);
   const ac = first[0].artifactContents.get(realSha);
   if (!ac) throw new Error('artifact content missing');
@@ -161,7 +164,7 @@ async function main() {
   if (row.source !== 'origin') throw new Error(`row.source expected origin, got ${row.source}`);
 
   // Second read — should hit cache.
-  const second = await corpus.read({ query: { kind: 'prediction.v0', limit: 5 } });
+  const second = await corpus.read({ query: { solverType: 'prediction.v0', limit: 5 } });
   const ac2 = second[0].artifactContents.get(realSha);
   if (!ac2) throw new Error('cache artifact content missing');
   if (ac2.source !== 'cache') throw new Error(`expected source=cache on second read, got ${ac2.source}`);
