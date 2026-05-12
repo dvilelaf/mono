@@ -703,6 +703,7 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       status: latest.status,
       statusUpdatedAt: latest.statusUpdatedAt,
       sourceBlock: latest.anchorBlock,
+      manifestHash: latest.manifestHash,
     };
   }
 

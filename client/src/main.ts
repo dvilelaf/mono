@@ -1821,14 +1821,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       const { resolveAgentIdForManifest } = await import(
         './erc8004/index.js'
       );
-      const subgraphUrl = config.subgraphUrl;
       reputationFeedback = {
         client: reputationClient,
         resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, subgraphUrl }),
+          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
       };
       console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${subgraphUrl ? ` subgraph=${subgraphUrl}` : ' (no subgraph configured — resolver always null)'}`,
+        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
       );
     } else {
       console.log(

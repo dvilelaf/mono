@@ -557,13 +557,15 @@ describe('listLaunchedSolverNets', () => {
 // ── getLifecycleStatus ────────────────────────────────────────────────────────
 
 describe('getLifecycleStatus', () => {
-  it('returns lifecycle status when manifest exists', async () => {
+  it('returns lifecycle status when manifest exists (with manifestHash)', async () => {
+    const realHash = '0x' + 'ab'.repeat(32);
     const { impl } = mockFetch({
       data: {
         solverNetManifest: {
           status: 'launched',
           statusUpdatedAt: '2026-05-11T12:00:00Z',
           anchorBlock: '99999',
+          manifestHash: realHash,
         },
       },
     });
@@ -575,6 +577,29 @@ describe('getLifecycleStatus', () => {
     expect(result!.status).toBe('launched');
     expect(result!.statusUpdatedAt).toBe('2026-05-11T12:00:00Z');
     expect(result!.sourceBlock).toBe(99999);
+    expect(result!.manifestHash).toBe(realHash);
+  });
+
+  it('maps null manifestHash from indexer to the "0x" sentinel', async () => {
+    // Older indexed rows predate the manifestHash column — the indexer returns
+    // null. http.ts must map null → '0x' (the sentinel) so callers can detect
+    // "no advertised hash available" without optional-field handling.
+    const { impl } = mockFetch({
+      data: {
+        solverNetManifest: {
+          status: 'launched',
+          statusUpdatedAt: '2026-05-11T12:00:00Z',
+          anchorBlock: '99999',
+          manifestHash: null,
+        },
+      },
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const result = await client.getLifecycleStatus('bafyreifoo');
+
+    expect(result).toBeDefined();
+    expect(result!.manifestHash).toBe('0x');
   });
 
   it('returns undefined when manifest not found', async () => {

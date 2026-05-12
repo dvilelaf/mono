@@ -142,6 +142,7 @@ query GetLifecycleStatus($manifestCid: String!) {
     status
     statusUpdatedAt
     anchorBlock
+    manifestHash
   }
 }
 `;
@@ -223,6 +224,7 @@ interface SolverNetSingle {
     status: string;
     statusUpdatedAt: string;
     anchorBlock: string | number;
+    manifestHash?: string | null;
   } | null;
 }
 
@@ -569,6 +571,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       status: validStatus(row.status) ? row.status : 'launched',
       statusUpdatedAt: row.statusUpdatedAt,
       sourceBlock: Number(row.anchorBlock),
+      manifestHash: (typeof row.manifestHash === 'string' && /^0x[0-9a-fA-F]+$/.test(row.manifestHash)
+        ? row.manifestHash
+        : '0x') as `0x${string}`,
     };
   }
 
@@ -588,6 +593,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     // the IPFS manifests. See packages/indexer/README.md §Known limitations.
     const where: Record<string, unknown> = {};
     if (query.evidenceTier) where['evidenceTier'] = query.evidenceTier;
+    if (query.manifestHash) where['manifestHash'] = query.manifestHash;
 
     const data = await postGql<EnvelopePage>(
       gqlUrl,

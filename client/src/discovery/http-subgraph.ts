@@ -189,6 +189,7 @@ export function createHttpSubgraphDiscoveryAPI(
       status: latest.status,
       statusUpdatedAt: latest.statusUpdatedAt,
       sourceBlock: latest.anchorBlock,
+      manifestHash: latest.manifestHash,
     };
   }
 

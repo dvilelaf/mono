@@ -39,6 +39,8 @@ export interface CorpusQuery {
   generatedAfter?: number;
   generatedBefore?: number;
   limit?: number;
+  /** Filter envelopes by the manifest hash (the keccak256 of the manifest body). */
+  manifestHash?: string;
 }
 
 export type EnvelopeProjectionMetadataValue = string | number | boolean;
