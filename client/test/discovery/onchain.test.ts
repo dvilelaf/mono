@@ -517,6 +517,9 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
       taskDiscoveryFromBlock: 0,
+      // Force a single getLogs chunk so the mock's call-indexed responses line up
+      // regardless of DEFAULT_CHUNK_BLOCKS.
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
     });
 
@@ -693,6 +696,9 @@ describe('OnchainDiscoveryAPI — cursorCache', () => {
       routerAddress: ROUTER,
       safeAddress: SAFE_ADDRESS,
       mechAddress: MECH_ADDRESS,
+      // Single chunk so [CACHED_BLOCK, head] is one getLogs call → its fromBlock
+      // is exactly CACHED_BLOCK, independent of DEFAULT_CHUNK_BLOCKS.
+      chunkBlocks: 100_000,
       publicClient: mockClient as never,
       cursorCache: cache,
     });
