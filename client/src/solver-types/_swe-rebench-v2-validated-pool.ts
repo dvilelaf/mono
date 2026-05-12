@@ -1,0 +1,221 @@
+/**
+ * Pool-validation gate for the swe-rebench-v2 task generator.
+ *
+ * SWE-rebench's leaderboard split contains instances that can't be scored in
+ * our eval environment — the dataset `test_cmd` runs a superset of the named
+ * tests, a `PASS_TO_PASS` test ERRORs without a service the container doesn't
+ * provide, the gold patch doesn't reproduce the expected transition, etc.
+ * Posting tasks for those just produces verdicts that say nothing about the
+ * solver. Standard practice (SWE-bench Verified by hand, SWE-rebench's pipeline
+ * automatically) is to validate each instance and only keep the scorable ones.
+ *
+ * `validatePoolInstances` does that validation: run the *gold* patch through
+ * our `PythonEvalRunner` and mark the instance scorable iff it resolves
+ * (`passed_match: true` under our SWE-bench "resolved" semantics). Results are
+ * cached per `(instance_id, evalSemanticsVersion)` in `<stateDir>/validated-pool.json`.
+ * The generator (`filterToScorablePool`) restricts its posting pool to the
+ * scorable set; absent validation data it falls back to Python-only instances
+ * (the languages our pytest `test_cmd` override supports) as a conservative floor.
+ *
+ * Refs: jinn-mono-uy6v.9.
+ */
+
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import type { PoolTask } from './_swe-rebench-v2-pool.js';
+import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
+
+/**
+ * Bump when the eval grading semantics change (verdict re-derivation,
+ * ungradeable classification, test-command construction) so cached validation
+ * results from an older harness are treated as stale and re-checked. `'2'` =
+ * the SWE-bench "resolved" semantics + run-the-named-tests `test_cmd` override
+ * (jinn-mono-uy6v.8); `'1'` was the original exact-set `passed_match`.
+ */
+export const EVAL_SEMANTICS_VERSION = '2';
+
+const SCHEMA_VERSION = 'swe-rebench-v2-validated-pool.v1' as const;
+
+export interface ValidatedPoolEntry {
+  scorable: boolean;
+  /** Why scorable/unscorable — `'gold-patch-resolves'`, `'ungradeable:<reason>'`, etc. */
+  reason: string;
+  checkedAt: string; // ISO timestamp
+}
+
+interface ValidatedPoolFile {
+  schemaVersion: typeof SCHEMA_VERSION;
+  evalSemanticsVersion: string;
+  updatedAt: string;
+  entries: Record<string, ValidatedPoolEntry>;
+}
+
+function freshFile(evalSemanticsVersion: string): ValidatedPoolFile {
+  return { schemaVersion: SCHEMA_VERSION, evalSemanticsVersion, updatedAt: new Date().toISOString(), entries: {} };
+}
+
+function isValidFile(raw: unknown, evalSemanticsVersion: string): raw is ValidatedPoolFile {
+  return (
+    typeof raw === 'object' && raw !== null &&
+    (raw as ValidatedPoolFile).schemaVersion === SCHEMA_VERSION &&
+    (raw as ValidatedPoolFile).evalSemanticsVersion === evalSemanticsVersion &&
+    typeof (raw as ValidatedPoolFile).entries === 'object' && (raw as ValidatedPoolFile).entries !== null
+  );
+}
+
+export class ValidatedPoolStore {
+  private readonly file: string;
+  private cache: ValidatedPoolFile | null = null;
+
+  constructor(opts: { stateDir: string }) {
+    this.file = join(opts.stateDir, 'validated-pool.json');
+  }
+
+  private async readRaw(): Promise<unknown> {
+    try {
+      return JSON.parse(await readFile(this.file, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private async loadForWrite(evalSemanticsVersion: string): Promise<ValidatedPoolFile> {
+    if (this.cache && this.cache.evalSemanticsVersion === evalSemanticsVersion) return this.cache;
+    const raw = await this.readRaw();
+    this.cache = isValidFile(raw, evalSemanticsVersion) ? raw : freshFile(evalSemanticsVersion);
+    return this.cache;
+  }
+
+  private async save(): Promise<void> {
+    if (!this.cache) return;
+    this.cache.updatedAt = new Date().toISOString();
+    await mkdir(dirname(this.file), { recursive: true });
+    await writeFile(this.file, JSON.stringify(this.cache, null, 2));
+  }
+
+  /** The set of instance ids known scorable for `evalSemanticsVersion`, or
+   *  `null` if there is no validation data for this semantics version (the
+   *  on-disk file is absent or built for a different version). */
+  async getScorableIds(evalSemanticsVersion: string): Promise<Set<string> | null> {
+    const raw = await this.readRaw();
+    if (!isValidFile(raw, evalSemanticsVersion)) return null;
+    return new Set(Object.entries(raw.entries).filter(([, e]) => e.scorable).map(([id]) => id));
+  }
+
+  /** The entry for `instanceId`, or `null` if not validated for this semantics version. */
+  async getEntry(instanceId: string, evalSemanticsVersion: string): Promise<ValidatedPoolEntry | null> {
+    const f = await this.loadForWrite(evalSemanticsVersion);
+    return f.entries[instanceId] ?? null;
+  }
+
+  async record(instanceId: string, entry: ValidatedPoolEntry, evalSemanticsVersion: string): Promise<void> {
+    const f = await this.loadForWrite(evalSemanticsVersion);
+    f.entries[instanceId] = entry;
+    await this.save();
+  }
+}
+
+/**
+ * Restrict the generator's posting pool to instances we can actually score.
+ * With validation data (`scorableIds` non-null): keep only the scorable set.
+ * Without it: fall back to Python-only instances — the conservative floor our
+ * pytest `test_cmd` override supports — and the caller should warn that the
+ * full gate (`jinn solver-nets validate-pool swe-rebench-v2`) hasn't been run.
+ */
+export function filterToScorablePool(
+  pool: PoolTask[],
+  scorableIds: Set<string> | null,
+): { pool: PoolTask[]; mode: 'validated' | 'python-floor' } {
+  if (scorableIds) {
+    return { pool: pool.filter((t) => scorableIds.has(t.instance_id)), mode: 'validated' };
+  }
+  return { pool: pool.filter((t) => (t.language ?? '') === 'python'), mode: 'python-floor' };
+}
+
+export interface ValidatePoolDeps {
+  fetcher: HfFetcher;
+  runner: EvalRunner;
+  store: ValidatedPoolStore;
+  semanticsVersion: string;
+  log?: (msg: string) => void;
+}
+
+export interface ValidatePoolSummary {
+  checked: number;     // instances we ran the gold-eval for this run
+  scorable: number;    // of those, marked scorable
+  unscorable: number;  // of those, marked unscorable
+  skipped: number;     // non-Python instances we didn't even try
+}
+
+function nameOf(err: unknown): string {
+  return typeof err === 'object' && err !== null && typeof (err as { name?: unknown }).name === 'string'
+    ? (err as { name: string }).name : '';
+}
+function reasonOf(err: unknown): string {
+  return typeof err === 'object' && err !== null && typeof (err as { reason?: unknown }).reason === 'string'
+    ? (err as { reason: string }).reason : 'unknown';
+}
+
+/**
+ * Validate pool instances by running their gold patch through the eval harness.
+ * Idempotent: instances already recorded for `semanticsVersion` are skipped
+ * unless `opts.force`. `opts.limit` caps how many gold-evals one run does.
+ */
+export async function validatePoolInstances(
+  pool: PoolTask[],
+  deps: ValidatePoolDeps,
+  opts: { limit?: number; force?: boolean } = {},
+): Promise<ValidatePoolSummary> {
+  const log = deps.log ?? (() => {});
+  const summary: ValidatePoolSummary = { checked: 0, scorable: 0, unscorable: 0, skipped: 0 };
+  for (const task of pool) {
+    if (opts.limit != null && summary.checked >= opts.limit) break;
+
+    // Only pytest (Python) instances are supported by the eval-runner `test_cmd`
+    // override; everything else can't be scored cleanly today.
+    if ((task.language ?? '') !== 'python') {
+      await deps.store.record(task.instance_id, { scorable: false, reason: 'non-pytest-unsupported', checkedAt: new Date().toISOString() }, deps.semanticsVersion);
+      summary.skipped += 1;
+      continue;
+    }
+    if (!opts.force && (await deps.store.getEntry(task.instance_id, deps.semanticsVersion))) {
+      continue; // already validated for this semantics version
+    }
+    if (!task.patch || !task.test_patch) {
+      await deps.store.record(task.instance_id, { scorable: false, reason: 'missing-gold-patch', checkedAt: new Date().toISOString() }, deps.semanticsVersion);
+      summary.checked += 1; summary.unscorable += 1;
+      continue;
+    }
+
+    log(`[validate-pool] ${task.instance_id} …`);
+    let entry: ValidatedPoolEntry;
+    try {
+      const row = await deps.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: task.instance_id });
+      const res = await deps.runner.runEval({
+        instance_id: task.instance_id,
+        repo: task.repo ?? row.repo,
+        image: row.image_name,
+        patch: task.patch,
+        test_patch: row.test_patch ?? task.test_patch,
+        install: row.install_config.install,
+        test_cmd: row.install_config.test_cmd,
+        log_parser: row.install_config.log_parser,
+        fail_to_pass: row.FAIL_TO_PASS,
+        pass_to_pass: row.PASS_TO_PASS,
+      });
+      entry = res.passed_match
+        ? { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }
+        : { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, checkedAt: new Date().toISOString() };
+    } catch (err) {
+      const reason = nameOf(err) === 'EvalCouldNotGradeError'
+        ? `ungradeable:${reasonOf(err)}`
+        : `error:${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+      entry = { scorable: false, reason, checkedAt: new Date().toISOString() };
+    }
+    await deps.store.record(task.instance_id, entry, deps.semanticsVersion);
+    summary.checked += 1;
+    if (entry.scorable) summary.scorable += 1; else summary.unscorable += 1;
+    log(`[validate-pool] ${task.instance_id} → ${entry.scorable ? 'SCORABLE' : 'unscorable'} (${entry.reason})`);
+  }
+  return summary;
+}

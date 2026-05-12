@@ -27,6 +27,11 @@ import {
 } from './swe-rebench-v2-auto.js';
 import { GeneratorStateStore } from './_swe-rebench-v2-state.js';
 import {
+  ValidatedPoolStore,
+  filterToScorablePool,
+  EVAL_SEMANTICS_VERSION,
+} from './_swe-rebench-v2-validated-pool.js';
+import {
   buildHistoricalPool,
   fetchHfSplit,
   listMonthlyPartitions,
@@ -243,9 +248,11 @@ async function maybeSignTask(
  */
 function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig): SweRebenchV2GeneratorTick {
   const stateStore = new GeneratorStateStore({ stateDir: config.stateDir });
+  const validatedPoolStore = new ValidatedPoolStore({ stateDir: config.stateDir });
 
   let pool: PoolTask[] = [];
   let poolLoadedAt = 0;
+  let floorWarned = false;
   let lastPostedLanguage: string | undefined;
   let lastPollAt: string | undefined;
   let lastPollSummary: SweRebenchV2GeneratorStateSnapshot['lastPollSummary'];
@@ -301,9 +308,26 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
+    // Restrict to instances we can actually score (validated gold-patch pool),
+    // or — absent validation data — to Python instances (the floor our pytest
+    // test_cmd override supports). See jinn-mono-uy6v.9.
+    const scorableIds = await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION);
+    const { pool: eligiblePool, mode: poolMode } = filterToScorablePool(pool, scorableIds);
+    if (poolMode === 'python-floor' && !floorWarned) {
+      floorWarned = true;
+      console.warn(
+        `[swe-rebench-v2-gen] no pool-validation data — restricting to ${eligiblePool.length} Python instance(s) of ${pool.length}; run \`jinn solver-nets validate-pool swe-rebench-v2\` to validate the full pool.`,
+      );
+    }
+    if (eligiblePool.length === 0) {
+      lastPollSummary = { poolSize: 0, posted: 0, skipped: 0 };
+      lastError = undefined;
+      return null;
+    }
+
     // Load all counters for eligible tasks
     const counters = new Map<string, { posted: number; successful: number; last_posted_at: number }>();
-    for (const task of pool) {
+    for (const task of eligiblePool) {
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
 
@@ -312,20 +336,20 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       ...Array.from(counters.values(), (c) => c.last_posted_at),
     );
     if (mostRecentPostedAt > 0 && now - mostRecentPostedAt < genConfig.cooldown_ms) {
-      lastPollSummary = { poolSize: pool.length, posted: 0, skipped: pool.length };
+      lastPollSummary = { poolSize: eligiblePool.length, posted: 0, skipped: eligiblePool.length };
       lastError = undefined;
       return null;
     }
 
     const candidate = selectNextPostingCandidate({
-      pool,
+      pool: eligiblePool,
       counters,
       config: genConfig,
       now,
       lastPostedLanguage,
     });
     if (!candidate) {
-      lastPollSummary = { poolSize: pool.length, posted: 0, skipped: pool.length };
+      lastPollSummary = { poolSize: eligiblePool.length, posted: 0, skipped: eligiblePool.length };
       lastError = undefined;
       return null;
     }
@@ -381,7 +405,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     };
 
     console.log(`[swe-rebench-v2-gen] posting ${candidate.instance_id}`);
-    lastPollSummary = { poolSize: pool.length, posted: 1, skipped: 0 };
+    lastPollSummary = { poolSize: eligiblePool.length, posted: 1, skipped: 0 };
     lastError = undefined;
     return maybeSignTask(task, { creator: config.creator, createdAt: now });
   };
