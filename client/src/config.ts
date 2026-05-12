@@ -889,14 +889,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
+  const hasSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
 
   // Testnet default: point discovery at the privately-operated Ponder indexer
   // (jinn-mono-280n.4), unless the operator has set their own `discovery` block
   // or a legacy `subgraphUrl`. The on-chain RPC floor stays as the fallback.
   const explicitDiscoveryMode = (typeof merged['discovery'] === 'object' && merged['discovery'] !== null
     && typeof (merged['discovery'] as { mode?: unknown }).mode === 'string');
-  const explicitSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
-  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode && !explicitSubgraphUrl) {
+  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode && !hasSubgraphUrl) {
     merged['discovery'] = {
       ...(typeof merged['discovery'] === 'object' && merged['discovery'] !== null ? merged['discovery'] as object : {}),
       mode: 'http',
@@ -910,7 +910,6 @@ export function loadConfig(configPath?: string): JinnConfig {
   // no explicit mode, map it to http-subgraph with a deprecation warning.
   //
   // TODO(280n.6): remove this block when subgraphUrl is retired.
-  const hasSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
   const discoveryBlock = typeof merged['discovery'] === 'object' && merged['discovery'] !== null
     ? (merged['discovery'] as { mode?: string; url?: string; fallbackToOnchain?: boolean })
     : null;
