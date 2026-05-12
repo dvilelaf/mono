@@ -1638,10 +1638,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // legacy-claude: wraps ClaudeRunner; handles spec=undefined (health-check) tasks
   const corpusChainId = config.network === 'testnet' ? 84532 : 8453;
   const corpusFromBlock = Number(DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK[corpusChainId] ?? 0n);
+  // Prefer the discovery.url (Ponder indexer) over the legacy subgraphUrl.
+  // The MCP subprocess reads JINN_DISCOVERY_URL; the old JINN_CORPUS_SUBGRAPH_URL is no longer set.
+  const corpusDiscoveryUrl = config.discovery?.url?.trim() || config.subgraphUrl?.trim() || '';
   const corpusEnv: RunnerContext['corpusEnv'] | undefined =
-    (config.subgraphUrl?.trim() || identityRegistryAddress)
+    (corpusDiscoveryUrl || identityRegistryAddress)
       ? {
-          ...(config.subgraphUrl?.trim() ? { subgraphUrl: config.subgraphUrl } : {}),
+          ...(corpusDiscoveryUrl ? { discoveryUrl: corpusDiscoveryUrl } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           rpcUrl: config.rpcUrl,
           chainId: corpusChainId,
