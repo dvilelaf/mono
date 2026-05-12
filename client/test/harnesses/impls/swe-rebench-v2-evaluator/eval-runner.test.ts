@@ -31,6 +31,7 @@ function makeUpstreamFixture(opts: {
   writeFileSync(join(scriptsDir, 'eval.py'), `
 import argparse
 import json
+import os
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -43,6 +44,7 @@ args = parser.parse_args()
 tasks = json.loads(Path(args.json).read_text())
 Path("observed-task.json").write_text(json.dumps(tasks[0]))
 Path("observed-patches.json").write_text(Path(args.patches).read_text())
+Path("observed-env.txt").write_text(os.environ.get("DOCKER_DEFAULT_PLATFORM", ""))
 Path("observed-log.txt").write_text(${JSON.stringify(logBody)})
 
 # Real upstream item shape: instance_id, exit_code (the docker-run exit code),
@@ -155,6 +157,23 @@ describe('PythonEvalRunner', () => {
     });
     const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
     await expect(runner.runEval(REQUEST)).rejects.toThrow(/grade/i);
+  });
+
+  it('pins the docker platform to linux/amd64 for the eval subprocess', async () => {
+    const upstreamRepoDir = makeUpstreamFixture();
+    const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+    await runner.runEval(REQUEST);
+    expect(readFileSync(join(upstreamRepoDir, 'observed-env.txt'), 'utf8')).toBe('linux/amd64');
+  });
+
+  it('resolves a relative report log_path against the upstream repo dir', async () => {
+    const upstreamRepoDir = makeUpstreamFixture({
+      reportItem: { log_path: 'observed-log.txt' }, // relative, as upstream eval.py writes it
+      logBody: 'PYTEST OUTPUT HERE',
+    });
+    const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+    const result = await runner.runEval(REQUEST);
+    expect(result.log).toContain('PYTEST OUTPUT HERE');
   });
 
   it('throws EvalCouldNotGradeError when the report file is missing/unparseable', async () => {

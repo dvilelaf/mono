@@ -8,7 +8,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
 
 /**
@@ -115,6 +115,10 @@ export class PythonEvalRunner implements EvalRunner {
     const child = spawn(this.opts.pythonBin ?? 'python3', pyArgs, {
       cwd: this.opts.upstreamRepoDir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // SWE-rebench eval images are published for linux/amd64. Pin the platform
+      // so the upstream `docker run` is consistent on amd64 hosts and does not
+      // silently crash under arm64 emulation on dev machines.
+      env: { ...process.env, DOCKER_DEFAULT_PLATFORM: 'linux/amd64' },
     });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -148,11 +152,17 @@ export class PythonEvalRunner implements EvalRunner {
     const passedActual = asStringArray(item['passed_actual']);
     const failedActual = asStringArray(item['failed_actual']);
 
+    // The upstream eval.py writes the full container log to
+    // <upstreamRepoDir>/logs/<instance>_log.txt and records `log_path` in the
+    // report — sometimes relative to its own cwd (the upstream repo dir).
+    // Resolve it so the test-log artifact carries the real pytest/container
+    // output rather than just the progress bar.
     let logBody = '';
     const logPath = item['log_path'];
     if (typeof logPath === 'string' && logPath.length > 0) {
+      const resolved = isAbsolute(logPath) ? logPath : join(this.opts.upstreamRepoDir, logPath);
       try {
-        logBody = await readFile(logPath, 'utf8');
+        logBody = await readFile(resolved, 'utf8');
       } catch {
         logBody = '';
       }
