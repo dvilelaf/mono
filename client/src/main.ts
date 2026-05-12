@@ -1785,9 +1785,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
   //      identity.
   //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the subgraph. When `subgraphUrl`
-  //      is unconfigured the resolver returns null cleanly and the hook
-  //      becomes a no-op (defensive: feedback is non-fatal).
+  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
+  //      no DiscoveryAPI is available the resolver returns null cleanly and
+  //      the hook becomes a no-op (defensive: feedback is non-fatal).
   //
   // Skipped when the operator hasn't minted an agent NFT yet (matches the
   // IdentityPublisher gating above).

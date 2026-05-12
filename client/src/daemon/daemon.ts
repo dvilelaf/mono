@@ -77,7 +77,8 @@ export interface DaemonConfig {
    * Store so the corpus shares the same SQLite handle. When set, the API
    * server exposes `POST /v1/artifacts/acquire` so the MCP subprocess can
    * acquire artifacts without ever holding the agent EOA private key. Built
-   * in `main.ts` once `subgraphUrl` is configured. See
+   * in `main.ts` once the discovery layer is wired (see
+   * spec/2026-05-11-discovery-api-and-shared-indexer.md). See
    * spec/2026-04-30-phase-a-umbrella.md §4.
    */
   corpusFactory?: (store: Store) => Corpus;

@@ -73,8 +73,6 @@ interface LocalConfig {
   apiPort?: number;
   dbPath?: string;
   earningDir?: string;
-  /** @deprecated — use discovery.url instead */
-  subgraphUrl?: string;
   discovery?: { mode?: string; url?: string; fallbackToOnchain?: boolean };
   taskDiscoveryAllowedTaskIds?: string[];
   ipfsGatewayUrl?: string;
