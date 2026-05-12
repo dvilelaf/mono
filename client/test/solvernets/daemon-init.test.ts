@@ -23,7 +23,6 @@ import os from 'os';
 import path from 'path';
 
 import {
-  createNoopSubgraphClient,
   initSolverNetSubsystem,
   type InitSolverNetSubsystemDeps,
   DEFAULT_CATALOG_REFRESH_INTERVAL_MS,
@@ -42,7 +41,6 @@ import type {
   IpfsClient,
   MetadataPublisher,
   SetMetadataPublishResult,
-  SubgraphClient,
 } from '../../src/solvernets/registry-client-erc8004.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -204,7 +202,6 @@ let baseDir: string;
 let store: SolverNetStore;
 let ipfs: IpfsClient;
 let publisher: MockPublisher;
-let subgraph: SubgraphClient;
 
 function buildDeps(overrides: Partial<InitSolverNetSubsystemDeps> = {}): InitSolverNetSubsystemDeps {
   const signer: SignerWithAgentEoa = {
@@ -216,7 +213,6 @@ function buildDeps(overrides: Partial<InitSolverNetSubsystemDeps> = {}): InitSol
     store,
     ipfs,
     publisher,
-    subgraph,
     registryClient: makeMockRegistryClient({ summaries: [] }),
     network: 'base-sepolia',
     resolveSigner: async () => signer,
@@ -233,7 +229,6 @@ beforeEach(async () => {
   store = createSolverNetStore({ baseDir });
   ipfs = makeMockIpfs();
   publisher = makeMockPublisher();
-  subgraph = createNoopSubgraphClient();
 });
 
 afterEach(async () => {
@@ -511,10 +506,3 @@ describe('initSolverNetSubsystem — stop()', () => {
   });
 });
 
-describe('createNoopSubgraphClient', () => {
-  it('returns empty arrays for both queries', async () => {
-    const client = createNoopSubgraphClient();
-    expect(await client.fetchSetMetadataEvents({ keyPrefix: 'solvernet-manifest:' })).toEqual([]);
-    expect(await client.fetchSetMetadataEventsForCid({ manifestCid: 'bafy-anything' })).toEqual([]);
-  });
-});

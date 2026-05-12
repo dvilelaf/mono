@@ -347,7 +347,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishManifest', () => 
     client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
   });
@@ -425,7 +424,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
   });
@@ -483,7 +481,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     const clientA = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: publisherA,
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
 
@@ -512,7 +509,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.publishLifecycleTransiti
     const clientB = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: publisherB,
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
 
@@ -550,7 +546,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -606,7 +601,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -623,7 +617,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
       // discoveryApi intentionally absent
     });
@@ -641,7 +634,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -703,7 +695,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -722,7 +713,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.listLaunched', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -763,7 +753,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -780,7 +769,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -798,7 +786,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       discoveryApi: failingDiscoveryApi,
       network: 'base-sepolia',
     });
@@ -825,7 +812,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -847,7 +833,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       discoveryApi: tamperingDiscoveryApi,
       network: 'base-sepolia',
     });
@@ -862,7 +847,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -882,7 +866,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -907,7 +890,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       discoveryApi: sentinelDiscoveryApi,
       network: 'base-sepolia',
     });
@@ -926,7 +908,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -950,7 +931,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: makeMockSubgraph(),
       discoveryApi: mismatchDiscoveryApi,
       network: 'base-sepolia',
     });
@@ -970,7 +950,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifest', () => {
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -1002,7 +981,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -1025,7 +1003,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       network: 'base-sepolia',
     });
 
@@ -1048,7 +1025,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const publisherClient = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
     const { manifest, signer } = await buildSignedManifest();
@@ -1057,7 +1033,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getManifestFromCache', (
     const reader = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs: sharedIpfs,
       publisher: makeMockPublisher(),
-      subgraph: sharedSubgraph,
       network: 'base-sepolia',
     });
     // Cold: cache miss before getManifest.
@@ -1083,7 +1058,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -1130,7 +1104,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });
@@ -1147,7 +1120,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       // discoveryApi intentionally absent
       network: 'base-sepolia',
     });
@@ -1169,7 +1141,6 @@ describe('IdentityRegistryBackedSolverNetRegistryClient.getLifecycleStatus', () 
     const client = new IdentityRegistryBackedSolverNetRegistryClient({
       ipfs,
       publisher,
-      subgraph,
       discoveryApi,
       network: 'base-sepolia',
     });

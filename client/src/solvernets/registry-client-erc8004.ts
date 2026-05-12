@@ -9,35 +9,6 @@
  *   - getManifest                    → IPFS fetch + canonical-hash verification + schema validation
  *   - getLifecycleStatus             → DiscoveryAPI.getLifecycleStatus
  *
- * Design choices, per `spec/2026-05-05-solvernet-creation-and-launch.md` §6:
- *
- * - **Payload encoding** is JCS-canonical UTF-8 JSON bytes — *not* the
- *   ABI-encoded execution-payload tuple used by `IdentityPublisher`. The two
- *   surfaces use the same `setMetadata(agentId, key, bytes)` ABI but carry
- *   different payload schemas; `solvernet.lifecycle.v1` is plain JSON because
- *   the document is human-readable lifecycle metadata, not a tight on-chain
- *   tuple. JCS-encoding keeps reproducibility across implementations.
- *
- * - **Key shape** is `solvernet-manifest:<cid>` — the same `<kind>:<cid>`
- *   pattern as execution envelopes (`envelope:<cid>`), one prefix per kind.
- *
- * - **Idempotency**: re-publishing the same canonical content yields the
- *   same cid (IPFS is content-addressed); re-firing `setMetadata` with the
- *   same args produces another event but is harmless — the most-recent-wins
- *   resolver still picks the latest.
- *
- * - **Network filtering**: the registry is global (no agentId filter), but
- *   the manifest itself records its target network. `listLaunched` filters
- *   summaries by the constructor's `network` so operators only see manifests
- *   for their chain. (The chain identity already lives in the manifest body
- *   per §7.)
- *
- * - **Hash verification on read**: `getManifest` always cross-checks the
- *   canonical hash of the fetched IPFS content against the on-chain
- *   advertised hash from the latest setMetadata event. A tampered IPFS
- *   pinner cannot make us return a manifest whose content disagrees with
- *   what the launcher anchored on-chain.
- *
  * Construction takes a deps bag (IPFS / publisher / discoveryApi) so tests
  * can inject mocks. The interfaces here are deliberately small — a future
  * replacement (alternative gateway, on-chain SolverNet registry contract)
@@ -54,7 +25,6 @@ import {
   manifestHash,
 } from './manifest.js';
 import {
-  resolveMostRecentWins,
   type SetMetadataEvent,
   type SetMetadataLifecyclePayload,
 } from './most-recent-wins.js';
@@ -166,22 +136,9 @@ export interface IdentityRegistryBackedSolverNetRegistryClientConfig {
   ipfs: IpfsClient;
   publisher: MetadataPublisher;
   /**
-   * @deprecated Unused after jinn-mono-280n.6 part A. The subgraph field is
-   * retained here so part B can delete it in a separate PR without touching
-   * callers in between. After part B lands this field and the SubgraphClient
-   * interface will be removed entirely. No methods on this class call
-   * this.subgraph any longer — all manifest-hash / lifecycle reads route
-   * through discoveryApi.
-   */
-  subgraph: SubgraphClient;
-  /**
    * DiscoveryAPI instance for all read-side operations (`listLaunched`,
    * `getLifecycleStatus`, manifest-hash cross-checks in `fetchAndValidateManifest`
-   * and `getManifest`). Required — see jinn-mono-280n.6 part A.
-   *
-   * When absent, `listLaunched` throws. `getManifest` and
-   * `publishLifecycleTransition` gracefully skip hash verification if this
-   * field is also absent.
+   * and `getManifest`).
    */
   discoveryApi?: DiscoveryAPI;
   /**
@@ -217,7 +174,6 @@ export class IdentityRegistryBackedSolverNetRegistryClient
 {
   private readonly ipfs: IpfsClient;
   private readonly publisher: MetadataPublisher;
-  private readonly subgraph: SubgraphClient;
   private readonly discoveryApi: DiscoveryAPI | undefined;
   private readonly network: 'base-sepolia' | 'base';
   private readonly now: () => Date;
@@ -250,7 +206,6 @@ export class IdentityRegistryBackedSolverNetRegistryClient
   constructor(config: IdentityRegistryBackedSolverNetRegistryClientConfig) {
     this.ipfs = config.ipfs;
     this.publisher = config.publisher;
-    this.subgraph = config.subgraph;
     this.discoveryApi = config.discoveryApi;
     this.network = config.network;
     this.now = config.now ?? (() => new Date());
@@ -371,22 +326,14 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     statusFilter?: Array<'launched' | 'paused' | 'retired'>;
     sinceBlock?: number;
   }): Promise<SolverNetManifestSummary[]> {
-    // Discovery is now the only supported path for listing launched SolverNets.
-    // Direct subgraph calls are no longer supported from this method — the
-    // DiscoveryAPI abstraction wraps the subgraph (or onchain RPC) and is the
-    // single callsite for read-side discovery queries.
     if (!this.discoveryApi) {
       throw new Error(
-        'listLaunched requires a DiscoveryAPI to be injected at construction time. ' +
-        'Pass discoveryApi in the IdentityRegistryBackedSolverNetRegistryClientConfig.',
+        'IdentityRegistryBackedSolverNetRegistryClient requires a DiscoveryAPI for listLaunched',
       );
     }
-
     // Step 1: Obtain coarse summaries (manifestCid + lifecycle status) from
-    // the DiscoveryAPI. The http-subgraph implementation folds
-    // resolveMostRecentWins internally; the onchain implementation scans logs.
-    // Note: listLaunchedSolverNets does not accept sinceBlock — that arg was
-    // a subgraph optimisation that does not translate to the abstract interface.
+    // the DiscoveryAPI. Note: listLaunchedSolverNets does not accept sinceBlock —
+    // that arg was a subgraph optimisation that does not translate to the abstract interface.
     const rawSummaries = await this.discoveryApi.listLaunchedSolverNets(
       args.statusFilter !== undefined ? { status: args.statusFilter } : undefined,
     );
@@ -450,7 +397,7 @@ export class IdentityRegistryBackedSolverNetRegistryClient
       // Cached but not yet marked verified (shouldn't happen with the
       // current cache-population paths, which always mark verified, but
       // we keep this branch defensive). Verify hash against on-chain
-      // advertised hash via discoveryApi.getLifecycleStatus if available.
+      // advertised hash via discoveryApi.getLifecycleStatus.
       let advertisedHash: `0x${string}` | null = null;
       if (this.discoveryApi) {
         try {
@@ -502,11 +449,9 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     sourceBlock: number;
     manifestHash: `0x${string}`;
   }> {
-    // Delegate to DiscoveryAPI (280n.6 part A: hosted-subgraph path removed).
     if (!this.discoveryApi) {
       throw new Error(
-        'getLifecycleStatus requires a DiscoveryAPI to be injected at construction time. ' +
-        'Pass discoveryApi in the IdentityRegistryBackedSolverNetRegistryClientConfig.',
+        'IdentityRegistryBackedSolverNetRegistryClient requires a DiscoveryAPI for getLifecycleStatus',
       );
     }
     const result = await this.discoveryApi.getLifecycleStatus(args.manifestCid);
@@ -587,22 +532,4 @@ export class IdentityRegistryBackedSolverNetRegistryClient
     return manifest;
   }
 
-  /**
-   * Pick the manifest hash advertised by the most recent setMetadata event
-   * for a cid. Returns null if no events match.
-   *
-   * Cross-launcher ties on the same block are broken by the higher
-   * `anchorTransactionIndex` — same lexicographic rule as `getLifecycleStatus`.
-   */
-  private latestAdvertisedHash(events: SetMetadataEvent[]): `0x${string}` | null {
-    const resolved = resolveMostRecentWins(events);
-    if (resolved.length === 0) return null;
-    const latest = resolved.reduce((acc, cur) => {
-      if (cur.anchorBlock !== acc.anchorBlock) {
-        return cur.anchorBlock > acc.anchorBlock ? cur : acc;
-      }
-      return cur.anchorTransactionIndex > acc.anchorTransactionIndex ? cur : acc;
-    });
-    return latest.manifestHash;
-  }
 }

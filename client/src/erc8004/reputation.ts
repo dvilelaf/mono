@@ -41,12 +41,12 @@
  * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
  * takes `harnessAgentId` as a direct input. The two natural resolution paths:
  *
- *   (b) subgraph query: `Operator { agentId } where executions_some: { manifestHash: <evidenceHash> }`
+ *   (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → operator.agentId
  *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
  *       harness's Safe (`getAgentByWallet` is not exposed on-chain).
  *
- * Subgraph (b) is the cheapest and aligns with the rest of the discovery
- * surface; (c) is the fallback when the subgraph is unavailable.
+ * Path (b) via the Ponder indexer is O(1) and the recommended route;
+ * (c) is the fallback when the discovery indexer is unavailable.
  *
  * ── Score-mapping policy ─────────────────────────────────────────────────────
  *

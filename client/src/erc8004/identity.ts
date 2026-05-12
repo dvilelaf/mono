@@ -36,18 +36,17 @@
  *
  *      Resolution paths:
  *
- *        (b) Subgraph: `Execution { operator { agentId } where manifestHash: $h }`
- *            — the Jinn subgraph already indexes envelope publishes joined to the
- *            operator. This is the recommended path: O(1) and aligned with the
- *            rest of the discovery surface.
+ *        (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → first ref's
+ *            `operator.agentId`. The Ponder indexer stores the agentId alongside
+ *            each indexed envelope. This is the O(1) recommended path.
  *        (c) On-chain `IdentityRegistry.Registered` event scan filtered by the
  *            harness's Safe address — cheaper than a global scan, but still O(n)
  *            in registered-events. Documented as a fallback only.
  *
- *      This module implements (b). The fallback is intentionally **not** wired in
- *      yet: the resolver returns `null` cleanly when the subgraph URL is undefined
- *      or the query has no match, and the caller (the feedback hook) treats that
- *      as a no-op (DR §4.3: "skip but don't fail — claimDelivery is authoritative").
+ *      This module implements (b). The resolver returns `null` cleanly when
+ *      `discoveryApi` is undefined or the query has no match, and the caller
+ *      (the feedback hook) treats that as a no-op (DR §4.3: "skip but don't fail
+ *      — claimDelivery is authoritative").
  */
 
 import { encodeAbiParameters, type Hex, type PublicClient, type WalletClient } from 'viem';
@@ -512,10 +511,8 @@ export class IdentityPublisher {
  * `await resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi })`
  * — without conditional plumbing.
  *
- * NOTE: The legacy `subgraphUrl` / `fetchImpl` fields from the old
- * hosted-subgraph path have been replaced by `discoveryApi`. The resolver
- * now delegates to `discoveryApi.queryEnvelopes({ manifestHash, limit: 1 })`
- * and extracts `agentId` from the first envelope ref. Part of jinn-mono-280n.6.
+ * NOTE: Resolution uses `discoveryApi.queryEnvelopes({ manifestHash, limit: 1 })`
+ * and extracts `agentId` from the first envelope ref (jinn-mono-280n.6).
  */
 export interface ResolveAgentIdArgs {
   manifestHash: `0x${string}`;

@@ -74,11 +74,3 @@ export {
   type ValidationStatus,
 } from './validation.js';
 
-// ── Subgraph stub (will move to its own module once the V2 schema lands) ──────
-export {
-  getMetadataValue,
-  queryArtifacts,
-  queryNodes,
-  type SubgraphConfig,
-  type SubgraphResult,
-} from './subgraph.js';
