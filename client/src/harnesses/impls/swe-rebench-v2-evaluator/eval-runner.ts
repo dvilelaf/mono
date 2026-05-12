@@ -3,6 +3,27 @@
  * SWE-rebench/SWE-rebench-V2 repo (MIT). Operators install the upstream
  * harness as a Python dependency; this runner shells out and parses the
  * structured JSON report.
+ *
+ * The upstream report item (`report.json` → `items[]`) has two shapes:
+ *  - success: `{ instance_id, from_fail_to_pass, failed_from_pass_to_pass,
+ *               passed_match, exit_code, log_path, error: "" }`
+ *  - setup error: `{ instance_id, from_fail_to_pass: [], failed_from_pass_to_pass:
+ *               [...all PASS_TO_PASS...], error: "<message>" }` (no exit_code /
+ *               passed_match / log_path)
+ *
+ * Two corrections this runner makes over the raw report:
+ *  1. We re-derive the verdict with SWE-bench "resolved" semantics —
+ *     `all FAIL_TO_PASS now pass AND no PASS_TO_PASS broke` — instead of
+ *     trusting `passed_match`, which upstream computes as
+ *     `{set of every test that passed} == {FAIL_TO_PASS ∪ PASS_TO_PASS}`.
+ *     That exact-set comparison makes any instance whose `test_cmd` runs more
+ *     (or fewer) than the named tests structurally unscorable, and penalises a
+ *     solver for adding an extra passing test. (jinn-mono-uy6v.8)
+ *  2. We refuse to return a verdict when the eval never actually graded the
+ *     solution (Docker unreachable, image pull/IO failure, model patch failed
+ *     to apply, install/test-setup failed, arch-incompatible image, upstream
+ *     setup error) — those become `EvalCouldNotGradeError`, which the harness
+ *     re-raises as `SkippableError` (no signed verdict).
  */
 
 import { spawn } from 'node:child_process';
@@ -12,13 +33,9 @@ import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
 
 /**
- * Thrown when the eval could not actually grade the solution — Docker
- * unavailable, image pull/IO failure, the model patch failed to apply, the
- * install/test-setup step failed, an arch-incompatible image crashed, the
- * upstream harness errored, etc. The caller MUST NOT turn this into a
- * `passed_match: false` verdict: there is no signal about the solver, only
- * about the operator's environment. The evaluator harness re-raises it as a
- * `SkippableError` so the engine records a skip (no delivered verdict).
+ * Thrown when the eval could not actually grade the solution. There is no
+ * signal about the solver here, only about the operator's environment — the
+ * caller MUST NOT turn this into a `passed_match: false` verdict.
  */
 export class EvalCouldNotGradeError extends Error {
   readonly reason: string;
@@ -43,27 +60,30 @@ export interface PythonEvalRunnerOptions {
 }
 
 /**
- * Known infra-abort signatures in the container output. Used only to produce
- * a human-readable `reason`; the load-bearing classifier is
- * "container exited non-zero AND no test was collected" (see below).
+ * Container-output signatures that mean the eval aborted before producing a
+ * usable result — i.e. the operator's environment is the problem, not the
+ * solver. Used both to classify (`reason`) and as the load-bearing gate:
+ * a "zero tests passed, non-zero exit" report is only treated as ungradeable
+ * when one of these is present; otherwise it's a (degenerate) real failure.
  */
 const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /Cannot connect to the Docker daemon/i, reason: 'docker_unavailable' },
   { rx: /input\/output error/i, reason: 'docker_storage_io_error' },
-  { rx: /error: corrupt patch at line/i, reason: 'patch_corrupt' },
-  { rx: /patch does not apply|patch failed:/i, reason: 'patch_does_not_apply' },
+  { rx: /No such image|manifest unknown|pull access denied/i, reason: 'image_pull_failed' },
+  { rx: /error: corrupt patch at line|patch fragment without header/i, reason: 'patch_corrupt' },
+  { rx: /patch does not apply|error: patch failed:/i, reason: 'patch_does_not_apply' },
   { rx: /Applied patch to .+ with conflicts|^U \S/m, reason: 'patch_merge_conflict' },
   { rx: /: command not found/i, reason: 'test_command_not_found' },
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },
-  { rx: /exec format error|requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+  { rx: /exec format error|the requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
 ];
 
-function classifyInfraReason(log: string): string {
+function matchInfraSignature(log: string): string | null {
   for (const { rx, reason } of INFRA_SIGNATURES) {
     if (rx.test(log)) return reason;
   }
-  return 'eval_aborted_before_tests';
+  return null;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -135,28 +155,41 @@ export class PythonEvalRunner implements EvalRunner {
     } catch {
       await rm(tmp, { recursive: true, force: true });
       // The upstream harness never produced a report — it crashed before it
-      // could grade anything. Not a verdict about the solver.
+      // could grade anything.
       throw new EvalCouldNotGradeError(
-        classifyInfraReason(stderr + stdout),
+        matchInfraSignature(stderr + stdout) ?? 'eval_no_report',
         `python exitCode=${exitCode}; ${(stderr || stdout).slice(-800)}`,
       );
     }
 
-    // Upstream report item shape: { instance_id, exit_code (the docker-run
-    // exit code), passed_match, passed_expected, passed_actual, failed_actual,
-    // log_path, ... }.
     const items = Array.isArray(report.items) ? report.items : [];
     const item = items.find((i) => i['instance_id'] === INSTANCE_ID) ?? items[0] ?? {};
 
-    const containerExit = typeof item['exit_code'] === 'number' ? (item['exit_code'] as number) : exitCode;
-    const passedActual = asStringArray(item['passed_actual']);
-    const failedActual = asStringArray(item['failed_actual']);
+    // Setup-error shape: eval.py caught an exception (missing image_name,
+    // missing config, unknown log parser, …). No exit_code / passed_match.
+    const reportError = typeof item['error'] === 'string' ? (item['error'] as string).trim() : '';
+    if (reportError) {
+      await rm(tmp, { recursive: true, force: true });
+      throw new EvalCouldNotGradeError('eval_setup_error', reportError);
+    }
+    if (typeof item['exit_code'] !== 'number') {
+      await rm(tmp, { recursive: true, force: true });
+      throw new EvalCouldNotGradeError(
+        'eval_report_malformed',
+        `report item lacked exit_code: ${JSON.stringify(item).slice(0, 500)}`,
+      );
+    }
+
+    const containerExit = item['exit_code'] as number;
+    // `from_fail_to_pass`: FAIL_TO_PASS tests that now pass.
+    // `failed_from_pass_to_pass`: PASS_TO_PASS tests that no longer pass.
+    const fromFailToPass = asStringArray(item['from_fail_to_pass']);
+    const failedFromPassToPass = asStringArray(item['failed_from_pass_to_pass']);
 
     // The upstream eval.py writes the full container log to
-    // <upstreamRepoDir>/logs/<instance>_log.txt and records `log_path` in the
-    // report — sometimes relative to its own cwd (the upstream repo dir).
-    // Resolve it so the test-log artifact carries the real pytest/container
-    // output rather than just the progress bar.
+    // <upstreamRepoDir>/logs/<instance>_log.txt and records `log_path` —
+    // sometimes relative to its own cwd. Resolve it so the test-log artifact
+    // carries the real pytest/container output rather than just the progress bar.
     let logBody = '';
     const logPath = item['log_path'];
     if (typeof logPath === 'string' && logPath.length > 0) {
@@ -171,23 +204,32 @@ export class PythonEvalRunner implements EvalRunner {
 
     await rm(tmp, { recursive: true, force: true });
 
-    // The eval did not actually grade the solution if the container aborted
-    // (non-zero exit) before any expected test was collected. A genuine
-    // wrong-answer run still surfaces the FAIL_TO_PASS / PASS_TO_PASS tests in
-    // passed_actual / failed_actual, so this only catches infra aborts: Docker
-    // down, patch-apply failure, test-file merge conflict, install/setup
-    // failure, missing test command, arch-incompatible image, etc.
-    if (containerExit !== 0 && passedActual.length === 0 && failedActual.length === 0) {
-      throw new EvalCouldNotGradeError(
-        classifyInfraReason(fullLog || stderr),
-        (fullLog || stderr).slice(-800),
-      );
+    // Ungradeable iff: the container aborted (non-zero exit) AND no expected
+    // test of either kind was observed to pass (`from_fail_to_pass` empty and
+    // *every* PASS_TO_PASS landed in `failed_from_pass_to_pass`) AND the output
+    // matches a known infra-abort signature. A genuine wrong-answer run still
+    // shows the FAIL_TO_PASS test failing inside a normal pytest report (no
+    // infra signature), and a partially-passing run is clearly a real result —
+    // both go through as verdicts.
+    const noTestPassed =
+      fromFailToPass.length === 0 && failedFromPassToPass.length >= args.pass_to_pass.length;
+    if (containerExit !== 0 && noTestPassed) {
+      const infraReason = matchInfraSignature(fullLog || stderr);
+      if (infraReason) {
+        throw new EvalCouldNotGradeError(infraReason, (fullLog || stderr).slice(-800));
+      }
     }
 
+    // SWE-bench "resolved" semantics: all FAIL_TO_PASS now pass and no
+    // PASS_TO_PASS broke. (`from_fail_to_pass` is an intersection with the
+    // expected FAIL_TO_PASS set, so length equality means full coverage.)
+    const resolved =
+      fromFailToPass.length === args.fail_to_pass.length && failedFromPassToPass.length === 0;
+
     return {
-      passed_match: item['passed_match'] === true,
-      passed: passedActual,
-      failed: failedActual,
+      passed_match: resolved,
+      passed: fromFailToPass,
+      failed: failedFromPassToPass,
       log: fullLog,
       exitCode: containerExit,
     };
