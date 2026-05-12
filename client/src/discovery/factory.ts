@@ -9,12 +9,9 @@
  */
 
 import type { DiscoveryAPI } from './types.js';
-import { DiscoveryUnavailableError } from './types.js';
 import { withFallback } from './with-fallback.js';
 import { createOnchainDiscoveryAPI } from './onchain.js';
-import { createHttpSubgraphDiscoveryAPI } from './http-subgraph.js';
 import { createHttpDiscoveryAPI } from './http.js';
-import type { SubgraphClient } from '../solvernets/registry-client-erc8004.js';
 
 // ── Deps bag ──────────────────────────────────────────────────────────────────
 
@@ -37,12 +34,6 @@ export interface DiscoveryFactoryDeps {
   mechAddress?: `0x${string}`;
   /** Lower bound block for on-chain scans. */
   taskDiscoveryFromBlock?: bigint | number;
-  /**
-   * Subgraph client for SolverNet manifest events — required when mode is
-   * 'http-subgraph'. Injected here so callers control the instance lifecycle
-   * and tests can provide a stub.
-   */
-  subgraphClient?: SubgraphClient;
   /** Fetch implementation (for testability). Defaults to globalThis.fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -50,7 +41,7 @@ export interface DiscoveryFactoryDeps {
 // ── Discovery config type (mirrors config.ts) ─────────────────────────────────
 
 export interface DiscoveryConfig {
-  mode?: 'http' | 'http-subgraph' | 'embedded' | 'onchain';
+  mode?: 'http' | 'embedded' | 'onchain';
   url?: string;
   fallbackToOnchain?: boolean;
 }
@@ -61,10 +52,9 @@ export interface DiscoveryConfig {
  * Build a DiscoveryAPI from the daemon's discovery config block.
  *
  * Modes:
- *   - 'onchain'       → returns the floor alone (no fallback needed)
- *   - 'http-subgraph' → wraps the transitional subgraph adapter with the floor
- *   - 'http'          → HttpDiscoveryAPI backed by a Ponder GraphQL endpoint (280n.4)
- *   - 'embedded'      → not yet shipped (280n.5); throws at boot
+ *   - 'onchain'   → returns the floor alone (no fallback needed)
+ *   - 'http'      → HttpDiscoveryAPI backed by a Ponder GraphQL endpoint (280n.4)
+ *   - 'embedded'  → not yet shipped (280n.5); throws at boot
  *
  * When `fallbackToOnchain` is true (default), the primary is wrapped in
  * withFallback(primary, floor). When false, the primary is returned directly.
@@ -116,37 +106,11 @@ export function createDiscoveryAPI(
     return withFallback(primary, floor);
   }
 
-  if (mode === 'embedded') {
-    // TODO(280n.5): instantiate EmbeddedPonderDiscoveryAPI once it ships.
-    throw new Error(
-      'discovery.mode="embedded" is not yet available. ' +
-      'EmbeddedPonderDiscoveryAPI ships in jinn-mono-280n.5. ' +
-      'Use mode="http-subgraph" (transitional) or mode="onchain" for now.',
-    );
-  }
-
-  // mode === 'http-subgraph' — transitional wrapper
-  if (!deps.subgraphClient) {
-    throw new Error(
-      'discovery.mode="http-subgraph" requires deps.subgraphClient to be provided. ' +
-      'Pass the SubgraphClient instance from daemon-init.',
-    );
-  }
-  if (!config.url) {
-    throw new Error(
-      'discovery.mode="http-subgraph" requires discovery.url (or legacy subgraphUrl) to be set.',
-    );
-  }
-
-  const primary = createHttpSubgraphDiscoveryAPI({
-    subgraphUrl: config.url,
-    subgraphClient: deps.subgraphClient,
-    fetchImpl: deps.fetchImpl,
-  });
-
-  if (!fallbackToOnchain) {
-    return primary;
-  }
-
-  return withFallback(primary, floor);
+  // mode === 'embedded'
+  // TODO(280n.5): instantiate EmbeddedPonderDiscoveryAPI once it ships.
+  throw new Error(
+    'discovery.mode="embedded" is not yet available. ' +
+    'EmbeddedPonderDiscoveryAPI ships in jinn-mono-280n.5. ' +
+    'Use mode="http" or mode="onchain" instead.',
+  );
 }

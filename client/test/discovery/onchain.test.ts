@@ -26,7 +26,7 @@ import {
 } from 'viem';
 import { createOnchainDiscoveryAPI, limitedConcurrency, type OnchainCursorCache } from '../../src/discovery/onchain.js';
 import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
-import { manifestDigestForCid } from '../../src/adapters/mech/task-subgraph.js';
+import { manifestDigestForCid } from '../../src/adapters/mech/digest.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -362,6 +362,8 @@ describe('OnchainDiscoveryAPI — getLifecycleStatus', () => {
     expect(result).toBeDefined();
     expect(result?.status).toBe('launched');
     expect(result?.sourceBlock).toBe(5_000);
+    // The buildSolvernetMetadataLog helper embeds hash: `0x${'ab'.repeat(32)}`.
+    expect(result?.manifestHash).toBe('0x' + 'ab'.repeat(32));
   });
 
   it('returns undefined for a different cid even if other events exist', async () => {

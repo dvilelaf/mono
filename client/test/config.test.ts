@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_TESTNET_SUBGRAPH_URL, DEFAULT_TESTNET_DISCOVERY_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
+import { DEFAULT_TESTNET_DISCOVERY_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -219,19 +219,8 @@ describe('loadConfig RPC override handling', () => {
     expect(config.discovery?.mode).toBeUndefined();
   });
 
-  it('lets JINN_SUBGRAPH_URL override the public task subgraph default', async () => {
-    const configPath = await writeConfigFile({ network: 'testnet' });
-    process.env['JINN_SUBGRAPH_URL'] = 'https://subgraph.override.example/graphql';
-    delete process.env['JINN_NETWORK'];
-
-    const config = loadConfig(configPath);
-
-    expect(config.subgraphUrl).toBe('https://subgraph.override.example/graphql');
-  });
-
   it('JINN_DISCOVERY_URL alone on testnet → that URL with mode "http" and fallback true', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
-    delete process.env['JINN_SUBGRAPH_URL'];
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
     delete process.env['JINN_NETWORK'];
@@ -246,7 +235,6 @@ describe('loadConfig RPC override handling', () => {
 
   it('JINN_DISCOVERY_URL on mainnet → mode defaulted to "http" so the URL is consulted', async () => {
     const configPath = await writeConfigFile({ network: 'mainnet' });
-    delete process.env['JINN_SUBGRAPH_URL'];
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
     delete process.env['JINN_NETWORK'];
@@ -263,7 +251,6 @@ describe('loadConfig RPC override handling', () => {
       network: 'testnet',
       discovery: { url: 'https://operator-indexer.example/graphql' },
     });
-    delete process.env['JINN_SUBGRAPH_URL'];
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_URL'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
@@ -281,7 +268,6 @@ describe('loadConfig RPC override handling', () => {
       network: 'testnet',
       discovery: { fallbackToOnchain: false },
     });
-    delete process.env['JINN_SUBGRAPH_URL'];
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_DISCOVERY_URL'];
     delete process.env['JINN_DISCOVERY_FALLBACK'];
@@ -297,7 +283,6 @@ describe('loadConfig RPC override handling', () => {
 
   it('JINN_DISCOVERY_FALLBACK=0 with JINN_DISCOVERY_URL disables the floor', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
-    delete process.env['JINN_SUBGRAPH_URL'];
     delete process.env['JINN_DISCOVERY_MODE'];
     delete process.env['JINN_NETWORK'];
     process.env['JINN_DISCOVERY_URL'] = 'https://my-indexer.example/graphql';
@@ -1068,85 +1053,3 @@ describe('capture config', () => {
   });
 });
 
-describe('loadConfig legacy subgraphUrl → discovery normalization', () => {
-  const dirs: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-    vi.restoreAllMocks();
-    delete process.env['JINN_SUBGRAPH_URL'];
-    delete process.env['JINN_NETWORK'];
-  });
-
-  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
-    dirs.push(dir);
-    const configPath = path.join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(contents, null, 2));
-    return configPath;
-  }
-
-  it('maps subgraphUrl to discovery.mode=http-subgraph and emits a deprecation warning', async () => {
-    const configPath = await writeConfigFile({
-      subgraphUrl: 'https://example.com/subgraph',
-    });
-    delete process.env['JINN_SUBGRAPH_URL'];
-    delete process.env['JINN_NETWORK'];
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const config = loadConfig(configPath);
-
-    expect(config.discovery?.mode).toBe('http-subgraph');
-    expect(config.discovery?.url).toBe('https://example.com/subgraph');
-    expect(config.discovery?.fallbackToOnchain).toBe(true);
-
-    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
-    const deprecationWarning = warnCalls.find(
-      (msg) => msg.includes('subgraphUrl') || msg.includes('deprecated'),
-    );
-    expect(deprecationWarning).toBeDefined();
-  });
-
-  it('does not map subgraphUrl when discovery.mode is already set', async () => {
-    const configPath = await writeConfigFile({
-      subgraphUrl: 'https://example.com/subgraph',
-      discovery: { mode: 'onchain' },
-    });
-    delete process.env['JINN_SUBGRAPH_URL'];
-    delete process.env['JINN_NETWORK'];
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const config = loadConfig(configPath);
-
-    // discovery.mode was already set — subgraphUrl mapping should not override it
-    expect(config.discovery?.mode).toBe('onchain');
-
-    // No deprecation warning about subgraphUrl → discovery mapping should be emitted
-    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
-    const mappingWarning = warnCalls.find(
-      (msg) => msg.includes('Mapping to discovery'),
-    );
-    expect(mappingWarning).toBeUndefined();
-  });
-
-  it('maps JINN_SUBGRAPH_URL env var to discovery.mode=http-subgraph', async () => {
-    const configPath = await writeConfigFile({});
-    process.env['JINN_SUBGRAPH_URL'] = 'https://env.example.com/subgraph';
-    delete process.env['JINN_NETWORK'];
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const config = loadConfig(configPath);
-
-    expect(config.discovery?.mode).toBe('http-subgraph');
-    expect(config.discovery?.url).toBe('https://env.example.com/subgraph');
-
-    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]));
-    const deprecationWarning = warnCalls.find(
-      (msg) => msg.includes('subgraphUrl') || msg.includes('deprecated'),
-    );
-    expect(deprecationWarning).toBeDefined();
-  });
-});
