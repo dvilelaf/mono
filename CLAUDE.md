@@ -221,15 +221,17 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
 | peers            | JINN_PEERS               | []                                |
 | tasks            | JINN_TASKS               | []                                |
-| discovery.mode   | JINN_DISCOVERY_MODE      | http (testnet) — `onchain` for the RPC-only floor |
-| discovery.url    | JINN_DISCOVERY_URL       | https://jinn-indexer-production.up.railway.app (testnet) |
-| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true                       |
+| discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
+| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | true (only relevant when mode is `http`/`embedded`) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
 | engine.implStateDirRoot | JINN_ENGINE_IMPL_STATE_DIR_ROOT | ~/.jinn-client/engine/impl-state |
 
 `JINN_PASSWORD` is env-only — never in config files.
+
+Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`) with `fallbackToOnchain: true`. Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
 
 ## On-Chain Addresses (Base)
 

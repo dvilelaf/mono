@@ -583,7 +583,7 @@ export async function resolveAgentIdForManifest(
   }
 
   const first = refs[0]!;
-  const agentIdStr = first.operator?.agentId;
+  const agentIdStr = first.operator.agentId;
   if (!agentIdStr) {
     return null;
   }

@@ -48,6 +48,24 @@ describe('acceptance operator config', () => {
     });
   });
 
+  it('defaults the mode to http when only a discovery URL is overridden', () => {
+    const config = buildOperatorClientConfig({
+      rpcUrl: 'https://base-sepolia.example',
+      clientHome: '/tmp/jinn-acceptance/.jinn-client',
+      runIdSuffix: 'unit',
+      env: {
+        JINN_TESTNET_ACCEPTANCE_DISCOVERY_URL: 'https://my-indexer.example/graphql',
+      },
+    });
+
+    // A URL with no mode would otherwise be clobbered by the daemon's default
+    // URL — pin mode: 'http' so the override survives the config loader.
+    expect(config.discovery).toEqual({
+      mode: 'http',
+      url: 'https://my-indexer.example/graphql',
+    });
+  });
+
   it('pins the on-chain floor when only the mode is overridden', () => {
     const config = buildOperatorClientConfig({
       rpcUrl: 'https://base-sepolia.example',
