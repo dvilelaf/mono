@@ -662,6 +662,22 @@ export type JinnConfig = Omit<z.infer<typeof JinnConfigSchema>, 'rpcUrl' | 'task
 
 const DEFAULT_DIR = join(homedir(), '.jinn-client');
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
+
+/**
+ * Default discovery indexer for Base Sepolia testnet daemons — the
+ * privately-operated Ponder instance (jinn-mono-280n.4). Operators override
+ * via `discovery.url` / `JINN_DISCOVERY_URL`, or pin `discovery.mode: 'onchain'`
+ * for RPC-only. No mainnet default yet (the public mainnet RPC can't sustain the
+ * historical sync — see ponder.config.ts).
+ */
+export const DEFAULT_TESTNET_DISCOVERY_URL = 'https://jinn-indexer-production.up.railway.app';
+
+/**
+ * @deprecated The hosted The Graph subgraph. Retained only for the transitional
+ * `discovery.mode: 'http-subgraph'` path until jinn-mono-280n.6 removes it.
+ * Testnet daemons now default to `discovery.mode: 'http'` against
+ * DEFAULT_TESTNET_DISCOVERY_URL, not this.
+ */
 export const DEFAULT_TESTNET_SUBGRAPH_URL =
   'https://api.studio.thegraph.com/query/1749489/jinn-testnet/capture-live-20260508183750';
 
@@ -873,13 +889,25 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
 
   const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
-  if (resolvedNetwork === 'testnet' && merged.subgraphUrl === undefined) {
-    merged.subgraphUrl = DEFAULT_TESTNET_SUBGRAPH_URL;
+
+  // Testnet default: point discovery at the privately-operated Ponder indexer
+  // (jinn-mono-280n.4), unless the operator has set their own `discovery` block
+  // or a legacy `subgraphUrl`. The on-chain RPC floor stays as the fallback.
+  const explicitDiscoveryMode = (typeof merged['discovery'] === 'object' && merged['discovery'] !== null
+    && typeof (merged['discovery'] as { mode?: unknown }).mode === 'string');
+  const explicitSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;
+  if (resolvedNetwork === 'testnet' && !explicitDiscoveryMode && !explicitSubgraphUrl) {
+    merged['discovery'] = {
+      ...(typeof merged['discovery'] === 'object' && merged['discovery'] !== null ? merged['discovery'] as object : {}),
+      mode: 'http',
+      url: DEFAULT_TESTNET_DISCOVERY_URL,
+      fallbackToOnchain: true,
+    };
   }
 
   // Legacy `subgraphUrl` → `discovery` normalization.
-  // When `subgraphUrl` is set but `discovery` has no explicit mode, map it
-  // to http-subgraph with a deprecation warning.
+  // When `subgraphUrl` is set (explicitly, by an operator) but `discovery` has
+  // no explicit mode, map it to http-subgraph with a deprecation warning.
   //
   // TODO(280n.6): remove this block when subgraphUrl is retired.
   const hasSubgraphUrl = typeof merged.subgraphUrl === 'string' && (merged.subgraphUrl as string).trim().length > 0;

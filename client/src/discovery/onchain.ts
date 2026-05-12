@@ -47,7 +47,11 @@ import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecycle
 
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 5;
-const DEFAULT_CHUNK_BLOCKS = 9_999n;
+// 1999-block chunks: the public Base / Base Sepolia RPCs (the default fallback
+// `rpcUrl`) cap `eth_getLogs` at a 2000-block range. Daemons configured with a
+// higher-limit RPC can override via `chunkBlocks`, but the default must work
+// against the bare public endpoint since this is the always-live fallback floor.
+const DEFAULT_CHUNK_BLOCKS = 1_999n;
 
 /** Default JinnRouter addresses by chain ID. */
 const DEFAULT_ROUTER_BY_CHAIN_ID: Record<number, Address> = {

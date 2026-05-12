@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_TESTNET_SUBGRAPH_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
+import { DEFAULT_TESTNET_SUBGRAPH_URL, DEFAULT_TESTNET_DISCOVERY_URL, loadConfig, buildConfigProvenance } from '../src/config.js';
 
 describe('loadConfig RPC override handling', () => {
   const dirs: string[] = [];
@@ -169,24 +169,33 @@ describe('loadConfig RPC override handling', () => {
     expect(config.rpcUrl).toBe('https://sepolia.base.org');
   });
 
-  it('defaults testnet to the public task subgraph URL', async () => {
+  it('defaults testnet discovery to the privately-operated Ponder indexer (http mode)', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
     delete process.env['JINN_NETWORK'];
 
     const config = loadConfig(configPath);
 
-    expect(config.subgraphUrl).toBe(DEFAULT_TESTNET_SUBGRAPH_URL);
+    expect(config.discovery?.mode).toBe('http');
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL);
+    expect(config.discovery?.fallbackToOnchain).toBe(true);
+    // No legacy subgraphUrl default any more — the Railway indexer is the default.
+    expect(config.subgraphUrl).toBeUndefined();
   });
 
-  it('does not default the testnet task subgraph on mainnet', async () => {
+  it('does not set a discovery or subgraph default on mainnet', async () => {
     const configPath = await writeConfigFile({ network: 'mainnet' });
     delete process.env['JINN_SUBGRAPH_URL'];
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
     delete process.env['JINN_NETWORK'];
 
     const config = loadConfig(configPath);
 
     expect(config.subgraphUrl).toBeUndefined();
+    expect(config.discovery?.mode).toBeUndefined();
   });
 
   it('lets JINN_SUBGRAPH_URL override the public task subgraph default', async () => {
