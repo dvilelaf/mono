@@ -50,6 +50,7 @@
  */
 
 import { encodeAbiParameters, type Hex, type PublicClient, type WalletClient } from 'viem';
+import type { EnvelopeRef } from '../corpus/types.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
 import {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
@@ -567,7 +568,7 @@ export async function resolveAgentIdForManifest(
     return null;
   }
 
-  let refs: import('../corpus/types.js').EnvelopeRef[];
+  let refs: EnvelopeRef[];
   try {
     refs = await discoveryApi.queryEnvelopes({ manifestHash, limit: 1 });
   } catch (err) {

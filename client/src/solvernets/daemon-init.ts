@@ -58,14 +58,6 @@ import {
   type SetMetadataPublishResult,
   type SubgraphClient,
 } from './registry-client-erc8004.js';
-
-// Noop SubgraphClient used by launch/lifecycle state-machine recovery paths
-// (mempool-drop detection) until a real subgraph extension is wired (Task 25).
-// Not exported — callers should not depend on this implementation.
-const NOOP_SUBGRAPH_CLIENT: SubgraphClient = {
-  async fetchSetMetadataEvents() { return []; },
-  async fetchSetMetadataEventsForCid() { return []; },
-};
 import type {
   SetMetadataEvent,
   SetMetadataLifecyclePayload,
@@ -86,6 +78,14 @@ import type { LaunchedSolverNetRecord, SolverNetStore } from './store.js';
 // Import viem types lazily-named — keep the runtime import scoped so unit
 // tests don't pay viem startup cost when they pass mocked publishers.
 import type { PublicClient, WalletClient } from 'viem';
+
+// Noop SubgraphClient used by launch/lifecycle state-machine recovery paths
+// (mempool-drop detection) until a real subgraph extension is wired (Task 25).
+// Not exported — callers should not depend on this implementation.
+const NOOP_SUBGRAPH_CLIENT: SubgraphClient = {
+  async fetchSetMetadataEvents() { return []; },
+  async fetchSetMetadataEventsForCid() { return []; },
+};
 
 // ── Catalog refresh defaults ────────────────────────────────────────────────
 
