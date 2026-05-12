@@ -98,42 +98,18 @@ query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!) {
 }
 `;
 
-const LIST_SOLVER_NETS_QUERY = `
-query ListSolverNets(
-  $statusFilter: [String!],
-  $launcherAgentId: String
-) {
-  solverNetManifests(
-    where: {
-      status_in: $statusFilter,
-      launcherAgentId: $launcherAgentId
-    },
-    limit: 200,
-    orderBy: "anchorBlock",
-    orderDirection: "desc"
-  ) {
-    items {
-      id
-      launcherAgentId
-      status
-      statusUpdatedAt
-      manifestHash
-      anchorBlock
-      chainId
-    }
-  }
-}
-`;
+// NOTE on the `where` filter pattern: Ponder's GraphQL treats a `null` value
+// for a `where` field as "field IS NULL" (not "skip this filter"), and a `null`
+// value for a `_in` operator as a SQL error. So every optional filter must be
+// constructed dynamically in JS — include the key only when it has a value —
+// and passed as a single typed `$where` variable. Passing individual nullable
+// scalar variables into a literal `where: { ... }` block is a bug.
 
-const LIST_SOLVER_NETS_NO_AGENT_QUERY = `
-query ListSolverNetsNoAgent(
-  $statusFilter: [String!]
-) {
+const LIST_SOLVER_NETS_QUERY = `
+query ListSolverNets($where: solverNetManifestFilter, $limit: Int!) {
   solverNetManifests(
-    where: {
-      status_in: $statusFilter
-    },
-    limit: 200,
+    where: $where,
+    limit: $limit,
     orderBy: "anchorBlock",
     orderDirection: "desc"
   ) {
@@ -161,16 +137,9 @@ query GetLifecycleStatus($manifestCid: String!) {
 `;
 
 const QUERY_ENVELOPES_QUERY = `
-query QueryEnvelopes(
-  $kind: String,
-  $evidenceTier: String,
-  $limit: Int!
-) {
+query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
   envelopes(
-    where: {
-      kind: $kind,
-      evidenceTier: $evidenceTier
-    },
+    where: $where,
     limit: $limit,
     orderBy: "publishedAtBlock",
     orderDirection: "desc"
@@ -466,25 +435,19 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     launcherAgentId?: string;
     status?: Array<'launched' | 'paused' | 'retired'>;
   }): Promise<SolverNetManifestSummary[]> {
-    const statusFilter = args?.status ?? ['launched', 'paused', 'retired'];
-    const launcherAgentId = args?.launcherAgentId;
+    // Build the where object dynamically — only include filters that are set.
+    // A null `status_in` is a SQL error in Ponder; a null `launcherAgentId`
+    // means "IS NULL". Omit, don't nullify.
+    const where: Record<string, unknown> = {};
+    if (args?.status && args.status.length > 0) where['status_in'] = args.status;
+    if (args?.launcherAgentId) where['launcherAgentId'] = args.launcherAgentId;
 
-    let data: SolverNetPage;
-    if (launcherAgentId) {
-      data = await postGql<SolverNetPage>(
-        gqlUrl,
-        fetchImpl,
-        LIST_SOLVER_NETS_QUERY,
-        { statusFilter, launcherAgentId },
-      );
-    } else {
-      data = await postGql<SolverNetPage>(
-        gqlUrl,
-        fetchImpl,
-        LIST_SOLVER_NETS_NO_AGENT_QUERY,
-        { statusFilter },
-      );
-    }
+    const data = await postGql<SolverNetPage>(
+      gqlUrl,
+      fetchImpl,
+      LIST_SOLVER_NETS_QUERY,
+      { where, limit: 200 },
+    );
 
     return (data.solverNetManifests?.items ?? []).map((row): SolverNetManifestSummary => ({
       manifestCid: row.id,
@@ -535,24 +498,21 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   async function queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]> {
     const limit = Math.min(500, Math.max(1, query.limit ?? 50));
 
-    // Map CorpusQuery fields to GraphQL filter variables.
-    // kind is not directly in CorpusQuery; we query all envelope kinds.
-    // evidenceTier is a direct filter.
-    // query.solverType is intentionally ignored: solverType lives in the IPFS
-    // manifest body, not in the on-chain envelope payload, so the indexer has
-    // no column for it. Callers must filter by solverType client-side after
-    // fetching the IPFS manifests. See packages/indexer/README.md §Known limitations.
-    const variables: Record<string, unknown> = {
-      kind: null,        // null = no filter on kind in the current schema
-      evidenceTier: query.evidenceTier ?? null,
-      limit,
-    };
+    // Build the where object dynamically — only include filters that are set.
+    // A null filter value means "IS NULL" in Ponder, not "skip the filter".
+    // `kind` is not part of CorpusQuery (we return all envelope kinds).
+    // `query.solverType` is intentionally ignored: solverType lives in the IPFS
+    // manifest body, not in the on-chain envelope payload, so the indexer has no
+    // column for it. Callers must filter by solverType client-side after fetching
+    // the IPFS manifests. See packages/indexer/README.md §Known limitations.
+    const where: Record<string, unknown> = {};
+    if (query.evidenceTier) where['evidenceTier'] = query.evidenceTier;
 
     const data = await postGql<EnvelopePage>(
       gqlUrl,
       fetchImpl,
       QUERY_ENVELOPES_QUERY,
-      variables,
+      { where, limit },
     );
 
     const items = data.envelopes?.items ?? [];

@@ -378,8 +378,27 @@ describe('listLaunchedSolverNets', () => {
     await client.listLaunchedSolverNets({ launcherAgentId: '99' });
 
     expect(calls).toHaveLength(1);
-    const body = calls[0] as { variables: { launcherAgentId: string } };
-    expect(body.variables.launcherAgentId).toBe('99');
+    const body = calls[0] as { variables: { where: { launcherAgentId?: string; status_in?: string[] } } };
+    expect(body.variables.where.launcherAgentId).toBe('99');
+  });
+
+  it('omits status_in from where when no status filter given (avoids Ponder null-IN SQL error)', async () => {
+    const calls: unknown[] = [];
+    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse(init?.body as string));
+      return new Response(
+        JSON.stringify({ data: { solverNetManifests: { items: [] } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await client.listLaunchedSolverNets();
+
+    expect(calls).toHaveLength(1);
+    const body = calls[0] as { variables: { where: Record<string, unknown> } };
+    // No filters supplied → empty where object, not { status_in: null } or { launcherAgentId: null }.
+    expect(body.variables.where).toEqual({});
   });
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
@@ -504,9 +523,27 @@ describe('queryEnvelopes', () => {
     await client.queryEnvelopes({ evidenceTier: 'committed', limit: 20 });
 
     expect(calls).toHaveLength(1);
-    const body = calls[0] as { variables: { evidenceTier: string; limit: number } };
-    expect(body.variables.evidenceTier).toBe('committed');
+    const body = calls[0] as { variables: { where: { evidenceTier?: string }; limit: number } };
+    expect(body.variables.where.evidenceTier).toBe('committed');
     expect(body.variables.limit).toBe(20);
+  });
+
+  it('omits evidenceTier from where when not given (avoids Ponder IS-NULL filter)', async () => {
+    const calls: unknown[] = [];
+    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse(init?.body as string));
+      return new Response(
+        JSON.stringify({ data: { envelopes: { items: [] } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await client.queryEnvelopes({ limit: 10 });
+
+    expect(calls).toHaveLength(1);
+    const body = calls[0] as { variables: { where: Record<string, unknown> } };
+    expect(body.variables.where).toEqual({});
   });
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
