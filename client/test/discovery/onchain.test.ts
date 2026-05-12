@@ -565,6 +565,43 @@ describe('OnchainDiscoveryAPI — findClaimableTasks', () => {
     expect(result.length).toBeLessThanOrEqual(10);
   });
 
+  it('caps the canClaimTask fan-out at maxResults even when getLogs returns far more TaskCreated events', async () => {
+    // getLogs returns 50 TaskCreated rows in one chunk; maxResults = pageSize(2) * maxPages(2) = 4.
+    // Without the pre-fan-out trim, canClaimTask (simulateContract) would run 50 times.
+    const taskLogs = Array.from({ length: 50 }, (_, i) =>
+      buildTaskCreatedLog(
+        BigInt(i + 1),
+        MANIFEST_DIGEST,
+        `0x${String(i).padStart(64, '0')}` as Hex,
+        5,
+        BigInt(100 + i),
+      ),
+    );
+    const mockClient = buildMockClient([taskLogs, []]);
+    mockClient.simulateContract.mockResolvedValue({ result: undefined }); // canClaimTask passes
+
+    const api = createOnchainDiscoveryAPI({
+      chainId: CHAIN_ID,
+      routerAddress: ROUTER,
+      safeAddress: SAFE_ADDRESS,
+      mechAddress: MECH_ADDRESS,
+      taskDiscoveryFromBlock: 0,
+      publicClient: mockClient as never,
+    });
+
+    const result = await api.findClaimableTasks({
+      solverNetManifestCids: [MANIFEST_CID],
+      operatorAddress: OPERATOR_ADDRESS,
+      pageSize: 2,
+      maxPages: 2,
+    });
+
+    // simulateContract (canClaimTask) invoked at most maxResults (4) times.
+    expect(mockClient.simulateContract.mock.calls.length).toBeLessThanOrEqual(4);
+    // Returned candidate list is also capped.
+    expect(result.length).toBeLessThanOrEqual(4);
+  });
+
   it('throws DiscoveryUnavailableError on getBlockNumber RPC failure', async () => {
     const mockClient = {
       getBlockNumber: vi.fn(async () => { throw new Error('RPC connection refused'); }),

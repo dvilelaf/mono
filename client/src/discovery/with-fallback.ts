@@ -112,13 +112,22 @@ export function withFallback(
 
   let consecutiveFailures = 0;
   let degradedSince: number | null = null;
+  // True when the next primary call is a probe — the first attempt after the
+  // `retryAfterMs` degraded window elapsed. A probe that fails should re-degrade
+  // immediately rather than burn `unhealthyThreshold` more failed round-trips
+  // before re-entering degraded mode; this flag lets `recordPrimaryFailure`
+  // distinguish "probe failed" from "Nth consecutive failure from a fresh
+  // healthy state". It is only set after a degraded→retry cycle, so first-boot
+  // behaviour (degrade after N failures) is unchanged.
+  let nextCallIsProbe = false;
 
   function isPrimaryHealthy(): boolean {
     if (degradedSince === null) return true;
     if (Date.now() - degradedSince >= retryAfterMs) {
-      // Probe window has elapsed — re-engage primary.
+      // Probe window has elapsed — re-engage primary on a probe call.
       degradedSince = null;
       consecutiveFailures = 0;
+      nextCallIsProbe = true;
       return true;
     }
     return false;
@@ -126,11 +135,17 @@ export function withFallback(
 
   function recordPrimaryFailure(): void {
     consecutiveFailures += 1;
-    if (consecutiveFailures >= unhealthyThreshold && degradedSince === null) {
+    const wasProbe = nextCallIsProbe;
+    nextCallIsProbe = false;
+    if (degradedSince !== null) return;
+    // A failed probe (the call right after the retry window) means the primary
+    // is still broken — go straight back to degraded mode rather than waiting
+    // for `unhealthyThreshold` more failures.
+    if (wasProbe || consecutiveFailures >= unhealthyThreshold) {
       degradedSince = Date.now();
       console.warn(
-        `[discovery] primary DiscoveryAPI marked unhealthy after ${consecutiveFailures} consecutive failures. ` +
-        `Routing to floor implementation for ${retryAfterMs}ms.`,
+        `[discovery] primary DiscoveryAPI marked unhealthy after ${consecutiveFailures} consecutive failure(s)` +
+        `${wasProbe ? ' (failed probe)' : ''}. Routing to floor implementation for ${retryAfterMs}ms.`,
       );
     }
   }
@@ -138,6 +153,7 @@ export function withFallback(
   function recordPrimarySuccess(): void {
     consecutiveFailures = 0;
     degradedSince = null;
+    nextCallIsProbe = false;
   }
 
   /**

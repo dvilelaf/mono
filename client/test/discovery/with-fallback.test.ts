@@ -261,6 +261,38 @@ describe('withFallback — degraded mode', () => {
     expect(primary.findClaimableTasks).toHaveBeenCalledOnce();
   });
 
+  it('re-degrades immediately when the post-window probe fails with a network error', async () => {
+    vi.useFakeTimers();
+    const THRESHOLD = 3;
+    const RETRY_MS = 60_000;
+    const netErr = new DiscoveryUnavailableError('down');
+    // Primary fails on every call (probe included).
+    const primary = makeThrowingStub(netErr);
+    const floor = makeStub();
+    const api = makeWrapper(primary, floor, { unhealthyThreshold: THRESHOLD, retryAfterMs: RETRY_MS });
+
+    // Exhaust the threshold → degraded.
+    for (let i = 0; i < THRESHOLD; i++) {
+      await api.findClaimableTasks({ solverNetManifestCids: [], operatorAddress: OPERATOR_ADDRESS });
+    }
+
+    // Advance past the retry window so the next call is a probe.
+    vi.advanceTimersByTime(RETRY_MS + 1);
+    vi.clearAllMocks();
+
+    // Probe call — primary is attempted and fails with a network error.
+    await api.findClaimableTasks({ solverNetManifestCids: [], operatorAddress: OPERATOR_ADDRESS });
+    expect(primary.findClaimableTasks).toHaveBeenCalledOnce();
+    expect(floor.findClaimableTasks).toHaveBeenCalledOnce();
+
+    // Next call must route straight to the floor again — the failed probe
+    // re-degraded immediately, without needing `unhealthyThreshold` more failures.
+    vi.clearAllMocks();
+    await api.findClaimableTasks({ solverNetManifestCids: [], operatorAddress: OPERATOR_ADDRESS });
+    expect(primary.findClaimableTasks).not.toHaveBeenCalled();
+    expect(floor.findClaimableTasks).toHaveBeenCalledOnce();
+  });
+
   it('emits console.warn exactly once when entering degraded mode', async () => {
     vi.useFakeTimers();
     const THRESHOLD = 2;

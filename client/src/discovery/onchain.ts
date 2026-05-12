@@ -213,7 +213,11 @@ async function scanLogsInChunks<T>(
   const results: T[] = [];
 
   if (maxResults !== undefined) {
-    // Newest-first scan with early exit
+    // Newest-first scan with early exit. Each chunk is [start, end] inclusive,
+    // i.e. `chunkBlocks` blocks wide (one fewer than the oldest-first branch's
+    // `chunkBlocks + 1`); this is harmless — `end = start - 1n` on the next
+    // iteration means chunks neither overlap nor skip blocks at the boundary —
+    // and not worth complicating the index arithmetic to make symmetric.
     for (let end = toBlock; end >= fromBlock && results.length < maxResults; ) {
       const start = end > chunkBlocks && end - chunkBlocks + 1n > fromBlock
         ? end - chunkBlocks + 1n
@@ -224,7 +228,9 @@ async function scanLogsInChunks<T>(
       end = start - 1n;
     }
   } else {
-    // Oldest-first scan
+    // Oldest-first scan. Each chunk is [start, start + chunkBlocks] inclusive,
+    // and the next iteration starts at `start + chunkBlocks + 1n` — no overlap,
+    // no gap.
     for (let start = fromBlock; start <= toBlock; start += chunkBlocks + 1n) {
       const end = start + chunkBlocks > toBlock ? toBlock : start + chunkBlocks;
       const chunk = await getLogs(start, end);
@@ -407,13 +413,23 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
       return true;
     });
 
+    // Cap the candidate set BEFORE the canClaimTask fan-out: scanLogsInChunks
+    // accumulates whole getLogs chunks, so taskCreatedLogs can be far larger
+    // than maxResults. Without this trim, findClaimableTasks would run a
+    // simulateContract RPC (at concurrency CLAIM_CHECK_CONCURRENCY) on every
+    // scanned TaskCreated row before any cap applies. The scan ran newest-first
+    // (see scanLogsInChunks), so the head of `uniqueTasks` is the newest tasks —
+    // keep those. Note this differs from the subgraph's server-side window
+    // filter; here we approximate it with a client-side newest-first cap.
+    const cappedTasks = uniqueTasks.slice(0, maxResults);
+
     // Apply canClaimTask eligibility checks (safeAddress + mechAddress validated above)
-    const eligibleTasks: typeof uniqueTasks = [];
+    const eligibleTasks: typeof cappedTasks = [];
 
     const safeAddress = opts.safeAddress as Address;
     const mechAddress = opts.mechAddress as Address;
 
-    const checkTasks = uniqueTasks.map((task) => async () => {
+    const checkTasks = cappedTasks.map((task) => async () => {
       try {
         const result = await canClaimTask(
           client as PublicClient,
