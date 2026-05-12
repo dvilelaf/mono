@@ -188,9 +188,7 @@ export function LauncherLaunchedPage({
           }}
         >
           Failed to load manifest:{' '}
-          {manifestQuery.error instanceof Error
-            ? manifestQuery.error.message
-            : 'unknown error'}
+          {formatManifestLoadError(manifestQuery.error)}
         </p>
       )}
 
@@ -212,6 +210,14 @@ export function LauncherLaunchedPage({
       />
     </main>
   );
+}
+
+function formatManifestLoadError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown error');
+  if (/404|manifest_not_found|registry_unavailable/i.test(message)) {
+    return `Manifest unavailable from local cache or registry (${message})`;
+  }
+  return message;
 }
 
 function ErrorBanner({

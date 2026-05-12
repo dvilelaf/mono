@@ -1524,22 +1524,40 @@ function makeManifest(args: {
       id: 'prediction',
       version: 'v1',
       schemas: { task: {}, solution: {}, verdict: {} },
-      claimPolicyDefaults: {},
-      credentialRequirements: [],
-      evaluationFunction: { name: 'eq', inputs: [] },
-      aggregationFunction: { name: 'majority', inputs: [] },
+      claimPolicyDefaults: {
+        mode: 'parallel',
+        maxClaims: 10,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+      credentialRequirements: { creator: [], solver: [], evaluator: [] },
+      evaluationFunction: {
+        id: 'prediction.brier-loss.v1',
+        deterministic: true,
+        inputs: ['solution', 'resolution'],
+        output: 'verdict',
+        implementation: 'jinn:harness:prediction-v1-evaluator',
+      },
+      aggregationFunction: {
+        id: 'prediction.trailing-mean-brier-spread.v1',
+        deterministic: true,
+        inputs: ['verdict[]'],
+        output: 'score',
+        windowDays: 30,
+      },
     },
     solutionPriceWei: '1000000000000000',
     verdictPriceWei: '500000000000000',
     openRoles: ['solver', 'evaluator'],
+    ...(args.manifestCid ? { registry: { manifestCid: args.manifestCid } } : {}),
     createdAt: '2026-05-06T00:00:00.000Z',
     launchedAt: '2026-05-06T00:00:00.000Z',
     signature: {
-      scheme: 'eip191',
+      alg: 'eip-191',
       signer: '0x2222222222222222222222222222222222222222',
-      signature: `0x${'cc'.repeat(65)}`,
+      value: `0x${'cc'.repeat(65)}`,
     },
-  } as unknown as SolverNetManifestV1;
+  };
 }
 
 /**
@@ -1979,6 +1997,44 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('registry_unavailable');
+  });
+
+  it('returns an owned cached manifest without requiring the registry client', async () => {
+    const cid = 'bafyownedmanifestcache1234567890';
+    const manifest = makeManifest({
+      solverNetId: 'owned-local',
+      manifestCid: cid,
+    });
+    const manifestPath = await store.writeManifestCache(cid, manifest);
+    await store.writeRecord({
+      ...makeOwnedRecord({ solverNetId: 'owned-local', status: 'launched' }),
+      manifestCid: cid,
+      manifestPath,
+    });
+
+    const registry = makeMockRegistryGet({
+      getManifestError: new Error('registry should not be touched'),
+    });
+    const { app } = buildTestApp({ store, registry });
+
+    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      manifest: SolverNetManifestV1;
+      lifecycle: { status: string; sourceBlock: number };
+    };
+    expect(body.manifest.name).toBe('owned-local');
+    expect(body.manifest.solutionPriceWei).toBe('1000000000000000');
+    expect(body.lifecycle).toEqual({
+      status: 'launched',
+      statusUpdatedAt: '2026-05-06T00:00:00.000Z',
+      sourceBlock: 100,
+    });
+    expect(registry.getManifestCalls).toEqual([]);
   });
 
   it('happy path: returns the manifest + lifecycle status', async () => {

@@ -572,6 +572,39 @@ async function tryGetSummary(
   }
 }
 
+async function tryGetOwnedCachedManifest(
+  store: SolverNetStore,
+  manifestCid: string,
+): Promise<{
+  record: LaunchedSolverNetRecord;
+  manifest: SolverNetManifestV1;
+} | null> {
+  const records = await store.loadOwnedRecords();
+  for (const record of records) {
+    if (record.manifestCid !== manifestCid || !record.manifestPath) continue;
+    const manifest = await store.loadManifestCache(record.manifestPath);
+    if (!manifest) continue;
+    if (manifest.solverNetId !== record.solverNetId) continue;
+    return { record, manifest };
+  }
+  return null;
+}
+
+function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
+  status: 'launched' | 'paused' | 'retired';
+  statusUpdatedAt: string;
+  sourceBlock: number;
+} {
+  return {
+    status:
+      record.status === 'paused' || record.status === 'retired'
+        ? record.status
+        : 'launched',
+    statusUpdatedAt: record.statusUpdatedAt,
+    sourceBlock: record.registry.metadataBlockNumber ?? 0,
+  };
+}
+
 // ── Implementation ──────────────────────────────────────────────────────────
 
 export function registerSolverNetsEndpoints(
@@ -1427,23 +1460,53 @@ export function registerSolverNetsEndpoints(
   // (path-traversal, decimals, empty) so we never round-trip them to IPFS,
   // but the registry client does the canonical check.
   app.get('/v1/solvernets/registry/:cid', async (c) => {
+    const cid = c.req.param('cid');
+    if (!cid) {
+      return c.json(
+        {
+          error: 'invalid_cid',
+          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
+        },
+        400,
+      );
+    }
+
+    let ownedCached: Awaited<ReturnType<typeof tryGetOwnedCachedManifest>>;
+    try {
+      ownedCached = await tryGetOwnedCachedManifest(store, cid);
+    } catch (err) {
+      return c.json(
+        {
+          error: 'store_read_failed',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        500,
+      );
+    }
+    if (ownedCached) {
+      return c.json({
+        manifest: ownedCached.manifest,
+        lifecycle: localLifecycleForRecord(ownedCached.record),
+      });
+    }
+
     if (!deps.registry) {
       return c.json(
         {
           error: 'registry_unavailable',
-          message: 'registry client is not configured',
+          message:
+            'registry client is not configured and no owned cached manifest matched this cid',
         },
         503,
       );
     }
     const registry = deps.registry;
 
-    const cid = c.req.param('cid');
-    if (!cid || !CID_SHAPE_REGEX.test(cid)) {
+    if (!CID_SHAPE_REGEX.test(cid)) {
       return c.json(
         {
           error: 'invalid_cid',
-          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
+          message: `cid does not look like a CID: ${cid}`,
         },
         400,
       );
