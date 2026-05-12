@@ -38,7 +38,7 @@ import {
   type PoolTask,
 } from './_swe-rebench-v2-pool.js';
 
-const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
+export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
 const CONTRACT_ID = 'swe-rebench-v2';
 const CONTRACT_VERSION = 'v1';
@@ -101,6 +101,31 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
 
 function defaultStateDir(): string {
   return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'swe-rebench-v2');
+}
+
+/**
+ * Load the full historical SWE-rebench v2 pool from the HF datasets-server.
+ * Throws if the splits listing is empty or unreachable. Shared by the
+ * generator's pool refresh and the `validate-pool` CLI command.
+ */
+export async function loadSweRebenchV2Pool(): Promise<PoolTask[]> {
+  const splitsUrl = `https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(HF_DATASET)}`;
+  const response = await fetch(splitsUrl);
+  if (!response.ok) throw new Error(`HF splits fetch failed: ${response.status}`);
+  const json = (await response.json()) as { splits?: Array<{ split: string }> };
+  const months = listMonthlyPartitions((json.splits ?? []).map((s) => s.split));
+  if (months.length === 0) {
+    throw new Error('HF datasets-server returned no monthly partitions for the SWE-rebench v2 pool');
+  }
+  return buildHistoricalPool({
+    months,
+    fetchSplit: (split) => fetchHfSplit({ dataset: HF_DATASET, split, limit: 100 }),
+  });
+}
+
+/** A {@link ValidatedPoolStore} rooted at the swe-rebench-v2 generator's state dir. */
+export function getSweRebenchV2ValidatedPoolStore(stateDir?: string): ValidatedPoolStore {
+  return new ValidatedPoolStore({ stateDir: stateDir ?? defaultStateDir() });
 }
 
 function positiveInt(value: unknown, fallback: number): number {
@@ -262,20 +287,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
 
   async function refreshPool(): Promise<void> {
     try {
-      // Fetch available splits from the HF datasets-server
-      const splitsUrl = `https://datasets-server.huggingface.co/splits?dataset=${encodeURIComponent(HF_DATASET)}`;
-      const response = await fetch(splitsUrl);
-      if (!response.ok) throw new Error(`HF splits fetch failed: ${response.status}`);
-      const json = (await response.json()) as { splits?: Array<{ split: string }> };
-      const splitNames = (json.splits ?? []).map((s) => s.split);
-      const months = listMonthlyPartitions(splitNames);
-      if (months.length === 0) return;
-
-      pool = await buildHistoricalPool({
-        months,
-        fetchSplit: (split) =>
-          fetchHfSplit({ dataset: HF_DATASET, split, limit: 100 }),
-      });
+      pool = await loadSweRebenchV2Pool();
       poolLoadedAt = Date.now();
     } catch (err) {
       // Non-fatal: keep the existing pool if already loaded
