@@ -80,19 +80,29 @@ query Tasks(
  * support. This single query replaces the N per-task queries that were causing
  * an N+1 round-trip problem (at pageSize=100, that was 100 serial requests).
  *
- * Limit is set to 10000 (100 tasks × 100 attempts each) as a safe upper bound.
+ * Ponder caps plural-query `limit` at 1000, so this is paginated with the
+ * `after` cursor — the caller loops until `pageInfo.hasNextPage` is false.
  * Client-side grouping by taskId produces per-task counts.
  */
+const ATTEMPTS_PAGE_LIMIT = 1000;
+
 const ATTEMPTS_FOR_TASKS_QUERY = `
-query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!) {
+query AttemptsForTasks($taskIds: [String!]!, $chainId: Int!, $limit: Int!, $after: String) {
   attempts(
     where: { taskId_in: $taskIds, chainId: $chainId },
-    limit: 10000
+    limit: $limit,
+    after: $after,
+    orderBy: "attemptIndex",
+    orderDirection: "asc"
   ) {
     items {
       taskId
       operator
       attemptIndex
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
     }
   }
 }
@@ -188,7 +198,10 @@ interface TasksPage {
 }
 
 interface AttemptsPage {
-  attempts: { items: AttemptRow[] };
+  attempts: {
+    items: AttemptRow[];
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
 }
 
 interface SolverNetRow {
@@ -235,7 +248,23 @@ export interface HttpDiscoveryAPIOptions {
    * Pass a mock in tests to assert request shapes.
    */
   fetchImpl?: typeof fetch;
+  /**
+   * TTL (ms) for the cached `/ready` probe result. Defaults to
+   * READY_PROBE_TTL_MS — short enough that a sync catch-up is noticed quickly,
+   * long enough that the probe isn't issued on every single discovery call.
+   * Exposed mostly for tests.
+   */
+  readyProbeTtlMs?: number;
 }
+
+/**
+ * How long a `/ready` probe result is trusted before re-probing. Ponder's
+ * `/ready` flips to 200 once the indexer has caught up to realtime; before that
+ * GraphQL still serves 200 with stale/empty data, so the daemon must consult
+ * `/ready` rather than the GraphQL status code. 20s keeps the latency to notice
+ * a sync stall low without hammering the endpoint.
+ */
+const READY_PROBE_TTL_MS = 20_000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -305,10 +334,42 @@ async function postGql<T>(
  */
 export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): DiscoveryAPI {
   const gqlUrl = opts.url.endsWith('/graphql') ? opts.url : `${opts.url}/graphql`;
+  // Ponder's `/ready` lives at the host root, not under `/graphql`.
+  const readyUrl = `${opts.url.replace(/\/graphql\/?$/, '').replace(/\/$/, '')}/ready`;
+  const readyTtlMs = opts.readyProbeTtlMs ?? READY_PROBE_TTL_MS;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
   if (!fetchImpl) {
     throw new Error('No fetch implementation available; pass fetchImpl in options');
+  }
+
+  // ── /ready probe (memoized with a short TTL) ──────────────────────────────
+  // Ponder serves GraphQL with 200 + stale/empty data while still catching up;
+  // `/ready` returns non-200 until it is at realtime. The daemon's fallback
+  // chain only routes to the on-chain floor on a *thrown* error, so we turn an
+  // unready indexer into a DiscoveryUnavailableError rather than silently
+  // returning cold-sync emptiness. Memoized so it isn't probed on every call.
+  let readyCache: { at: number; ok: boolean; status: number } | null = null;
+
+  async function ensureReady(): Promise<void> {
+    const now = Date.now();
+    if (readyCache && now - readyCache.at < readyTtlMs) {
+      if (!readyCache.ok) {
+        throw new DiscoveryUnavailableError(`indexer not ready: ${readyCache.status}`);
+      }
+      return;
+    }
+    let res: Response;
+    try {
+      res = await fetchImpl(readyUrl, { method: 'GET' });
+    } catch (err) {
+      readyCache = { at: now, ok: false, status: 0 };
+      throw new DiscoveryUnavailableError(`indexer /ready probe failed: ${String(err)}`, err);
+    }
+    readyCache = { at: now, ok: res.ok, status: res.status };
+    if (!res.ok) {
+      throw new DiscoveryUnavailableError(`indexer not ready: ${res.status}`);
+    }
   }
 
   // ── findClaimableTasks ────────────────────────────────────────────────────
@@ -323,6 +384,8 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const { keccak256, toBytes } = await import('viem');
     const cids = Array.from(new Set(args.solverNetManifestCids.filter(Boolean)));
     if (cids.length === 0) return [];
+
+    await ensureReady();
 
     const pageSize = Math.min(200, Math.max(1, args.pageSize ?? 100));
     const maxPages = Math.max(1, args.maxPages ?? 5);
@@ -356,22 +419,33 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         const operatorAttemptCountByTaskId = new Map<string, number>();
 
         if (validRows.length > 0) {
-          // Batch-fetch all attempts for this page of tasks in a single round-trip.
-          // This replaces the previous N+1 pattern (one query per task) with one
-          // query per page of tasks. ATTEMPTS_FOR_TASKS_QUERY uses the `taskId_in`
-          // filter which Ponder 0.16.x supports on indexed text columns.
+          // Batch-fetch all attempts for this page of tasks. This replaces the
+          // previous N+1 pattern (one query per task) with one query per page,
+          // paginated with the `after` cursor because Ponder caps plural-query
+          // `limit` at 1000 (a larger literal `limit` is a GraphQL validation
+          // error). ATTEMPTS_FOR_TASKS_QUERY uses the `taskId_in` filter which
+          // Ponder 0.16.x supports on indexed text columns.
+          //
+          // A genuine failure here is NOT swallowed: postGql throws
+          // DiscoveryUnavailableError, which propagates so withFallback engages
+          // the on-chain floor. Silently zeroing the counts would make the
+          // indexer-side pre-filter a no-op while looking like it works.
           const taskIds = validRows.map((r) => r.id);
 
           // All rows in a page share the same chainId (single-chain query), so
           // take chainId from the first valid row.
           const pageChainId = validRows[0].chainId;
 
-          try {
-            const attData = await postGql<AttemptsPage>(
+          let after: string | null = null;
+          // Hard page cap: taskIds.length attempts of pages of 1000 is far more
+          // than any realistic claim window; the cap just bounds a pathological
+          // cursor loop.
+          for (let attemptsPage = 0; attemptsPage < taskIds.length + 1; attemptsPage++) {
+            const attData: AttemptsPage = await postGql<AttemptsPage>(
               gqlUrl,
               fetchImpl,
               ATTEMPTS_FOR_TASKS_QUERY,
-              { taskIds, chainId: pageChainId },
+              { taskIds, chainId: pageChainId, limit: ATTEMPTS_PAGE_LIMIT, after },
             );
             for (const a of attData.attempts?.items ?? []) {
               attemptCountByTaskId.set(a.taskId, (attemptCountByTaskId.get(a.taskId) ?? 0) + 1);
@@ -382,8 +456,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
                 );
               }
             }
-          } catch {
-            // Batch attempt fetch failed — treat all as zero; daemon will re-verify at claim time.
+            const pageInfo = attData.attempts?.pageInfo;
+            if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+            after = pageInfo.endCursor;
           }
         }
 
@@ -435,6 +510,8 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     launcherAgentId?: string;
     status?: Array<'launched' | 'paused' | 'retired'>;
   }): Promise<SolverNetManifestSummary[]> {
+    await ensureReady();
+
     // Build the where object dynamically — only include filters that are set.
     // A null `status_in` is a SQL error in Ponder; a null `launcherAgentId`
     // means "IS NULL". Omit, don't nullify.
@@ -473,6 +550,8 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // ── getLifecycleStatus ────────────────────────────────────────────────────
 
   async function getLifecycleStatus(manifestCid: string): Promise<SolverNetLifecycleStatus | undefined> {
+    await ensureReady();
+
     const data = await postGql<SolverNetSingle>(
       gqlUrl,
       fetchImpl,
@@ -496,6 +575,8 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // ── queryEnvelopes ────────────────────────────────────────────────────────
 
   async function queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]> {
+    await ensureReady();
+
     const limit = Math.min(500, Math.max(1, query.limit ?? 50));
 
     // Build the where object dynamically — only include filters that are set.

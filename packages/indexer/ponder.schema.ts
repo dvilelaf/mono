@@ -163,6 +163,12 @@ export const solverNetManifest = onchainTable(
     anchorBlock: t.bigint().notNull(),
     /** Transaction index of the winning MetadataSet event (for tiebreaking). */
     anchorTransactionIndex: t.integer().notNull(),
+    /**
+     * Log index of the winning MetadataSet event within its block. Final
+     * tiebreaker so two lifecycle updates in the same transaction (same block,
+     * same tx index) resolve deterministically — later log wins.
+     */
+    anchorLogIndex: t.integer().notNull(),
     /** Chain ID. */
     chainId: t.integer().notNull(),
   }),

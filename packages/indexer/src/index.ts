@@ -116,11 +116,17 @@ ponder.on('JinnRouter:TaskAttemptCreated', async ({ event, context }) => {
 // ── JinnRouter: SolutionDeliveryClaimed ──────────────────────────────────────
 // Used as a proxy for task finalization. JinnRouter V3 has no standalone
 // TaskFinalized event; SolutionDeliveryClaimed is the terminal success state.
-
+//
+// Existence guard: the matching TaskCreated may predate `startBlock` (or, in a
+// future multi-chain config, live on a chain this indexer doesn't cover), in
+// which case there is no `task` row. `db.update` on a missing row throws and
+// crashes the indexer — so look it up first and skip if absent. The daemon's
+// canClaimTask simulation is the correctness gate regardless.
 ponder.on('JinnRouter:SolutionDeliveryClaimed', async ({ event, context }) => {
-  await context.db
-    .update(task, { id: event.args.taskId.toString() })
-    .set({ finalized: true });
+  const id = event.args.taskId.toString();
+  const existing = await context.db.find(task, { id });
+  if (!existing) return;
+  await context.db.update(task, { id }).set({ finalized: true });
 });
 
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
@@ -146,6 +152,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
     let statusUpdatedAt = new Date().toISOString();
     let manifestHash: `0x${string}` = '0x';
     let transactionIndex = 0;
+    const logIndex = typeof event.log.logIndex === 'number' ? event.log.logIndex : 0;
 
     try {
       const payloadText = Buffer.from(event.args.metadataValue.slice(2), 'hex').toString('utf8');
@@ -170,8 +177,10 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
       return;
     }
 
-    // Most-recent-wins upsert: only update if the new event is from the same
-    // or a later block (ties broken by transactionIndex).
+    // Most-recent-wins upsert: only update if the new event is more recent than
+    // the stored one, ordered by (block, transactionIndex, logIndex). Including
+    // logIndex makes two lifecycle updates in the same transaction resolve
+    // deterministically (later log wins) instead of tiebreaking arbitrarily.
     await context.db
       .insert(solverNetManifest)
       .values({
@@ -182,6 +191,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
         manifestHash,
         anchorBlock: blockNumber,
         anchorTransactionIndex: transactionIndex,
+        anchorLogIndex: logIndex,
         chainId,
       })
       .onConflictDoUpdate((row) => {
@@ -192,10 +202,13 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
         // empty SET clause which is invalid SQL on Postgres/PGlite. The no-op path
         // must return all existing row fields so Drizzle generates a valid
         // `SET col = col, ...` statement — semantically a no-op, syntactically valid.
-        if (
+        const incomingIsNewer =
           blockNumber > row.anchorBlock ||
-          (blockNumber === row.anchorBlock && transactionIndex > row.anchorTransactionIndex)
-        ) {
+          (blockNumber === row.anchorBlock && transactionIndex > row.anchorTransactionIndex) ||
+          (blockNumber === row.anchorBlock &&
+            transactionIndex === row.anchorTransactionIndex &&
+            logIndex > row.anchorLogIndex);
+        if (incomingIsNewer) {
           return {
             launcherAgentId: agentId,
             status,
@@ -203,6 +216,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
             manifestHash,
             anchorBlock: blockNumber,
             anchorTransactionIndex: transactionIndex,
+            anchorLogIndex: logIndex,
             chainId,
           };
         }
@@ -215,6 +229,7 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
           manifestHash: row.manifestHash,
           anchorBlock: row.anchorBlock,
           anchorTransactionIndex: row.anchorTransactionIndex,
+          anchorLogIndex: row.anchorLogIndex,
           chainId: row.chainId,
         };
       });
@@ -249,12 +264,32 @@ ponder.on('IdentityRegistry:MetadataSet', async ({ event, context }) => {
         publishedAtBlock: blockNumber,
         logIndex,
       })
-      .onConflictDoUpdate({
-        // If the same agent re-publishes to the same key, update with new data.
-        manifestHash,
-        evidenceTier: payload.evidenceTier,
-        publishedAtBlock: blockNumber,
-        logIndex,
+      .onConflictDoUpdate((row) => {
+        // Most-recent-wins: if the same agent re-publishes to the same key,
+        // keep the later event ordered by (publishedAtBlock, logIndex). Two
+        // MetadataSet events in the same block must compare logIndex so they
+        // resolve deterministically (later log wins) rather than letting the
+        // unconditional update clobber a newer row with an older one.
+        //
+        // The no-op branch returns existing row fields so Drizzle emits a valid
+        // `SET col = col, ...` rather than an empty SET clause.
+        const incomingIsNewer =
+          blockNumber > row.publishedAtBlock ||
+          (blockNumber === row.publishedAtBlock && logIndex >= row.logIndex);
+        if (incomingIsNewer) {
+          return {
+            manifestHash,
+            evidenceTier: payload.evidenceTier,
+            publishedAtBlock: blockNumber,
+            logIndex,
+          };
+        }
+        return {
+          manifestHash: row.manifestHash,
+          evidenceTier: row.evidenceTier,
+          publishedAtBlock: row.publishedAtBlock,
+          logIndex: row.logIndex,
+        };
       });
     return;
   }

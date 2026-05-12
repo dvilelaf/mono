@@ -17,9 +17,10 @@ ENV JINN_INDEXER_COMMIT=$JINN_INDEXER_COMMIT
 
 WORKDIR /app
 
-# Copy dependency manifests first for layer caching.
-COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn ./.yarn
+# Copy dependency manifests first for layer caching. The Yarn version is pinned
+# by the `packageManager` field in package.json, so `corepack enable` resolves
+# it without a vendored `.yarn/` cache or `.yarnrc.yml`.
+COPY package.json yarn.lock ./
 RUN corepack enable && yarn install --immutable
 
 # Copy source.
@@ -41,8 +42,7 @@ WORKDIR /app
 
 # Copy built tree from build stage.
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/.yarn ./.yarn
-COPY --from=build /app/package.json /app/.yarnrc.yml /app/yarn.lock ./
+COPY --from=build /app/package.json /app/yarn.lock ./
 COPY --from=build /app/ponder.config.ts /app/ponder.schema.ts /app/tsconfig.json ./
 COPY --from=build /app/ponder-env.d.ts ./
 COPY --from=build /app/abis ./abis

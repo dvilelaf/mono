@@ -22,13 +22,23 @@ import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/** True for the host-root `/ready` readiness probe HttpDiscoveryAPI issues. */
+function isReadyProbe(url: string): boolean {
+  return url.endsWith('/ready');
+}
+
 /**
- * Build a mock fetchImpl that returns the given JSON body and HTTP status.
- * Captures request details for assertion.
+ * Build a mock fetchImpl that returns the given JSON body and HTTP status for
+ * GraphQL POSTs, and a 200 for the `/ready` readiness probe (so the GraphQL
+ * path under test is reached). Captures GraphQL request details for assertion;
+ * `/ready` probes are not recorded.
  */
 function mockFetch(body: unknown, status = 200) {
   const calls: { url: string; body: unknown }[] = [];
   const impl = vi.fn(async (url: string, init?: RequestInit) => {
+    if (isReadyProbe(url)) {
+      return new Response(null, { status: 200 });
+    }
     calls.push({ url, body: JSON.parse(init?.body as string) });
     return new Response(JSON.stringify(body), {
       status,
@@ -36,6 +46,26 @@ function mockFetch(body: unknown, status = 200) {
     });
   });
   return { impl, calls };
+}
+
+/**
+ * Build a mock fetchImpl that returns a non-200 for the `/ready` probe — the
+ * indexer is up but still cold-syncing. Every DiscoveryAPI method should turn
+ * this into a DiscoveryUnavailableError before issuing any GraphQL query.
+ */
+function notReadyFetch(status = 503) {
+  const graphqlCalls: string[] = [];
+  const impl = vi.fn(async (url: string, _init?: RequestInit) => {
+    if (isReadyProbe(url)) {
+      return new Response(null, { status });
+    }
+    graphqlCalls.push(url);
+    return new Response(JSON.stringify({ data: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  return { impl, graphqlCalls };
 }
 
 /**
@@ -100,7 +130,8 @@ describe('findClaimableTasks', () => {
     };
 
     const callCount = { n: 0 };
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       callCount.n++;
       const body = JSON.parse(init?.body as string) as { query: string };
       // Discriminate by query name: 'query Tasks(' is the tasks page query;
@@ -124,13 +155,14 @@ describe('findClaimableTasks', () => {
       operatorAddress: '0x2222222222222222222222222222222222222222',
     });
 
-    // Should have called fetch at least twice (tasks + attempts).
+    // Should have called fetch at least twice (tasks + attempts), not counting
+    // the /ready probe.
     expect(callCount.n).toBeGreaterThanOrEqual(2);
 
-    // First call should be to /graphql.
-    const firstCall = impl.mock.calls[0] as [string, RequestInit];
-    expect(firstCall[0]).toBe(`${BASE_URL}/graphql`);
-    expect(firstCall[1].method).toBe('POST');
+    // GraphQL calls go to /graphql via POST. (calls[0] is the /ready GET.)
+    const gqlCall = impl.mock.calls.find(([u]) => (u as string).endsWith('/graphql')) as [string, RequestInit];
+    expect(gqlCall[0]).toBe(`${BASE_URL}/graphql`);
+    expect(gqlCall[1].method).toBe('POST');
 
     // Result should have one candidate.
     expect(result).toHaveLength(1);
@@ -169,7 +201,8 @@ describe('findClaimableTasks', () => {
       },
     };
 
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       const body = JSON.parse(init?.body as string) as { query: string };
       if (body.query.includes('query Tasks(')) {
         return new Response(JSON.stringify(tasksResponse), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -215,7 +248,8 @@ describe('findClaimableTasks', () => {
     };
 
     const fetchCalls: { query: string; variables: unknown }[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       const body = JSON.parse(init?.body as string) as { query: string; variables: unknown };
       fetchCalls.push({ query: body.query, variables: body.variables });
       if (body.query.includes('query Tasks(')) {
@@ -245,6 +279,108 @@ describe('findClaimableTasks', () => {
     const task11 = result.find((r) => r.taskId === '11');
     expect(task10?.attemptCount).toBe(1);
     expect(task11?.attemptCount).toBe(1);
+  });
+
+  it('paginates the batched attempts query across multiple pages (limit ≤ 1000)', async () => {
+    // Ponder caps plural-query `limit` at 1000, so the attempts fetch must
+    // paginate with the `after` cursor rather than asking for one giant page.
+    const tasksResponse = {
+      data: {
+        tasks: {
+          items: [
+            { id: '20', taskCidDigest: '0x' + 'ab'.repeat(32), manifestDigest: '0x' + 'cd'.repeat(32), maxClaims: 0, chainId: 84532 },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    };
+    // Two pages of attempts for the same task; counts must sum across pages.
+    const attemptsPage1 = {
+      data: {
+        attempts: {
+          items: [
+            { taskId: '20', operator: '0x1111111111111111111111111111111111111111', attemptIndex: 0 },
+            { taskId: '20', operator: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', attemptIndex: 1 },
+          ],
+          pageInfo: { hasNextPage: true, endCursor: 'CURSOR_1' },
+        },
+      },
+    };
+    const attemptsPage2 = {
+      data: {
+        attempts: {
+          items: [
+            { taskId: '20', operator: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', attemptIndex: 2 },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+
+    const attemptsQueries: Array<{ limit: number; after: string | null }> = [];
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as { query: string; variables: { limit?: number; after?: string | null } };
+      if (body.query.includes('query Tasks(')) {
+        return new Response(JSON.stringify(tasksResponse), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      // ATTEMPTS_FOR_TASKS_QUERY
+      attemptsQueries.push({ limit: body.variables.limit ?? 0, after: body.variables.after ?? null });
+      const page = body.variables.after === 'CURSOR_1' ? attemptsPage2 : attemptsPage1;
+      return new Response(JSON.stringify(page), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    const result = await client.findClaimableTasks({
+      solverNetManifestCids: ['bafyreiabc123'],
+      operatorAddress: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+
+    // Two attempts-query round-trips: first with no cursor, second with the page-1 endCursor.
+    expect(attemptsQueries).toHaveLength(2);
+    expect(attemptsQueries[0]).toEqual({ limit: 1000, after: null });
+    expect(attemptsQueries[1]).toEqual({ limit: 1000, after: 'CURSOR_1' });
+
+    // Counts must include attempts from both pages.
+    expect(result).toHaveLength(1);
+    expect(result[0].taskId).toBe('20');
+    expect(result[0].attemptCount).toBe(3);
+    expect(result[0].operatorAttemptCount).toBe(2);
+  });
+
+  it('propagates a DiscoveryUnavailableError from the attempts query (not swallowed)', async () => {
+    // A genuine failure in the batched attempts fetch must surface so
+    // withFallback can engage the on-chain floor — not be swallowed into
+    // wrong-but-plausible zero counts.
+    const tasksResponse = {
+      data: {
+        tasks: {
+          items: [
+            { id: '30', taskCidDigest: '0x' + 'ab'.repeat(32), manifestDigest: '0x' + 'cd'.repeat(32), chainId: 84532 },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    };
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      const body = JSON.parse(init?.body as string) as { query: string };
+      if (body.query.includes('query Tasks(')) {
+        return new Response(JSON.stringify(tasksResponse), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      // Attempts query errors out.
+      return new Response(JSON.stringify({ errors: [{ message: 'limit exceeds maximum' }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await expect(
+      client.findClaimableTasks({
+        solverNetManifestCids: ['bafyreiabc123'],
+        operatorAddress: '0x1234567890123456789012345678901234567890',
+      }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
   });
 
   it('throws DiscoveryUnavailableError on GraphQL errors', async () => {
@@ -366,7 +502,8 @@ describe('listLaunchedSolverNets', () => {
 
   it('filters by launcherAgentId when provided', async () => {
     const calls: unknown[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       calls.push(JSON.parse(init?.body as string));
       return new Response(
         JSON.stringify({ data: { solverNetManifests: { items: [] } } }),
@@ -384,7 +521,8 @@ describe('listLaunchedSolverNets', () => {
 
   it('omits status_in from where when no status filter given (avoids Ponder null-IN SQL error)', async () => {
     const calls: unknown[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       calls.push(JSON.parse(init?.body as string));
       return new Response(
         JSON.stringify({ data: { solverNetManifests: { items: [] } } }),
@@ -448,7 +586,8 @@ describe('getLifecycleStatus', () => {
 
   it('passes manifestCid as variable in GraphQL query', async () => {
     const calls: unknown[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       calls.push(JSON.parse(init?.body as string));
       return new Response(
         JSON.stringify({ data: { solverNetManifest: null } }),
@@ -511,7 +650,8 @@ describe('queryEnvelopes', () => {
 
   it('passes evidenceTier filter in variables', async () => {
     const calls: unknown[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       calls.push(JSON.parse(init?.body as string));
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
@@ -530,7 +670,8 @@ describe('queryEnvelopes', () => {
 
   it('omits evidenceTier from where when not given (avoids Ponder IS-NULL filter)', async () => {
     const calls: unknown[] = [];
-    const impl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const impl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
       calls.push(JSON.parse(init?.body as string));
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
@@ -571,9 +712,14 @@ describe('queryEnvelopes', () => {
 
 describe('URL normalization', () => {
   it('appends /graphql to base URL that does not end with it', async () => {
-    const calls: string[] = [];
+    const gqlCalls: string[] = [];
+    const readyCalls: string[] = [];
     const impl = vi.fn(async (url: string, _init?: RequestInit) => {
-      calls.push(url);
+      if (isReadyProbe(url)) {
+        readyCalls.push(url);
+        return new Response(null, { status: 200 });
+      }
+      gqlCalls.push(url);
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -582,13 +728,20 @@ describe('URL normalization', () => {
 
     const client = createHttpDiscoveryAPI({ url: 'http://my-indexer.example', fetchImpl: impl as unknown as typeof fetch });
     await client.queryEnvelopes({});
-    expect(calls[0]).toBe('http://my-indexer.example/graphql');
+    expect(gqlCalls[0]).toBe('http://my-indexer.example/graphql');
+    // /ready hangs off the host root, not under /graphql.
+    expect(readyCalls[0]).toBe('http://my-indexer.example/ready');
   });
 
   it('does not double-append /graphql when URL already ends with it', async () => {
-    const calls: string[] = [];
+    const gqlCalls: string[] = [];
+    const readyCalls: string[] = [];
     const impl = vi.fn(async (url: string, _init?: RequestInit) => {
-      calls.push(url);
+      if (isReadyProbe(url)) {
+        readyCalls.push(url);
+        return new Response(null, { status: 200 });
+      }
+      gqlCalls.push(url);
       return new Response(
         JSON.stringify({ data: { envelopes: { items: [] } } }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -597,6 +750,80 @@ describe('URL normalization', () => {
 
     const client = createHttpDiscoveryAPI({ url: 'http://my-indexer.example/graphql', fetchImpl: impl as unknown as typeof fetch });
     await client.queryEnvelopes({});
-    expect(calls[0]).toBe('http://my-indexer.example/graphql');
+    expect(gqlCalls[0]).toBe('http://my-indexer.example/graphql');
+    // The trailing /graphql is stripped to find the host root for /ready.
+    expect(readyCalls[0]).toBe('http://my-indexer.example/ready');
+  });
+});
+
+// ── /ready readiness probe ────────────────────────────────────────────────────
+
+describe('/ready readiness probe', () => {
+  it('throws DiscoveryUnavailableError from every method when /ready is non-200', async () => {
+    const { impl, graphqlCalls } = notReadyFetch(503);
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+
+    await expect(
+      client.findClaimableTasks({
+        solverNetManifestCids: ['bafyreiabc123'],
+        operatorAddress: '0x1234567890123456789012345678901234567890',
+      }),
+    ).rejects.toThrow(DiscoveryUnavailableError);
+    await expect(client.listLaunchedSolverNets()).rejects.toThrow(DiscoveryUnavailableError);
+    await expect(client.getLifecycleStatus('bafyreifoo')).rejects.toThrow(DiscoveryUnavailableError);
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+
+    // None of the methods should have issued a GraphQL query — they bailed at
+    // the readiness gate.
+    expect(graphqlCalls).toHaveLength(0);
+  });
+
+  it('lets the GraphQL query through once /ready returns 200', async () => {
+    const { impl } = mockFetch({ data: { envelopes: { items: [] } } });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await expect(client.queryEnvelopes({})).resolves.toEqual([]);
+  });
+
+  it('memoizes the /ready result within the TTL (one probe for multiple calls)', async () => {
+    let readyProbes = 0;
+    const impl = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (isReadyProbe(url)) {
+        readyProbes++;
+        return new Response(null, { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { envelopes: { items: [] } } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      readyProbeTtlMs: 60_000,
+    });
+    await client.queryEnvelopes({});
+    await client.queryEnvelopes({});
+    await client.queryEnvelopes({});
+    expect(readyProbes).toBe(1);
+  });
+
+  it('re-probes /ready after the TTL elapses', async () => {
+    let readyProbes = 0;
+    const impl = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (isReadyProbe(url)) {
+        readyProbes++;
+        return new Response(null, { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { envelopes: { items: [] } } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      readyProbeTtlMs: 0, // expire immediately
+    });
+    await client.queryEnvelopes({});
+    await client.queryEnvelopes({});
+    expect(readyProbes).toBe(2);
   });
 });
