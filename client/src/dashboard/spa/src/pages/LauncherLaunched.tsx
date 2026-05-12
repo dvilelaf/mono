@@ -13,6 +13,10 @@ import { PauseRetireDialog } from './launcher-launched/PauseRetireDialog.js';
 import { SpendPanel } from './launcher-launched/SpendPanel.js';
 import { StatusHeader } from './launcher-launched/StatusHeader.js';
 import { TasksPanel } from './launcher-launched/TasksPanel.js';
+import {
+  TEMPLATES_BY_KEY,
+  type CreateWizardTemplate,
+} from './launcher-create/templates.js';
 
 /**
  * Post-launch dashboard for `/launcher/launched/:solverNetId`.
@@ -147,6 +151,7 @@ export function LauncherLaunchedPage({
 
   const record = recordQuery.data;
   const manifest = manifestQuery.data?.manifest;
+  const template = resolveLaunchedTemplate(record, manifest);
   const solverNetName = manifest?.name ?? record.summary?.name ?? record.solverNetId;
 
   return (
@@ -168,6 +173,7 @@ export function LauncherLaunchedPage({
       <GeneratorPanel
         record={record}
         manifest={manifest}
+        template={template}
         onSave={async (patch) => {
           await generatorMutation.mutateAsync(patch);
         }}
@@ -218,6 +224,19 @@ function formatManifestLoadError(error: unknown): string {
     return `Manifest unavailable from local cache or registry (${message})`;
   }
   return message;
+}
+
+function resolveLaunchedTemplate(
+  record: LaunchedSolverNetRecord,
+  manifest: RegistryManifestResponse['manifest'] | undefined,
+): CreateWizardTemplate | undefined {
+  const contract = manifest?.contract ?? (
+    record.summary
+      ? { id: record.summary.contractId, version: record.summary.contractVersion }
+      : undefined
+  );
+  if (!contract) return undefined;
+  return TEMPLATES_BY_KEY[`${contract.id}.${contract.version}`];
 }
 
 function ErrorBanner({

@@ -395,6 +395,16 @@ function parseGeneratorConfigPatchForRecord(
   return PredictionV1GeneratorConfigPatchSchema.safeParse(raw);
 }
 
+function zodIssuesForResponse(error: z.ZodError): Array<{
+  path: string;
+  message: string;
+}> {
+  return error.issues.map((issue) => ({
+    path: issue.path.join('.') || '<body>',
+    message: issue.message,
+  }));
+}
+
 // ── Launch helpers ──────────────────────────────────────────────────────────
 
 interface DraftCompletenessResult {
@@ -1244,12 +1254,13 @@ export function registerSolverNetsEndpoints(
 
     const parsed = parseGeneratorConfigPatchForRecord(record, raw);
     if (!parsed.success) {
+      const issues = zodIssuesForResponse(parsed.error);
       return c.json(
         {
           error: 'invalid_body',
-          message: parsed.error.issues
-            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
-            .join('; '),
+          kind: 'schema_validation_failed',
+          issues,
+          message: issues.map((i) => `${i.path}: ${i.message}`).join('; '),
         },
         400,
       );
@@ -1263,6 +1274,13 @@ export function registerSolverNetsEndpoints(
       return c.json(
         {
           error: 'invalid_body',
+          kind: 'schema_validation_failed',
+          issues: [
+            {
+              path: 'claimPolicy.maxClaimsPerOperator',
+              message: effectiveConfigError,
+            },
+          ],
           message: effectiveConfigError,
         },
         400,

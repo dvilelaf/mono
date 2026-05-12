@@ -1243,6 +1243,42 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(body.message).toMatch(/maxClaimsPerOperator/);
   });
 
+  it('rejects prediction-shaped patches for swe-rebench-v2 records with schema issues', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ cadenceMs: 60_000, maxOpenRounds: 3 }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      kind?: string;
+      issues?: Array<{ message: string }>;
+    };
+    expect(body.kind).toBe('schema_validation_failed');
+    expect(body.issues?.some((issue) => issue.message.includes('cadenceMs'))).toBe(true);
+  });
+
   it('rejects unknown record id with 404', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
