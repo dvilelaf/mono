@@ -1312,7 +1312,7 @@ export class TaskEngine {
       // with a wrong shape — validatePayload will catch schema mismatches.
       //
       // verificationOfRestoration: stubbed — Plan D will connect the real SDK.
-      // restorationEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
+      // solutionEnvelope.sha256: placeholder — Plan D wires real sha256 derivation.
       const verdictPayload = implOutput?.verdictPayload;
       if (!verdictPayload) {
         throw new Error(

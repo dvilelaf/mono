@@ -1899,7 +1899,7 @@ export class Store {
         envelopeSha256: p.envelopeSha256,
         signatureHash: p.signatureHash,
         solverType: p.solverType,
-        role: p.role,
+        role: normalizeEnvelopeRole(p.role),
         taskCid: p.taskCid,
         taskId: p.taskId,
         requestId: p.requestId,
