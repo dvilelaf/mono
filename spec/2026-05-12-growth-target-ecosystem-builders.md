@@ -64,6 +64,16 @@ need light touches if the daily-loop skill chain shifts; the audit in
 *Downstream skill audit* below identifies what shifts where and what
 sits unchanged.
 
+**Supporting research.** Per-ecosystem motivation profiles for the
+eleven ecosystems named in §3 (Hermes, OpenCode, Aider, OpenHands,
+Cline, ERC-8004, Continue.dev, Roo Code, Goose, SWE-agent, plus
+OpenClaw as the deceased-predecessor reference point) are in
+[`growth/docs/2026-05-12-ecosystem-builder-motivations.md`](../growth/docs/2026-05-12-ecosystem-builder-motivations.md).
+That doc carries the field evidence, the cross-ecosystem synthesis, and
+the four-cluster table (Distribution / Research / Substrate-capture /
+Sovereignty) that this spec's §3 rewrite implicitly relies on. Read it
+before reviewing the cluster definition below.
+
 ## What this proposal changes
 
 ### §3 cluster name and definition tighten on the contributor axis, widen on the artefact axis
