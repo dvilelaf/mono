@@ -256,16 +256,20 @@ That's it. Polished features (mode selector with rich tradeoff descriptions, sna
 
 ## 14. Deferred future work
 
-The following were in v0.1/v0.2 scope and have been deferred to a future spec because they were over-engineering for the current need:
+The following were in v0.1/v0.2 scope and have been deferred because they were over-engineering for the current need. Tracked in **`jinn-mono-tejo`** (Decentralize the discovery layer):
 
 - **`EmbeddedPonderDiscoveryAPI` (Ponder in-process inside the daemon).** Would let operators run an indexer locally for full trust-minimisation. Real demand for this hasn't materialised. If/when an operator asks, the implementation is: add `@jinn-network/indexer` as a daemon dep, spawn Ponder as a child process, point it at local PGlite. The `DiscoveryAPI` interface is already shaped to accommodate this implementation. No interface changes required.
 - **Snapshot publication and verification.** Would let new operators skip the cold-start sync time. Ponder's canonical answer is to use a HyperSync-backed RPC URL — cold sync from genesis becomes minutes. If that's insufficient, a Postgres dump/restore pipeline could be added; the snapshot-on-IPFS-with-on-chain-CID scheme was over-engineered for the actual need.
 - **Operator dashboard polish.** Multi-mode selector with rich tradeoff descriptions, connected-consumer counts when running as a public indexer, federated-host directory. All depend on either embedded mode or genuine federation, neither of which is in current scope.
 
+Related cleanup beads, not part of this spec's scope:
+- **`jinn-mono-euyi`** — audit and retire the `subgraph/` directory once `280n.6` lands and nothing consumes the hosted Graph subgraph.
+- **`jinn-mono-h8bq`** — consolidate envelope-level `solverType` into SolverNet identity (`{id, version}` / `manifestCid`). Orthogonal to discovery, but surfaced during this work because `CorpusQuery.solverType` is one of the filter fields.
+
 ## 15. Open questions
 
-1. **Telemetry on fallback engagement.** Should the daemon report when it's falling back to on-chain mode? Likely yes (operator visibility), via the existing telemetry channel. Confirm shape during integration.
-2. **What to do with `erc8004/subgraph.ts`.** The stub references bead `jinn-mono-fud` for an upcoming Jinn-specific subgraph. Either roll that work into the Ponder schema (preferred — it's the same data domain) or close the bead as superseded. Decide during implementation.
+1. **Telemetry on fallback engagement** — *resolved.* Yes, report it, minimally: a log line on transition into and out of fallback; a single `discovery_fallback_active` gauge (0/1) in the existing telemetry channel; the §13 binary dashboard status indicator picks this up for free. Pin the exact telemetry topic during implementation; no need for duration tracking or per-query path attribution at v0.1.
+2. **What to do with `erc8004/subgraph.ts`** — *resolved.* Confirmed dead during the v0.3 investigation: `queryArtifacts` is the wrong-shaped predecessor to corpus envelope discovery (the corpus library does it correctly via `DiscoveryAPI.queryEnvelopes`); `queryNodes` peer-discovery never functioned and its downstream merge into peer-sync is also stubbed. The stub + `daemon.ts:backfillFromSubgraph` get deleted in `280n.6` (now in that issue's scope). Bead `jinn-mono-fud` is already closed (the Graph subgraph it tracked was built and lives in `subgraph/`); the fate of `subgraph/` is `jinn-mono-euyi`.
 
 ## 16. References
 
