@@ -164,11 +164,40 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     expect(r.reason).toBe('implStateDir not configured');
   });
 
-  it('reports ready when state file + upstream repo are present', async () => {
+  function dockerOk() {
+    return vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 0, stdout: 'Server Version: 27.0.0', stderr: '' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+  }
+
+  it('reports ready when state file + upstream repo are present and Docker is reachable', async () => {
     makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
-    const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
     const r = await h.isReady();
     expect(r.ready).toBe(true);
+  });
+
+  it('reports not-ready when Docker is unreachable, even with a valid enable marker', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker'
+        ? { exitCode: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.isReady();
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/docker/i);
+    expect(r.nextStep?.description).toMatch(/docker/i);
+    expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
   });
 
   it('reports not-ready when upstream repo dir is missing despite a marker', async () => {

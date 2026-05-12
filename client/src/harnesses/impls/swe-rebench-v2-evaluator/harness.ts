@@ -145,6 +145,25 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         },
       };
     }
+    // Live Docker probe: the eval shells out to per-instance `docker run`
+    // images. Docker is validated at `jinn harnesses enable` time, but it can
+    // stop afterwards — re-check on every readiness probe so the daemon does
+    // not claim evaluation tasks it cannot grade. (Without this, a stopped
+    // Docker daemon turns every claimed eval into a bogus `passed_match:false`
+    // verdict — see jinn-mono-uy6v.8.)
+    const run = this.deps.runCommand ?? runCommand;
+    const dockerCheck = await run('docker', ['info']);
+    if (dockerCheck.exitCode !== 0) {
+      return {
+        ready: false,
+        reason: 'Docker daemon not reachable',
+        nextStep: {
+          description:
+            'Start Docker Desktop (or the docker daemon) — the SWE-rebench v2 evaluator runs per-instance Docker images. Once Docker is up the evaluator becomes ready automatically.',
+          url: 'https://docs.docker.com/get-docker/',
+        },
+      };
+    }
     return { ready: true };
   }
 
