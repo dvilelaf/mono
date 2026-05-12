@@ -34,12 +34,12 @@ import type {
   ReadyStatus,
   Solution,
 } from '../../types.js';
-import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
+import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { Task } from '../../../types/task.js';
 import { SignedEnvelopeSchema } from '../../../types/envelope.js';
 import { uploadToIpfs } from '../../../adapters/mech/ipfs.js';
 import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher } from './index.js';
-import { PythonEvalRunner } from './eval-runner.js';
+import { PythonEvalRunner, EvalCouldNotGradeError } from './eval-runner.js';
 import { HttpHfFetcher } from './hf-fetcher.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
@@ -279,7 +279,22 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       this.deps.runner ?? new PythonEvalRunner({ upstreamRepoDir: state.upstreamRepoDir });
     const evaluator = new SweRebenchV2Evaluator({ fetcher, runner });
 
-    const graded = await evaluator.grade({ task, solutionPayload });
+    let graded: Awaited<ReturnType<SweRebenchV2Evaluator['grade']>>;
+    try {
+      graded = await evaluator.grade({ task, solutionPayload });
+    } catch (err) {
+      if (err instanceof EvalCouldNotGradeError) {
+        // The eval never actually graded the solution (Docker down, patch
+        // failed to apply, install/test-setup failed, arch-incompatible
+        // image, …). There is no signal about the solver — emit no verdict.
+        // SkippableError → engine records a skip, nothing is delivered.
+        throw new SkippableError(
+          `eval_not_gradeable:${err.reason}`,
+          `${err.message}${err.logExcerpt ? `\n${err.logExcerpt}` : ''}`,
+        );
+      }
+      throw err;
+    }
 
     // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
     // training) can fetch it anonymously by CID. The CID is surfaced via the

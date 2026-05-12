@@ -11,6 +11,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EvalRunner } from './index.js';
 
+/**
+ * Thrown when the eval could not actually grade the solution — Docker
+ * unavailable, image pull/IO failure, the model patch failed to apply, the
+ * install/test-setup step failed, an arch-incompatible image crashed, the
+ * upstream harness errored, etc. The caller MUST NOT turn this into a
+ * `passed_match: false` verdict: there is no signal about the solver, only
+ * about the operator's environment. The evaluator harness re-raises it as a
+ * `SkippableError` so the engine records a skip (no delivered verdict).
+ */
+export class EvalCouldNotGradeError extends Error {
+  readonly reason: string;
+  /** A short, redacted excerpt of the eval output, for diagnostics. */
+  readonly logExcerpt: string;
+
+  constructor(reason: string, logExcerpt = '') {
+    super(`swe-rebench-v2 eval could not grade the solution (${reason})`);
+    this.name = 'EvalCouldNotGradeError';
+    this.reason = reason;
+    this.logExcerpt = logExcerpt.slice(0, 1000);
+  }
+}
+
 export interface PythonEvalRunnerOptions {
   /** Path to the cloned SWE-rebench-V2 repo (cached locally). */
   upstreamRepoDir: string;
@@ -18,6 +40,34 @@ export interface PythonEvalRunnerOptions {
   pythonBin?: string;
   /** Workers for parallel eval (defaults to 1; we run one task at a time). */
   maxWorkers?: number;
+}
+
+/**
+ * Known infra-abort signatures in the container output. Used only to produce
+ * a human-readable `reason`; the load-bearing classifier is
+ * "container exited non-zero AND no test was collected" (see below).
+ */
+const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
+  { rx: /Cannot connect to the Docker daemon/i, reason: 'docker_unavailable' },
+  { rx: /input\/output error/i, reason: 'docker_storage_io_error' },
+  { rx: /error: corrupt patch at line/i, reason: 'patch_corrupt' },
+  { rx: /patch does not apply|patch failed:/i, reason: 'patch_does_not_apply' },
+  { rx: /Applied patch to .+ with conflicts|^U \S/m, reason: 'patch_merge_conflict' },
+  { rx: /: command not found/i, reason: 'test_command_not_found' },
+  { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
+  { rx: /No virtual environment found/i, reason: 'venv_missing' },
+  { rx: /exec format error|requested image's platform .* does not match/i, reason: 'image_arch_mismatch' },
+];
+
+function classifyInfraReason(log: string): string {
+  for (const { rx, reason } of INFRA_SIGNATURES) {
+    if (rx.test(log)) return reason;
+  }
+  return 'eval_aborted_before_tests';
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
 export class PythonEvalRunner implements EvalRunner {
@@ -80,13 +130,23 @@ export class PythonEvalRunner implements EvalRunner {
       report = JSON.parse(await readFile(reportPath, 'utf8')) as typeof report;
     } catch {
       await rm(tmp, { recursive: true, force: true });
-      throw new Error(`Eval runner failed: exitCode=${exitCode}, stderr=${stderr.slice(-500)}`);
+      // The upstream harness never produced a report — it crashed before it
+      // could grade anything. Not a verdict about the solver.
+      throw new EvalCouldNotGradeError(
+        classifyInfraReason(stderr + stdout),
+        `python exitCode=${exitCode}; ${(stderr || stdout).slice(-800)}`,
+      );
     }
 
-    // Upstream report shape: { total, passed, items: [{instance_id, passed_match,
-    // from_fail_to_pass, failed_from_pass_to_pass, exit_code, log_path, error}] }.
+    // Upstream report item shape: { instance_id, exit_code (the docker-run
+    // exit code), passed_match, passed_expected, passed_actual, failed_actual,
+    // log_path, ... }.
     const items = Array.isArray(report.items) ? report.items : [];
     const item = items.find((i) => i['instance_id'] === INSTANCE_ID) ?? items[0] ?? {};
+
+    const containerExit = typeof item['exit_code'] === 'number' ? (item['exit_code'] as number) : exitCode;
+    const passedActual = asStringArray(item['passed_actual']);
+    const failedActual = asStringArray(item['failed_actual']);
 
     let logBody = '';
     const logPath = item['log_path'];
@@ -97,15 +157,29 @@ export class PythonEvalRunner implements EvalRunner {
         logBody = '';
       }
     }
+    const fullLog = stdout + logBody;
 
     await rm(tmp, { recursive: true, force: true });
 
+    // The eval did not actually grade the solution if the container aborted
+    // (non-zero exit) before any expected test was collected. A genuine
+    // wrong-answer run still surfaces the FAIL_TO_PASS / PASS_TO_PASS tests in
+    // passed_actual / failed_actual, so this only catches infra aborts: Docker
+    // down, patch-apply failure, test-file merge conflict, install/setup
+    // failure, missing test command, arch-incompatible image, etc.
+    if (containerExit !== 0 && passedActual.length === 0 && failedActual.length === 0) {
+      throw new EvalCouldNotGradeError(
+        classifyInfraReason(fullLog || stderr),
+        (fullLog || stderr).slice(-800),
+      );
+    }
+
     return {
       passed_match: item['passed_match'] === true,
-      passed: Array.isArray(item['from_fail_to_pass']) ? (item['from_fail_to_pass'] as string[]) : [],
-      failed: Array.isArray(item['failed_from_pass_to_pass']) ? (item['failed_from_pass_to_pass'] as string[]) : [],
-      log: stdout + logBody,
-      exitCode,
+      passed: passedActual,
+      failed: failedActual,
+      log: fullLog,
+      exitCode: containerExit,
     };
   }
 }

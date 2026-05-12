@@ -414,6 +414,35 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
   });
 
+  it('does not produce a verdict when the eval could not grade the solution (skips instead)', async () => {
+    const { EvalCouldNotGradeError } = await import(
+      '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js'
+    );
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+    const uploadToIpfs = vi.fn().mockResolvedValue('bafy-should-not-be-called');
+    const runner = {
+      runEval: vi
+        .fn()
+        .mockRejectedValue(
+          new EvalCouldNotGradeError(
+            'docker_unavailable',
+            'docker: Cannot connect to the Docker daemon',
+          ),
+        ),
+    };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { fetcher: makeFakeFetcher(), runner, uploadToIpfs },
+    });
+    const ctx = buildHarnessContext(
+      implStateDir,
+      buildEvaluationTask(buildSolverEnvelope()),
+    );
+    await expect(harness.run(ctx)).rejects.toBeInstanceOf(SkippableError);
+    expect(uploadToIpfs).not.toHaveBeenCalled();
+    expect(existsSync(join(ctx.workingDir, 'swe-rebench-v2-verdict.json'))).toBe(false);
+  });
+
   it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
     const wrongEnvelope = buildSolverEnvelope({ solverType: 'prediction.v1' });
     const harness = new SweRebenchV2EvaluatorHarness({
