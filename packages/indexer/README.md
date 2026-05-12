@@ -129,13 +129,37 @@ the indexer adapter.
 
 ```bash
 yarn dev       # Ponder dev server (hot reload, PGlite)
-yarn build     # Ponder build (compile + validate schema; required before yarn start/serve)
+yarn build     # Ponder build (codegen — regenerates ponder-env.d.ts; this Ponder
+               # version has no separate `ponder build` command)
 yarn start     # Ponder production server (indexer + HTTP, requires DATABASE_URL)
 yarn serve     # Ponder production HTTP server only (no indexer, requires DATABASE_URL)
 yarn codegen   # Regenerate ponder-env.d.ts type artifacts
 yarn typecheck # TypeScript check (no emit)
-yarn test      # Vitest unit tests — currently zero tests in this package;
-               # the GraphQL adapter tests moved to client/test/discovery/http.test.ts
-               # as part of jinn-mono-280n.4. Handler integration tests will live
-               # in the daemon's integration suite.
+yarn test      # Vitest unit tests for the event handlers (test/handlers.test.ts).
 ```
+
+### What the handler tests cover, and how
+
+`test/handlers.test.ts` exercises the event-folding logic in `src/handlers.ts`:
+MetadataSet key routing (manifest vs. envelope vs. ignored), envelope-payload
+decode with the V2→V1 fallback (and garbage-payload tolerance), most-recent-wins
+upsert ordering — including the `(block, transactionIndex, logIndex)` tiebreak
+and idempotent re-sync — the `SolutionDeliveryClaimed` missing-row guard, and
+Task/Attempt folding (cross-checked against the GraphQL field names
+`client/src/discovery/http.ts` queries).
+
+Ponder 0.16.x has no first-class unit-test util for indexing functions, and the
+`ponder:registry` / `ponder:schema` modules are virtual modules the Ponder
+build resolves — not importable from Vitest. So the handler logic is extracted
+out of the `ponder.on(...)` registrations in `src/index.ts` into exported pure
+functions in `src/handlers.ts` (`src/index.ts` is now thin shims that forward
+`{ event, context }` plus the schema table objects), and the tests run those
+pure functions against `test/helpers/in-memory-db.ts` — a stub that mirrors the
+`find / insert / update / onConflictDoNothing / onConflictDoUpdate` surface the
+handlers use. The two-operator end-to-end (a real Ponder service indexing a live
+testnet contract) is tracked separately.
+
+The daemon-side GraphQL **client** surface (the queries `HttpDiscoveryAPI`
+issues against this service) is covered by `client/test/discovery/http.test.ts`
+in the `@jinn-network/client` package — that suite mocks `fetch` and asserts
+the query/response shape; it does not run these handlers.
