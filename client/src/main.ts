@@ -1463,7 +1463,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // (envelope discovery). See spec/2026-05-11-discovery-api-and-shared-indexer.md §9.
   let sharedDiscoveryApi: import('./discovery/types.js').DiscoveryAPI | undefined;
   {
-    const { createDiscoveryAPI } = await import('./discovery/factory.js');
+    const onchainFloorOpts = {
+      rpcUrl: config.rpcUrl,
+      chainId: config.network === 'testnet' ? 84532 : 8453,
+      routerAddress: ROUTER_ADDRESS,
+      identityRegistryAddress: identityRegistryAddress ?? undefined,
+      safeAddress,
+      mechAddress: mechAddress ?? undefined,
+      taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+    } as const;
+    async function buildOnchainFloor(): Promise<import('./discovery/types.js').DiscoveryAPI> {
+      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
+      return createOnchainDiscoveryAPI(onchainFloorOpts);
+    }
+
     const discoveryConfig = config.discovery;
     if (discoveryConfig) {
       // A discovery block was explicitly set (or normalized from subgraphUrl).
@@ -1475,43 +1488,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           : createNoopSubgraphClient();
       }
       try {
+        const { createDiscoveryAPI } = await import('./discovery/factory.js');
         sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, {
-          rpcUrl: config.rpcUrl,
-          chainId: config.network === 'testnet' ? 84532 : 8453,
-          routerAddress: ROUTER_ADDRESS,
-          identityRegistryAddress: identityRegistryAddress ?? undefined,
-          safeAddress,
-          mechAddress: mechAddress ?? undefined,
-          taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
+          ...onchainFloorOpts,
           subgraphClient: subgraphClientForDiscovery,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
-        const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
-        sharedDiscoveryApi = createOnchainDiscoveryAPI({
-          rpcUrl: config.rpcUrl,
-          chainId: config.network === 'testnet' ? 84532 : 8453,
-          routerAddress: ROUTER_ADDRESS,
-          identityRegistryAddress: identityRegistryAddress ?? undefined,
-          safeAddress,
-          mechAddress: mechAddress ?? undefined,
-          taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
-        });
+        sharedDiscoveryApi = await buildOnchainFloor();
       }
     } else {
       // No discovery config — default to onchain floor (no subgraphUrl in config).
       // TODO(280n.4): flip default to 'http' once HttpDiscoveryAPI lands.
-      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
-      sharedDiscoveryApi = createOnchainDiscoveryAPI({
-        rpcUrl: config.rpcUrl,
-        chainId: config.network === 'testnet' ? 84532 : 8453,
-        routerAddress: ROUTER_ADDRESS,
-        identityRegistryAddress: identityRegistryAddress ?? undefined,
-        safeAddress,
-        mechAddress: mechAddress ?? undefined,
-        taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
-      });
+      sharedDiscoveryApi = await buildOnchainFloor();
     }
   }
 
