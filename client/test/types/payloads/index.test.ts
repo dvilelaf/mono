@@ -103,4 +103,36 @@ describe('validatePayload', () => {
       validatePayload('portfolio.v0', 'solution', { bogus: true }),
     ).toThrow();
   });
+
+  it('accepts legacy verdict payload restorationEnvelope and normalizes through the schema', () => {
+    const legacyVerdict = {
+      restorationEnvelope: { cid: 'bafy-solution', sha256: 'a'.repeat(64) },
+      verificationOfRestoration: {
+        claimedTier: 'self-signed',
+        sdkVersion: '1.0.0',
+        timestamp: 1,
+        checks: [{ name: 'schema', passed: true }],
+        overall: 'valid',
+      },
+      verdict: 'PASS',
+      score: '1.0',
+      scoreBasis: 'brier.v1',
+      scoreVersion: '1.0.0',
+      oracleReading: {
+        feed: `0x${'1'.repeat(40)}`,
+        roundId: '1',
+        answer: '1',
+        updatedAt: 1,
+      },
+      claimed: {
+        probability: '0.55',
+        submittedAt: 1,
+        modelId: 'm',
+      },
+      groundTruth: 'YES',
+      checks: [{ name: 'schema', status: 'PASS' }],
+    };
+
+    expect(() => validatePayload('prediction.v0', 'verdict', legacyVerdict)).not.toThrow();
+  });
 });
