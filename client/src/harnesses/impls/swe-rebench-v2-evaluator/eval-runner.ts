@@ -90,6 +90,40 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The `install_config.test_cmd` array handed to `eval.py` (run line-by-line
+ * under `set -e` after the patch + gold test_patch are applied).
+ *
+ * For pytest instances we *override* the dataset's `test_cmd` with one that
+ * runs exactly the FAIL_TO_PASS ∪ PASS_TO_PASS node ids in the `-rA` summary
+ * format `parse_log_pytest` understands. Many dataset rows scope `test_cmd`
+ * to a whole file or the whole repo, or use `-v` — both make instances
+ * structurally unscorable (extra passing tests, or a parser-format mismatch)
+ * even when the fix is correct. Running exactly the named tests is the
+ * standard SWE-bench evaluation shape.
+ *
+ * For non-pytest log parsers (go / cargo / …) node-id semantics differ, so we
+ * fall back to the dataset's `test_cmd` verbatim and accept the limitation.
+ */
+function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[] {
+  const install = normalizeCommands(args.install);
+  if (args.log_parser === 'parse_log_pytest') {
+    const nodeIds = [...args.fail_to_pass, ...args.pass_to_pass];
+    if (nodeIds.length > 0) {
+      const cmd = [
+        'python -m pytest --no-header -rA --tb=no -p no:cacheprovider',
+        ...nodeIds.map(shellQuote),
+      ].join(' ');
+      return [...install, cmd];
+    }
+  }
+  return [...install, ...normalizeCommands(args.test_cmd)];
+}
+
 export class PythonEvalRunner implements EvalRunner {
   constructor(private readonly opts: PythonEvalRunnerOptions) {}
 
@@ -109,10 +143,7 @@ export class PythonEvalRunner implements EvalRunner {
       PASS_TO_PASS: args.pass_to_pass,
       test_patch: args.test_patch,
       install_config: {
-        test_cmd: [
-          ...normalizeCommands(args.install),
-          ...normalizeCommands(args.test_cmd),
-        ],
+        test_cmd: buildTestCommands(args),
         log_parser: args.log_parser,
       },
     }];

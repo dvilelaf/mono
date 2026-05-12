@@ -105,12 +105,35 @@ describe('PythonEvalRunner', () => {
     const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
     expect(observedTask.instance_id).toBe('astronomer__astronomer-cosmos-2332');
     expect(observedTask.repo).toBe('jinn/testbed');
-    expect(observedTask.install_config.test_cmd).toEqual([
-      'pip install -e .',
-      'pytest tests/dbt/test_graph.py',
-    ]);
     expect(result.passed_match).toBe(true);
     expect(result.passed).toEqual(['test_a']);
+  });
+
+  it('overrides test_cmd to run exactly the FAIL_TO_PASS ∪ PASS_TO_PASS node ids for pytest instances', async () => {
+    const upstreamRepoDir = makeUpstreamFixture();
+    await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+      ...REQUEST,
+      fail_to_pass: ['tests/a.py::test_x'],
+      pass_to_pass: ['tests/a.py::test_y', 'tests/a.py::test_z[0]'],
+    });
+    const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+    expect(observedTask.install_config.test_cmd).toEqual([
+      'pip install -e .',
+      `python -m pytest --no-header -rA --tb=no -p no:cacheprovider 'tests/a.py::test_x' 'tests/a.py::test_y' 'tests/a.py::test_z[0]'`,
+    ]);
+    // The dataset's broad/`-v` test command is not used.
+    expect(observedTask.install_config.test_cmd.join('\n')).not.toContain('tests/dbt/test_graph.py');
+  });
+
+  it('falls back to the dataset test_cmd verbatim for non-pytest log parsers', async () => {
+    const upstreamRepoDir = makeUpstreamFixture();
+    await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+      ...REQUEST,
+      log_parser: 'parse_log_go',
+      test_cmd: 'go test ./...',
+    });
+    const observedTask = JSON.parse(readFileSync(join(upstreamRepoDir, 'observed-task.json'), 'utf8'));
+    expect(observedTask.install_config.test_cmd).toEqual(['pip install -e .', 'go test ./...']);
   });
 
   it('pins the docker platform to linux/amd64 for the eval subprocess', async () => {
