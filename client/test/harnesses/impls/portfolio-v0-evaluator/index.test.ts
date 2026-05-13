@@ -909,7 +909,7 @@ describe('PortfolioV0Evaluator', () => {
 
   // ── restorationEnvelope back-ref ──────────────────────────────────────────
 
-  describe('restorationEnvelope back-ref', () => {
+  describe('solutionEnvelope back-ref', () => {
     it('uses restorationEnvelopeCid from context when threaded by daemon', async () => {
       const workingDir = makeTmpDir();
       dirs.push(workingDir);
@@ -917,11 +917,11 @@ describe('PortfolioV0Evaluator', () => {
       const envelopeCid = 'f01551220deadbeefcafe';
       const ctx = makeCtx(workingDir, evaluator, { restorationEnvelopeCid: envelopeCid });
       const out = await evaluator.run(ctx);
-      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-      expect(vp.restorationEnvelope.cid).toBe(envelopeCid);
+      const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+      expect(vp.solutionEnvelope.cid).toBe(envelopeCid);
       // sha256 must be the sha256 of the JCS canonical bytes (aligns with JCS upload pipeline)
       const expectedSha256 = createHash('sha256').update(canonicalJson(MOCK_MANIFEST)).digest('hex');
-      expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+      expect(vp.solutionEnvelope.sha256).toBe(expectedSha256);
     });
 
     it('falls back to restorationRequestId when no context key present', async () => {
@@ -930,11 +930,11 @@ describe('PortfolioV0Evaluator', () => {
       const evaluator = makeEvaluator();
       const ctx = makeCtx(workingDir, evaluator);
       const out = await evaluator.run(ctx);
-      const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+      const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
       // restorationRequestId is '0xrequest' in makeCtx
-      expect(vp.restorationEnvelope.cid).toBe('0xrequest');
+      expect(vp.solutionEnvelope.cid).toBe('0xrequest');
       // sha256 must be a valid hex string (not placeholder zeros)
-      expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(vp.solutionEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 });

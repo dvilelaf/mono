@@ -36,7 +36,7 @@ import type {
 } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { uploadToIpfs } from '../../../adapters/mech/ipfs.js';
 import { SweRebenchV2Evaluator, type EvalRunner, type HfFetcher } from './index.js';
 import { PythonEvalRunner } from './eval-runner.js';
@@ -267,7 +267,10 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     // Parse the solver's solution envelope and pull out the patch.
     const manifestJson = ctx.task.context!['restorationResult'] as string;
     const envelope = SignedEnvelopeSchema.parse(JSON.parse(manifestJson));
-    if (envelope.solverType !== 'swe-rebench-v2.v1' || envelope.role !== 'solution') {
+    if (
+      envelope.solverType !== 'swe-rebench-v2.v1' ||
+      normalizeEnvelopeRole(envelope.role) !== 'solution'
+    ) {
       throw new Error(
         `swe-rebench-v2-evaluator: expected swe-rebench-v2.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
       );

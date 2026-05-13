@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
 import type { Task } from '../../../types/task.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { PredictionV1TaskSchema } from '../../../types/prediction-v1.js';
 import {
   PredictionV1RestorationPayloadSchema,
@@ -86,7 +86,10 @@ export class PredictionV1Evaluator implements Harness {
     let solution: PredictionV1RestorationPayload | null = null;
     try {
       const envelope = SignedEnvelopeSchema.parse(rawEnvelope);
-      if (envelope.solverType !== 'prediction.v1' || envelope.role !== 'solution') {
+      if (
+        envelope.solverType !== 'prediction.v1' ||
+        normalizeEnvelopeRole(envelope.role) !== 'solution'
+      ) {
         checks.push({
           name: 'solution.envelope',
           status: 'FAIL',

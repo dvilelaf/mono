@@ -56,7 +56,8 @@ export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult 
     };
   }
 
-  if (!ctx.solutionEnvelopeBytes) {
+  const solutionEnvelopeBytes = ctx.solutionEnvelopeBytes ?? ctx.restorationEnvelopeBytes;
+  if (!solutionEnvelopeBytes) {
     return {
       id,
       layer,
@@ -65,7 +66,7 @@ export function checkVerdictBackReference(ctx: ConformanceContext): CheckResult 
     };
   }
 
-  const actualSha = createHash('sha256').update(ctx.solutionEnvelopeBytes).digest('hex');
+  const actualSha = createHash('sha256').update(solutionEnvelopeBytes).digest('hex');
   if (actualSha !== ref.sha256.toLowerCase()) {
     return {
       id,

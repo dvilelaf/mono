@@ -140,7 +140,7 @@ describe('PredictionV1Evaluator', () => {
 
     await expect(evaluator.canAttempt(evalTask)).resolves.toEqual({
       ok: false,
-      reason: 'context.restorationTaskCid required',
+      reason: 'context.solutionTaskCid required',
     });
     const out = await evaluator.run(makeHarnessCtx({ task: evalTask }));
     const payload = PredictionV1VerdictPayloadSchema.parse(out.verdictPayload);

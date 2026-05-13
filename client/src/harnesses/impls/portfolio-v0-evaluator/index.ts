@@ -41,7 +41,7 @@ import {
   PortfolioV0TaskSchema,
   PortfolioV0EligibilitySchema,
 } from '../../../types/portfolio.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import type { SignedEnvelope } from '../../../types/envelope.js';
 import { PortfolioV0RestorationPayloadSchema } from '../../../types/payloads/portfolio-v0.js';
 import type { PortfolioV0RestorationPayload } from '../../../types/payloads/portfolio-v0.js';
@@ -319,7 +319,10 @@ export class PortfolioV0Evaluator implements Harness {
 
     try {
       targetEnvelope = SignedEnvelopeSchema.parse(JSON.parse(inlined));
-      if (targetEnvelope.solverType !== 'portfolio.v0' || targetEnvelope.role !== 'solution') {
+      if (
+        targetEnvelope.solverType !== 'portfolio.v0' ||
+        normalizeEnvelopeRole(targetEnvelope.role) !== 'solution'
+      ) {
         throw new Error(
           `Unexpected envelope kind/role: ${targetEnvelope.solverType}/${targetEnvelope.role}; expected portfolio.v0/solution`,
         );

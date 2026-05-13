@@ -22,7 +22,7 @@ import type { Task } from '../../../types/task.js';
 import {
   PredictionV1TaskSchema,
 } from '../../../types/prediction.js';
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import { PredictionV0RestorationPayloadSchema, type PredictionV0RestorationPayload } from '../../../types/payloads/prediction-v0.js';
 import {
   oraclePriceAtResolveTs,
@@ -111,7 +111,10 @@ export class PredictionV1Evaluator implements Harness {
     const manifestJson = task.context!['restorationResult'] as string;
     const rawPayload = JSON.parse(manifestJson) as Record<string, unknown>;
     const envelope = SignedEnvelopeSchema.parse(rawPayload);
-    if (envelope.solverType !== 'prediction.v1' || envelope.role !== 'solution') {
+    if (
+      envelope.solverType !== 'prediction.v1' ||
+      normalizeEnvelopeRole(envelope.role) !== 'solution'
+    ) {
       throw new Error(
         `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.v1/solution`,
       );

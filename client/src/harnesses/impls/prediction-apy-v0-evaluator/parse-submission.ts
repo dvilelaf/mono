@@ -1,4 +1,4 @@
-import { SignedEnvelopeSchema } from '../../../types/envelope.js';
+import { SignedEnvelopeSchema, normalizeEnvelopeRole } from '../../../types/envelope.js';
 import type { SignedEnvelope } from '../../../types/envelope.js';
 import { PredictionApyV0RestorationPayloadSchema } from '../../../types/payloads/prediction-apy-v0.js';
 import type { PredictionApyV0RestorationPayload } from '../../../types/payloads/prediction-apy-v0.js';
@@ -19,7 +19,10 @@ export function parsePredictionApySubmissionEnvelope(manifestJson: string): {
 } {
   const raw = JSON.parse(manifestJson) as Record<string, unknown>;
   const envelope = SignedEnvelopeSchema.parse(raw);
-  if (envelope.solverType !== 'prediction.apy.v0' || envelope.role !== 'solution') {
+  if (
+    envelope.solverType !== 'prediction.apy.v0' ||
+    normalizeEnvelopeRole(envelope.role) !== 'solution'
+  ) {
     throw new Error(
       `Unexpected envelope kind/role: ${envelope.solverType}/${envelope.role}; expected prediction.apy.v0/solution`,
     );

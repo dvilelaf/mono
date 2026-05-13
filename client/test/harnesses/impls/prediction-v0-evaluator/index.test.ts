@@ -137,11 +137,11 @@ describe('PredictionV1Evaluator — verdict pipeline', () => {
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
-    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
-    expect(vp.restorationEnvelope.cid).toBe('f01551220abcdef1234');
+    const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
+    expect(vp.solutionEnvelope.cid).toBe('f01551220abcdef1234');
     // Evaluator uses JCS canonical bytes (canonicalJson) to match the upload pipeline.
     const expectedSha256 = createHash('sha256').update(canonicalJson(manifest)).digest('hex');
-    expect(vp.restorationEnvelope.sha256).toBe(expectedSha256);
+    expect(vp.solutionEnvelope.sha256).toBe(expectedSha256);
   });
 
   it('restorationEnvelope.cid falls back to bafy-unknown when no context key or requestId', async () => {
@@ -154,10 +154,10 @@ describe('PredictionV1Evaluator — verdict pipeline', () => {
       evaluatorSafeAddress: '0x0000000000000000000000000000000000000003',
     });
     const out = await evaluator.run(makeCtx(evalTask, spanningDeps('3501')));
-    const vp = out.verdictPayload as { restorationEnvelope: { cid: string; sha256: string } };
+    const vp = out.verdictPayload as { solutionEnvelope: { cid: string; sha256: string } };
     // falls back to restorationRequestId (0x00...00) since no RESTORATION_ENVELOPE_CID_CONTEXT_KEY
-    expect(vp.restorationEnvelope.cid).not.toBe('bafy-unknown');
-    expect(vp.restorationEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(vp.solutionEnvelope.cid).not.toBe('bafy-unknown');
+    expect(vp.solutionEnvelope.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('INDETERMINATE when oracle has no spanning round', async () => {

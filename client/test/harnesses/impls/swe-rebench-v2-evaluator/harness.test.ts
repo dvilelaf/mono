@@ -414,7 +414,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     expect((sol.verdictPayload as Record<string, unknown>)['passed_match']).toBe(false);
   });
 
-  it('throws when the envelope is not swe-rebench-v2.v1/restoration', async () => {
+  it('throws when the envelope is not swe-rebench-v2.v1/solution', async () => {
     const wrongEnvelope = buildSolverEnvelope({ solverType: 'prediction.v1' });
     const harness = new SweRebenchV2EvaluatorHarness({
       implStateDir,
@@ -425,7 +425,7 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       },
     });
     const ctx = buildHarnessContext(implStateDir, buildEvaluationTask(wrongEnvelope));
-    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/restoration/);
+    await expect(harness.run(ctx)).rejects.toThrow(/expected swe-rebench-v2\.v1\/solution/);
   });
 
   it('throws when the harness is not enabled', async () => {
