@@ -121,6 +121,10 @@ export class ValidatedPoolStore {
  * Without it: fall back to Python-only instances — the conservative floor our
  * pytest `test_cmd` override supports — and the caller should warn that the
  * full gate (`jinn solver-nets validate-pool swe-rebench-v2`) hasn't been run.
+ *
+ * The `nebius/SWE-rebench-leaderboard` rows don't carry an explicit `language`
+ * field (it's `undefined`/`null` on every row), so we also infer from the
+ * patch file extensions — mirroring `inferLanguageFromPatch` in the solver-type.
  */
 export function filterToScorablePool(
   pool: PoolTask[],
@@ -129,7 +133,20 @@ export function filterToScorablePool(
   if (scorableIds) {
     return { pool: pool.filter((t) => scorableIds.has(t.instance_id)), mode: 'validated' };
   }
-  return { pool: pool.filter((t) => (t.language ?? '') === 'python'), mode: 'python-floor' };
+  return { pool: pool.filter(isPythonInstance), mode: 'python-floor' };
+}
+
+function isPythonInstance(task: PoolTask): boolean {
+  if (task.language === 'python') return true;
+  if (task.language && task.language !== 'python') return false;
+  // language unset → infer from `.py` in any patch path.
+  return looksPython(task.patch) || looksPython(task.test_patch);
+}
+
+function looksPython(patch: string | undefined): boolean {
+  if (!patch) return false;
+  // Match `--- a/<p>` / `+++ b/<p>` / `diff --git a/<p>` ending in .py
+  return /(?:^|\n)(?:---|\+\+\+|diff --git) [ab]\/\S+\.py(?:\s|$)/.test(patch);
 }
 
 export interface ValidatePoolDeps {
@@ -172,8 +189,10 @@ export async function validatePoolInstances(
     if (opts.limit != null && summary.checked >= opts.limit) break;
 
     // Only pytest (Python) instances are supported by the eval-runner `test_cmd`
-    // override; everything else can't be scored cleanly today.
-    if ((task.language ?? '') !== 'python') {
+    // override; everything else can't be scored cleanly today. The leaderboard
+    // rows don't carry an explicit language field — infer from the patch when
+    // unset.
+    if (!isPythonInstance(task)) {
       await deps.store.record(task.instance_id, { scorable: false, reason: 'non-pytest-unsupported', checkedAt: new Date().toISOString() }, deps.semanticsVersion);
       summary.skipped += 1;
       continue;

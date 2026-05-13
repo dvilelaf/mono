@@ -92,6 +92,15 @@ describe('filterToScorablePool', () => {
     expect(mode).toBe('python-floor');
     expect(out.map((t) => t.instance_id)).toEqual(['a__1', 'a__2']);
   });
+
+  it('infers Python from .py paths in the patch when the language field is unset (as the leaderboard rows are)', () => {
+    const inferred: PoolTask[] = [
+      poolTask('a__inferred_py', { language: undefined, patch: 'diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1 +1 @@\n-a\n+b\n' }),
+      poolTask('a__inferred_go', { language: undefined, patch: 'diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n', test_patch: undefined }),
+    ];
+    const { pool: out } = filterToScorablePool(inferred, null);
+    expect(out.map((t) => t.instance_id)).toEqual(['a__inferred_py']);
+  });
 });
 
 describe('validatePoolInstances', () => {
