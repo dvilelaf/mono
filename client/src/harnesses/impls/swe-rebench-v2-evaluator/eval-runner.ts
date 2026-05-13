@@ -94,12 +94,15 @@ export interface PythonEvalRunnerOptions {
  */
 export const DEFAULT_EVAL_IMAGE_CACHE_MAX = 20;
 
-function resolveImageCacheMax(opt: number | undefined): number {
+export function resolveImageCacheMax(opt: number | undefined): number {
   if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
   const envRaw = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
   if (envRaw !== undefined) {
-    const parsed = Number.parseInt(envRaw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    // `Number()` rejects strings with trailing garbage (e.g. `"1e3oops"` →
+    // NaN), unlike `parseInt`. We want operators who typo this to fall back
+    // to the default, not silently get `1`.
+    const parsed = Number(envRaw);
+    if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0) return parsed;
   }
   return DEFAULT_EVAL_IMAGE_CACHE_MAX;
 }
@@ -240,10 +243,13 @@ export class PythonEvalRunner implements EvalRunner {
       this.imageLru.delete(oldest);
       try {
         await this.cleanupImage(oldest);
-      } catch {
-        // Swallow — see `cleanupImage` contract. Best-effort GC: a failed
-        // rmi leaves the image on disk but doesn't break the loop, and the
-        // LRU has already moved on.
+      } catch (err) {
+        // Best-effort GC: a failed rmi leaves the image on disk but mustn't
+        // break the loop. Warn so a flaky `docker` (or a permission slip)
+        // becomes visible before disks fill — silent leaks were the whole
+        // problem this bead exists to fix.
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[swe-rebench-v2] eval-image cleanup failed for ${oldest}: ${reason}`);
       }
     }
   }

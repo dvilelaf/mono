@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   PythonEvalRunner,
   EvalCouldNotGradeError,
+  DEFAULT_EVAL_IMAGE_CACHE_MAX,
+  resolveImageCacheMax,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 
 const tempDirs: string[] = [];
@@ -386,6 +388,28 @@ describe('PythonEvalRunner', () => {
       expect(log).toContain('rmi');
       expect(log).toContain('img-1:latest');
       expect(log).not.toContain('img-2:latest');
+    });
+
+    it('falls back to DEFAULT_EVAL_IMAGE_CACHE_MAX when the env var is invalid (0 / negative / non-numeric / empty)', () => {
+      const prev = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+      try {
+        for (const garbage of ['0', '-5', 'garbage', '', '  ', '1e3oops']) {
+          process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = garbage;
+          expect(resolveImageCacheMax(undefined)).toBe(DEFAULT_EVAL_IMAGE_CACHE_MAX);
+        }
+        // Sanity: a valid positive integer is honored.
+        process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '7';
+        expect(resolveImageCacheMax(undefined)).toBe(7);
+        // Explicit option always wins over env (positive option short-circuits).
+        process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '999';
+        expect(resolveImageCacheMax(3)).toBe(3);
+        // Invalid explicit option falls through to the env.
+        expect(resolveImageCacheMax(0)).toBe(999);
+        expect(resolveImageCacheMax(-1)).toBe(999);
+      } finally {
+        if (prev === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prev;
+      }
     });
   });
 });
