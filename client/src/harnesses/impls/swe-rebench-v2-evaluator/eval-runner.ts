@@ -57,6 +57,64 @@ export interface PythonEvalRunnerOptions {
   pythonBin?: string;
   /** Workers for parallel eval (defaults to 1; we run one task at a time). */
   maxWorkers?: number;
+  /**
+   * Max number of distinct eval images to keep in the local Docker cache.
+   * The runner tracks an in-process LRU keyed by image tag; once usage exceeds
+   * this cap, the least-recently-used images are removed via
+   * {@link PythonEvalRunnerOptions.cleanupImage}.
+   *
+   * The leaderboard pool has hundreds of unique instances at ~3 GB/image, so
+   * an unbounded cache fills operator disks in days (jinn-mono-uy6v.11).
+   *
+   * Default: `process.env.JINN_EVAL_IMAGE_CACHE_MAX` parsed as an integer, or
+   * `DEFAULT_EVAL_IMAGE_CACHE_MAX` (20) if unset/invalid.
+   */
+  imageCacheMax?: number;
+  /**
+   * Removes an image from the local Docker cache (or no-ops if the operator
+   * has chosen not to GC). Called for each eviction from the LRU.
+   *
+   * Defaults to `docker rmi <image>` via the system `docker` binary. Test
+   * suites inject a stub to capture the eviction order without shelling out.
+   *
+   * Implementations MUST NOT throw — failures should be swallowed (logged
+   * elsewhere if desired) so a missing/failed `docker rmi` never escapes
+   * `runEval`. The runner enforces this defensively too.
+   */
+  cleanupImage?: (image: string) => Promise<void>;
+}
+
+/**
+ * Default cap on the per-instance Docker image cache when no explicit
+ * `imageCacheMax` and no `JINN_EVAL_IMAGE_CACHE_MAX` env var are configured.
+ *
+ * 20 images × ~3 GB/image ≈ 60 GB working set — small enough that even a
+ * 256 GB disk has headroom, large enough that the steady-state loop on a
+ * frequently-repeating subset of the pool rarely re-pulls.
+ */
+export const DEFAULT_EVAL_IMAGE_CACHE_MAX = 20;
+
+function resolveImageCacheMax(opt: number | undefined): number {
+  if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
+  const envRaw = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+  if (envRaw !== undefined) {
+    const parsed = Number.parseInt(envRaw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_EVAL_IMAGE_CACHE_MAX;
+}
+
+/**
+ * Production `cleanupImage`: spawn `docker rmi <image>`. Errors are swallowed
+ * — a missing/failed `docker rmi` is operationally tolerable (cache will
+ * remain bloated for a while; not a correctness failure).
+ */
+function defaultCleanupImage(image: string): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawn('docker', ['rmi', image], { stdio: ['ignore', 'ignore', 'ignore'] });
+    child.on('close', () => resolve());
+    child.on('error', () => resolve());
+  });
 }
 
 /**
@@ -133,9 +191,64 @@ function buildTestCommands(args: Parameters<EvalRunner['runEval']>[0]): string[]
 }
 
 export class PythonEvalRunner implements EvalRunner {
-  constructor(private readonly opts: PythonEvalRunnerOptions) {}
+  /**
+   * LRU of image tags whose Docker layers may be cached locally. Stored as a
+   * `Set<string>` because `Set` preserves insertion order; we delete-then-add
+   * to refresh recency and `next()` on the keys iterator to find the
+   * least-recently-used entry.
+   */
+  private readonly imageLru = new Set<string>();
+  private readonly imageCacheMax: number;
+  private readonly cleanupImage: (image: string) => Promise<void>;
+
+  constructor(private readonly opts: PythonEvalRunnerOptions) {
+    this.imageCacheMax = resolveImageCacheMax(opts.imageCacheMax);
+    this.cleanupImage = opts.cleanupImage ?? defaultCleanupImage;
+  }
 
   async runEval(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
+    try {
+      return await this.runEvalImpl(args);
+    } finally {
+      // Always record the image and run GC — even when the eval threw. A
+      // pull-and-crash failure (Docker storage IO error, image_arch_mismatch,
+      // patch_corrupt, eval_no_report) still left an image on disk; we must
+      // count it toward the cache cap so the failure path can't leak the LRU.
+      await this.recordImageUsage(args.image);
+    }
+  }
+
+  /**
+   * Move `image` to the most-recently-used slot of the in-process LRU; if the
+   * set now exceeds {@link imageCacheMax}, evict the oldest entries via
+   * {@link cleanupImage}. Eviction failures are swallowed so a flaky
+   * `docker rmi` cannot escape `runEval`.
+   *
+   * The cap is enforced after the just-used image is inserted: the
+   * just-evaluated image is the *most* recent, so repeat-evals of recently
+   * used instances never re-pull. Only when more than N distinct images have
+   * been used does the oldest get rmi'd.
+   */
+  private async recordImageUsage(image: string): Promise<void> {
+    if (!image) return;
+    // Refresh recency: delete-then-add reinserts at the tail of the set.
+    this.imageLru.delete(image);
+    this.imageLru.add(image);
+    while (this.imageLru.size > this.imageCacheMax) {
+      const oldest = this.imageLru.values().next().value;
+      if (!oldest) break;
+      this.imageLru.delete(oldest);
+      try {
+        await this.cleanupImage(oldest);
+      } catch {
+        // Swallow — see `cleanupImage` contract. Best-effort GC: a failed
+        // rmi leaves the image on disk but doesn't break the loop, and the
+        // LRU has already moved on.
+      }
+    }
+  }
+
+  private async runEvalImpl(args: Parameters<EvalRunner['runEval']>[0]): ReturnType<EvalRunner['runEval']> {
     const tmp = await mkdtemp(join(tmpdir(), 'swerebench-eval-'));
     // Single-task runner: eval.py matches the patch override by instance_id.
     const INSTANCE_ID = args.instance_id;

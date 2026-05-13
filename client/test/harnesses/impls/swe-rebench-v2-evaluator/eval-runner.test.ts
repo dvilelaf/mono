@@ -233,4 +233,159 @@ describe('PythonEvalRunner', () => {
     await expect(new PythonEvalRunner({ upstreamRepoDir: dir, maxWorkers: 1 }).runEval(REQUEST))
       .rejects.toBeInstanceOf(EvalCouldNotGradeError);
   });
+
+  // jinn-mono-uy6v.11 — bound the per-instance Docker image cache so a
+  // long-running operator daemon does not accumulate ~3 GB/image until the
+  // disk fills. The runner keeps an in-process LRU of image names; when more
+  // than `imageCacheMax` distinct images have been used, the least-recently
+  // used ones are removed via the injected `cleanupImage` hook (which
+  // defaults to `docker rmi <image>` in production).
+  describe('LRU image cache GC (jinn-mono-uy6v.11)', () => {
+    it('does NOT remove any image while distinct usages ≤ cap (keeps repeat-evals fast)', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const removed: string[] = [];
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        imageCacheMax: 3,
+        cleanupImage: async (image) => { removed.push(image); },
+      });
+      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
+      // Cache is full but not over capacity — nothing should be GC'd yet.
+      expect(removed).toEqual([]);
+    });
+
+    it('evicts the least-recently-used image once usage exceeds the cap', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const removed: string[] = [];
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        imageCacheMax: 2,
+        cleanupImage: async (image) => { removed.push(image); },
+      });
+      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      // Third distinct image — must evict the oldest (img-1).
+      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
+      expect(removed).toEqual(['img-1:latest']);
+      // Fourth — must evict the now-oldest (img-2).
+      await runner.runEval({ ...REQUEST, instance_id: 'i4', image: 'img-4:latest' });
+      expect(removed).toEqual(['img-1:latest', 'img-2:latest']);
+    });
+
+    it('refreshes LRU order on repeat-eval — re-using an image protects it from eviction', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const removed: string[] = [];
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        imageCacheMax: 2,
+        cleanupImage: async (image) => { removed.push(image); },
+      });
+      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+      await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      // Re-use img-1 — now img-2 is the oldest.
+      await runner.runEval({ ...REQUEST, instance_id: 'i1-repeat', image: 'img-1:latest' });
+      expect(removed).toEqual([]);
+      // A new distinct image evicts img-2, not img-1.
+      await runner.runEval({ ...REQUEST, instance_id: 'i3', image: 'img-3:latest' });
+      expect(removed).toEqual(['img-2:latest']);
+    });
+
+    it('records the image in the LRU even when the eval throws EvalCouldNotGradeError', async () => {
+      // Cap of 1 — every new distinct image evicts the previous one. This
+      // proves cleanup runs in the failure path too (acceptance: cleanup must
+      // not be conditional on the success path).
+      const failingFixture = makeUpstreamFixture({
+        reportItem: { error: 'Task missing top-level image_name.' },
+      });
+      const removed: string[] = [];
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir: failingFixture,
+        maxWorkers: 1,
+        imageCacheMax: 1,
+        cleanupImage: async (image) => { removed.push(image); },
+      });
+      await expect(runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' }))
+        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
+      // A second distinct image — even after a failure — must evict the first.
+      await expect(runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' }))
+        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
+      expect(removed).toEqual(['img-1:latest']);
+    });
+
+    it('also records the image in the LRU when the report is missing/unparseable (no-report failure path)', async () => {
+      // eval.py exits non-zero with no report file — runEval throws
+      // EvalCouldNotGradeError('eval_no_report'). The image must still be
+      // tracked for GC, otherwise pull-and-crash failures leak the cache.
+      const dir = mkdtempSync(join(tmpdir(), 'swe-rebench-eval-runner-test-'));
+      tempDirs.push(dir);
+      const scriptsDir = join(dir, 'scripts');
+      mkdirSync(scriptsDir, { recursive: true });
+      writeFileSync(join(scriptsDir, '__init__.py'), '');
+      writeFileSync(join(scriptsDir, 'eval.py'), 'import sys\nsys.exit(2)\n');
+      chmodSync(join(scriptsDir, 'eval.py'), 0o755);
+
+      const removed: string[] = [];
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir: dir,
+        maxWorkers: 1,
+        imageCacheMax: 1,
+        cleanupImage: async (image) => { removed.push(image); },
+      });
+      await expect(runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' }))
+        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
+      await expect(runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' }))
+        .rejects.toBeInstanceOf(EvalCouldNotGradeError);
+      expect(removed).toEqual(['img-1:latest']);
+    });
+
+    it('swallows cleanupImage errors so a failing docker rmi never escapes runEval', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const runner = new PythonEvalRunner({
+        upstreamRepoDir,
+        maxWorkers: 1,
+        imageCacheMax: 1,
+        cleanupImage: async () => { throw new Error('rmi blew up'); },
+      });
+      await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+      // The second call would trigger cleanupImage(img-1). It must complete
+      // normally and return the graded result.
+      const result = await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      expect(result.passed_match).toBe(true);
+    });
+
+    it('reads the default cap from JINN_EVAL_IMAGE_CACHE_MAX when neither imageCacheMax nor cleanupImage is configured', async () => {
+      const upstreamRepoDir = makeUpstreamFixture();
+      const prev = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+      const prevPath = process.env['PATH'];
+      // Stub `docker` on PATH with a script that records the rmi target and
+      // returns 0. Cap=1 → second distinct image triggers rmi of the first.
+      const stubDir = mkdtempSync(join(tmpdir(), 'swe-rebench-docker-stub-'));
+      tempDirs.push(stubDir);
+      const logPath = join(stubDir, 'rmi.log');
+      writeFileSync(join(stubDir, 'docker'), `#!/usr/bin/env bash\necho "$@" >> ${JSON.stringify(logPath)}\nexit 0\n`);
+      chmodSync(join(stubDir, 'docker'), 0o755);
+
+      process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '1';
+      process.env['PATH'] = `${stubDir}:${prevPath}`;
+      try {
+        const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+        await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+        await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+      } finally {
+        if (prev === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prev;
+        if (prevPath === undefined) delete process.env['PATH'];
+        else process.env['PATH'] = prevPath;
+      }
+      const log = readFileSync(logPath, 'utf8');
+      expect(log).toContain('rmi');
+      expect(log).toContain('img-1:latest');
+      expect(log).not.toContain('img-2:latest');
+    });
+  });
 });
