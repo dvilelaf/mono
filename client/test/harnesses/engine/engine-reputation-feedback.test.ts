@@ -27,6 +27,7 @@ import {
 } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { ReputationRegistryClient, ResolvedAgent } from '../../../src/erc8004/index.js';
+import { claimDelivery as mockedClaimDelivery } from '../../../src/adapters/mech/contracts.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -217,6 +218,10 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
 
   beforeEach(() => {
     store = new Store(':memory:');
+    // Engine.verdictCodeForTask flows into claimDelivery's `verdictCode`
+    // argument — reset between tests so per-test assertions on call args
+    // are not polluted by sibling tests.
+    vi.mocked(mockedClaimDelivery).mockClear();
   });
   afterEach(() => {
     store.close();
@@ -573,6 +578,89 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
         tag1: 'swe-rebench-v2.v1',
       }),
     );
+  });
+
+  // ── On-chain verdictCode pinning (jinn-mono-uy6v.10 review) ───────────────
+  //
+  // `verdictCodeForTask` reads `gatingClaim.verdict` and maps PASS→1, FAIL→2,
+  // INVALID→3, INDETERMINATE/UNRESOLVED→4. The `default` arm silently returns
+  // 1 (PASS) — so any gatingClaim without a recognised `verdict` field tags
+  // the on-chain delivery as PASS regardless of test outcome. This was the
+  // secondary half of uy6v.10: the live daemon's pre-fix swe-rebench-v2
+  // verdicts tagged FAIL deliveries as PASS on chain. The harness fix above
+  // (verdict in gating) closes the live path; these tests pin the mapping so
+  // a future harness that emits `verdict: 'FAIL'` actually lands as 2 on
+  // chain, and the silent-PASS default for the missing-verdict case is
+  // documented (regression bait for the next harness that forgets it).
+  function lastClaimVerdictCode(): number | undefined {
+    const calls = vi.mocked(mockedClaimDelivery).mock.calls;
+    if (calls.length === 0) return undefined;
+    const lastCall = calls[calls.length - 1]!;
+    const options = lastCall[5] as { verdictCode?: number };
+    return options.verdictCode;
+  }
+
+  it('swe-rebench-v2 verdict=FAIL gating → on-chain claimDelivery tagged with FAIL code (2)', async () => {
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-fail';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'FAIL',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 0, passed_match: false, verdict: 'FAIL' },
+    });
+
+    await engine.process(requestId);
+
+    expect(engine.testPersistence.getByRequestId(requestId)!.state).toBe(
+      TaskRunState.COMPLETE,
+    );
+    expect(lastClaimVerdictCode()).toBe(2);
+  });
+
+  it('swe-rebench-v2 verdict=PASS gating → on-chain claimDelivery tagged with PASS code (1)', async () => {
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-pass';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS',
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 1, passed_match: true, verdict: 'PASS' },
+    });
+
+    await engine.process(requestId);
+
+    expect(engine.testPersistence.getByRequestId(requestId)!.state).toBe(
+      TaskRunState.COMPLETE,
+    );
+    expect(lastClaimVerdictCode()).toBe(1);
+  });
+
+  it('pre-fix gating shape (no verdict field) still tags on-chain delivery as PASS (1) — documents the silent fallback', async () => {
+    // This pins the known fallback at engine.ts `verdictCodeForTask.default`:
+    // a missing/unrecognised `verdict` returns 1 (PASS). The harness fix in
+    // this PR removes the live trigger of this branch, but the engine still
+    // silently defaults to PASS for any future harness that emits the
+    // pre-fix shape. A regression here means a new harness can silently
+    // mis-tag every verdict as PASS — exactly the failure mode uy6v.10
+    // surfaced. If we later harden `verdictCodeForTask` to throw or default
+    // to UNRESOLVED (4) on missing verdict, this test's expected value
+    // changes — that's the intended signal.
+    const engine = new TestEngine(makeOpts(store));
+    const requestId = '0xrid-verdictcode-prefix';
+    await seedDelivering(engine, requestId, {
+      taskRole: 'evaluation',
+      verdict: 'PASS', // ignored by the override below
+      inlineHarnessManifest: true,
+      solverType: 'swe-rebench-v2.v1',
+      gatingClaimOverride: { score: 0, passed_match: false }, // no `verdict`
+    });
+
+    await engine.process(requestId);
+
+    expect(lastClaimVerdictCode()).toBe(1);
   });
 
   it('swe-rebench-v2 pre-fix gating shape (no verdict field) → skip log surfaces (regression guard)', async () => {
