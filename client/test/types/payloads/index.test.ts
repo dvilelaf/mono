@@ -135,4 +135,39 @@ describe('validatePayload', () => {
 
     expect(() => validatePayload('prediction.v0', 'verdict', legacyVerdict)).not.toThrow();
   });
+
+  it('accepts prediction.v1 legacy verdict payload restorationEnvelope as a read alias', () => {
+    const legacyVerdict = {
+      verdict: 'SCORED',
+      outcome: 'YES',
+      resolvedAt: '2026-05-04T00:00:00.000Z',
+      resolutionSource: {
+        venue: 'polymarket',
+        url: 'https://polymarket.com/event/test-market',
+        marketId: 'mkt-1',
+        conditionId: '0xabc',
+      },
+      task: { cid: 'bafy-task', id: 'prediction-v1-polymarket-abc' },
+      restorationEnvelope: { cid: 'bafy-solution', sha256: 'a'.repeat(64) },
+      claimed: {
+        probabilityYes: '0.5700',
+        submittedAt: '2026-05-02T01:00:00.000Z',
+        modelId: 'prediction-v1-baseline/consensus',
+      },
+      benchmark: {
+        probabilityYes: '0.6200',
+        sampledAt: '2026-05-02T00:00:00.000Z',
+        method: 'best-bid-ask-midpoint',
+      },
+      scores: {
+        scoreBasis: 'brier-loss.v1',
+        solverBrier: '0.184900',
+        consensusBrier: '0.144400',
+        brierSpread: '0.040500',
+      },
+      checks: [{ name: 'solution.schema', status: 'PASS' }],
+    };
+
+    expect(() => validatePayload('prediction.v1', 'verdict', legacyVerdict)).not.toThrow();
+  });
 });

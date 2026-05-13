@@ -67,10 +67,10 @@ describe('parsePredictionApySubmissionEnvelope', () => {
     expect(payload.prediction.modelId).toBe('m');
   });
 
-  it('normalizes legacy restoration role envelopes on read', () => {
+  it('accepts legacy restoration role envelopes without mutating signed data', () => {
     const raw = makeValidEnvelope({ role: 'restoration' });
     const { envelope } = parsePredictionApySubmissionEnvelope(JSON.stringify(raw));
-    expect(envelope.role).toBe('solution');
+    expect(envelope.role).toBe('restoration');
   });
 
   it('throws on invalid json', () => {
