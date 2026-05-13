@@ -363,11 +363,19 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       'utf8',
     );
 
+    // Derive the engine-facing `verdict` from `passed_match`. The engine's
+    // reputation-feedback hook (and `verdictCodeForTask` for the on-chain
+    // verdict tag in `claimDelivery`) keys on `gating.verdict`. Before this
+    // mapping, the hook silently no-op'd on every swe-rebench-v2 delivery and
+    // every verdict tag defaulted to PASS — see jinn-mono-uy6v.10.
+    const verdict: 'PASS' | 'FAIL' = verdictPayload.passed_match ? 'PASS' : 'FAIL';
+
     return {
       venueRef: { name: 'swe-rebench-v2' },
       gating: {
         score: verdictPayload.score,
         passed_match: verdictPayload.passed_match,
+        verdict,
       },
       informational: {
         instance_id: task.instance_id,
