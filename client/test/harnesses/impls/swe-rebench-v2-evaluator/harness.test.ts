@@ -200,6 +200,19 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
   });
 
+  it('caches the docker info probe across rapid isReady() calls (claim-loop hot path)', async () => {
+    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    const runCommand = vi.fn(async (bin: string) =>
+      bin === 'docker' ? { exitCode: 0, stdout: 'ok', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+    for (let i = 0; i < 25; i++) {
+      const r = await h.isReady();
+      expect(r.ready).toBe(true);
+    }
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
   it('reports not-ready when upstream repo dir is missing despite a marker', async () => {
     // Marker pointing at a non-existent dir.
     writeFileSync(

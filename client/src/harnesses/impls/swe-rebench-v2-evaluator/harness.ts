@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn, type SpawnOptions } from 'node:child_process';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   SweRebenchV2TaskSchema,
@@ -85,12 +86,28 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private readonly implStateDir: string | undefined;
   private readonly ipfsRegistryUrl: string;
   private readonly deps: NonNullable<SweRebenchV2EvaluatorHarnessOptions['_testDeps']>;
+  /** The engine's claim-eligibility check calls `isReady()` per candidate
+   *  task per tick (~17 Hz potential). Cache the live `docker info` result
+   *  for a short TTL so we don't spawn `docker` in a tight loop. */
+  private dockerCheckCache: { at: number; ok: boolean } | null = null;
+  private static readonly DOCKER_CHECK_TTL_MS = 5_000;
 
   constructor(opts: SweRebenchV2EvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
     this.implStateDir = opts.implStateDir;
     this.ipfsRegistryUrl = opts.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
     this.deps = opts._testDeps ?? {};
+  }
+
+  private async isDockerReachable(now: number = Date.now()): Promise<boolean> {
+    const cached = this.dockerCheckCache;
+    if (cached && now - cached.at < SweRebenchV2EvaluatorHarness.DOCKER_CHECK_TTL_MS) {
+      return cached.ok;
+    }
+    const run = this.deps.runCommand ?? runCommand;
+    const r = await run('docker', ['info']);
+    this.dockerCheckCache = { at: now, ok: r.exitCode === 0 };
+    return this.dockerCheckCache.ok;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -145,15 +162,13 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         },
       };
     }
-    // Live Docker probe: the eval shells out to per-instance `docker run`
-    // images. Docker is validated at `jinn harnesses enable` time, but it can
-    // stop afterwards — re-check on every readiness probe so the daemon does
+    // Live Docker probe (TTL-cached): the eval shells out to per-instance
+    // `docker run` images. Docker is validated at `jinn harnesses enable` time,
+    // but it can stop afterwards — re-check periodically so the daemon does
     // not claim evaluation tasks it cannot grade. (Without this, a stopped
     // Docker daemon turns every claimed eval into a bogus `passed_match:false`
     // verdict — see jinn-mono-uy6v.8.)
-    const run = this.deps.runCommand ?? runCommand;
-    const dockerCheck = await run('docker', ['info']);
-    if (dockerCheck.exitCode !== 0) {
+    if (!(await this.isDockerReachable())) {
       return {
         ready: false,
         reason: 'Docker daemon not reachable',
@@ -406,7 +421,17 @@ async function runCommand(
   });
 }
 
-function readEnabledState(implStateDir: string): EnabledState | null {
+/**
+ * The default `implStateDir` for the swe-rebench-v2 evaluator. The daemon
+ * normally injects this via `engine.implStateDirRoot`; consumers (e.g. the
+ * `validate-pool` CLI command) that need to locate the upstream eval repo
+ * without going through the daemon use this default.
+ */
+export function defaultSweRebenchV2EvaluatorImplStateDir(): string {
+  return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
+}
+
+export function readEnabledState(implStateDir: string): EnabledState | null {
   const path = join(implStateDir, STATE_FILE);
   if (!existsSync(path)) return null;
   try {
