@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -392,14 +392,27 @@ describe('PythonEvalRunner', () => {
 
     it('falls back to DEFAULT_EVAL_IMAGE_CACHE_MAX when the env var is invalid (0 / negative / non-numeric / empty)', () => {
       const prev = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        for (const garbage of ['0', '-5', 'garbage', '', '  ', '1e3oops']) {
+        const invalidInputs = ['0', '-5', 'garbage', '', '  ', '1e3oops'];
+        for (const garbage of invalidInputs) {
+          warn.mockClear();
           process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = garbage;
           expect(resolveImageCacheMax(undefined)).toBe(DEFAULT_EVAL_IMAGE_CACHE_MAX);
+          // Operators who mistype the env var get a loud signal — silent
+          // fallback was the original review finding here. The literal value
+          // is interpolated so trailing whitespace / empty-string typos are
+          // unambiguous in the log.
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining(`JINN_EVAL_IMAGE_CACHE_MAX=${JSON.stringify(garbage)}`),
+          );
         }
-        // Sanity: a valid positive integer is honored.
+        // Sanity: a valid positive integer is honored and does NOT warn.
+        warn.mockClear();
         process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '7';
         expect(resolveImageCacheMax(undefined)).toBe(7);
+        expect(warn).not.toHaveBeenCalled();
         // Explicit option always wins over env (positive option short-circuits).
         process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '999';
         expect(resolveImageCacheMax(3)).toBe(3);
@@ -409,7 +422,46 @@ describe('PythonEvalRunner', () => {
       } finally {
         if (prev === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
         else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prev;
+        warn.mockRestore();
       }
+    });
+
+    it('warns when the production docker rmi cleanup exits non-zero so a flaky daemon is visible (jinn-mono-uy6v.11)', async () => {
+      // Stub `docker` on PATH with a script that exits non-zero — simulating
+      // "image is in use by container", "permission denied", or a daemon
+      // restart. Pre-fix, `defaultCleanupImage` swallowed errors silently, so
+      // operators had zero visibility into a persistently-failing `docker rmi`
+      // until the disk filled.
+      const upstreamRepoDir = makeUpstreamFixture();
+      const prevPath = process.env['PATH'];
+      const prevCacheMax = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+      const stubDir = mkdtempSync(join(tmpdir(), 'swe-rebench-docker-rmi-fail-stub-'));
+      tempDirs.push(stubDir);
+      writeFileSync(join(stubDir, 'docker'), '#!/usr/bin/env bash\nexit 1\n');
+      chmodSync(join(stubDir, 'docker'), 0o755);
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env['PATH'] = `${stubDir}:${prevPath ?? ''}`;
+      process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = '1';
+      let warnCalls: string[] = [];
+      try {
+        const runner = new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 });
+        await runner.runEval({ ...REQUEST, instance_id: 'i1', image: 'img-1:latest' });
+        // Second distinct image → triggers cleanup of img-1 → docker stub exits 1.
+        await runner.runEval({ ...REQUEST, instance_id: 'i2', image: 'img-2:latest' });
+        warnCalls = warn.mock.calls.map((c) => String(c[0]));
+      } finally {
+        if (prevPath === undefined) delete process.env['PATH'];
+        else process.env['PATH'] = prevPath;
+        if (prevCacheMax === undefined) delete process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
+        else process.env['JINN_EVAL_IMAGE_CACHE_MAX'] = prevCacheMax;
+        warn.mockRestore();
+      }
+      // Warn fired with the image tag + non-zero exit code. (Captured before
+      // mockRestore so a captures-after-restore quirk can't be the failure.)
+      const cleanupWarn = warnCalls.find((m) => m.includes('docker rmi img-1:latest'));
+      expect(cleanupWarn).toBeTruthy();
+      expect(cleanupWarn).toContain('exited 1');
     });
   });
 });

@@ -98,25 +98,50 @@ export function resolveImageCacheMax(opt: number | undefined): number {
   if (typeof opt === 'number' && Number.isFinite(opt) && opt > 0) return Math.floor(opt);
   const envRaw = process.env['JINN_EVAL_IMAGE_CACHE_MAX'];
   if (envRaw !== undefined) {
-    // `Number()` rejects strings with trailing garbage (e.g. `"1e3oops"` →
-    // NaN), unlike `parseInt`. We want operators who typo this to fall back
-    // to the default, not silently get `1`.
+    // `Number()` returns 0 for `""` / whitespace and NaN for strings with
+    // non-numeric content (e.g. `"garbage"`, `"1e3oops"`) — unlike `parseInt`,
+    // which would silently accept `parseInt("1e3oops") === 1`. Either way we
+    // reject anything that isn't a positive integer.
     const parsed = Number(envRaw);
     if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0) return parsed;
+    // Surface the typo so operators discover it before the disk fills,
+    // rather than silently running on the default.
+    console.warn(
+      `[swe-rebench-v2] JINN_EVAL_IMAGE_CACHE_MAX=${JSON.stringify(envRaw)} is not a positive integer — using default ${DEFAULT_EVAL_IMAGE_CACHE_MAX}`,
+    );
   }
   return DEFAULT_EVAL_IMAGE_CACHE_MAX;
 }
 
 /**
- * Production `cleanupImage`: spawn `docker rmi <image>`. Errors are swallowed
- * — a missing/failed `docker rmi` is operationally tolerable (cache will
- * remain bloated for a while; not a correctness failure).
+ * Production `cleanupImage`: spawn `docker rmi <image>`. Errors are tolerated
+ * — a missing/failed `docker rmi` is operationally survivable (the image
+ * stays on disk; cache stays bloated for a while; not a correctness failure)
+ * — but we warn on non-zero exit and on failed-to-spawn so a persistently-flaky
+ * daemon (or a permission slip) becomes visible before disks fill. Silent
+ * leaks were the original failure mode `jinn-mono-uy6v.11` exists to fix.
+ *
+ * We listen on `'exit'` rather than `'close'` and route stdio to `'ignore'`
+ * so the resolve path doesn't depend on parent-side stream draining (which
+ * can fail to fire `'close'` cleanly when piped without backpressure on the
+ * right tick). The image tag + exit code is sufficient signal; operators can
+ * grep the docker daemon log for the underlying reason.
  */
 function defaultCleanupImage(image: string): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn('docker', ['rmi', image], { stdio: ['ignore', 'ignore', 'ignore'] });
-    child.on('close', () => resolve());
-    child.on('error', () => resolve());
+    child.on('exit', (code, signal) => {
+      if (code !== 0) {
+        const status =
+          code !== null ? `exited ${code}` : `terminated by signal ${signal ?? 'unknown'}`;
+        console.warn(`[swe-rebench-v2] docker rmi ${image} ${status}`);
+      }
+      resolve();
+    });
+    child.on('error', (err) => {
+      console.warn(`[swe-rebench-v2] docker rmi ${image} failed to spawn: ${err.message}`);
+      resolve();
+    });
   });
 }
 
