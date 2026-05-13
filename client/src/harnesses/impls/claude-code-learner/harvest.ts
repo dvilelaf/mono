@@ -208,7 +208,7 @@ function maybeMaterializeSweRebenchPatchPayload(
 }
 
 function payloadRole(task?: Task): Role {
-  return task?.role === 'evaluation' ? 'verdict' : 'restoration';
+  return task?.role === 'evaluation' ? 'verdict' : 'solution';
 }
 
 function normalizeTypedPayload(
@@ -222,7 +222,7 @@ function normalizeTypedPayload(
 
   if (
     solverType === 'swe-rebench-v2.v1' &&
-    role === 'restoration' &&
+    role === 'solution' &&
     raw['schemaVersion'] === undefined &&
     typeof raw['patch'] === 'string' &&
     raw['patch'].trim()

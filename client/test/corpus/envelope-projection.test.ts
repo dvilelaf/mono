@@ -11,7 +11,7 @@ describe('projectEnvelope', () => {
   it('projects prediction.v1 Solution metadata from envelope and Task context', () => {
     const task = makePredictionTask();
     const projection = projectEnvelope(makeEnvelope({
-      role: 'restoration',
+      role: 'solution',
       taskCid: TASK_CID,
       requestId: REQUEST_ID,
       signatureHash: `0x${'a'.repeat(64)}`,
@@ -31,7 +31,7 @@ describe('projectEnvelope', () => {
     expect(projection).toMatchObject({
       envelopeId: 'bafy-solution-envelope',
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid: TASK_CID,
       taskId: TASK_ID,
       requestId: REQUEST_ID,

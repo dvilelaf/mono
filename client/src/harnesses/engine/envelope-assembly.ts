@@ -13,6 +13,7 @@ import { signCanonical } from './signing.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import type {
   Role,
+  LegacyEnvelopeRole,
   EvidenceTier,
   SignedEnvelope,
   Artifact,
@@ -23,7 +24,7 @@ import { validateManifestForPublish } from './validate-manifest.js';
 
 export interface EnvelopeInputs {
   solverType: string;
-  role: Role;
+  role: Role | LegacyEnvelopeRole;
   task: {
     cid: string;
     onchainCreationTx: string;

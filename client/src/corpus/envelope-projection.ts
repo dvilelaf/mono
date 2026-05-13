@@ -3,7 +3,7 @@ import type {
   EnvelopeProjectionMetadata,
   EnvelopeProjectionMetadataValue,
 } from './types.js';
-import type { SignedEnvelope } from '../types/envelope.js';
+import { normalizeEnvelopeRole, type SignedEnvelope } from '../types/envelope.js';
 import type { Task } from '../types/task.js';
 
 const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid';
@@ -22,6 +22,7 @@ export function projectEnvelope(
   options: ProjectEnvelopeOptions = {},
 ): EnvelopeProjection {
   const metadata: EnvelopeProjectionMetadata = {};
+  const role = normalizeEnvelopeRole(envelope.role);
 
   setMetadata(metadata, 'participant.safeAddress', envelope.participant.safeAddress);
   setMetadata(metadata, 'participant.agentEoa', envelope.participant.agentEoa);
@@ -68,7 +69,7 @@ export function projectEnvelope(
     envelopeSha256,
     signatureHash: envelope.signature.hash,
     solverType: envelope.solverType,
-    role: envelope.role,
+    role,
     taskCid: projectedTaskCid,
     taskId: projectedTaskId,
     requestId: envelope.task?.requestId ?? null,
@@ -103,7 +104,7 @@ function projectPredictionV1Fields(
   const solutionEnvelope = record(payload?.solutionEnvelope);
 
   setMetadata(metadata, 'solverType', envelope.solverType);
-  setMetadata(metadata, 'role', envelope.role);
+  setMetadata(metadata, 'role', normalizeEnvelopeRole(envelope.role));
   setMetadata(metadata, 'source.venue', stringValue(taskSource?.venue) ?? stringValue(resolutionSource?.venue));
   setMetadata(metadata, 'source.marketId', stringValue(taskIdentifiers?.marketId) ?? stringValue(resolutionSource?.marketId));
   setMetadata(

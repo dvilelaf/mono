@@ -25,7 +25,7 @@ describe('Store envelope projection index', () => {
   it('queries Solution and Verdict projections grouped under one Task projection', () => {
     const task = makePredictionTask();
     const solutionA = projectEnvelope(makeEnvelope({
-      role: 'restoration',
+      role: 'solution',
       generatedAt: 1000,
       taskCid: TASK_CID,
       requestId: `0x${'1'.repeat(64)}`,
@@ -33,7 +33,7 @@ describe('Store envelope projection index', () => {
       payload: { probabilityYes: '0.5700', submittedAt: '2026-05-02T01:00:00.000Z', modelId: 'solver-a' },
     }), { envelopeCid: 'bafy-solution-a', task, taskId: TASK_ID });
     const solutionB = projectEnvelope(makeEnvelope({
-      role: 'restoration',
+      role: 'solution',
       generatedAt: 1100,
       taskCid: TASK_CID,
       requestId: `0x${'2'.repeat(64)}`,
@@ -63,7 +63,7 @@ describe('Store envelope projection index', () => {
 
     const solutions = store.queryEnvelopeProjections({
       solverType: 'prediction.v1',
-      role: 'restoration',
+      role: 'solution',
       taskCid: TASK_CID,
     });
     const verdicts = store.queryEnvelopeProjections({
@@ -100,7 +100,7 @@ describe('Store envelope projection index', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
       solverType: 'legacy.v0',
-      role: 'restoration',
+      role: 'solution',
       taskCid: 'bafy-generic-task',
       solutionEnvelopeRef: null,
     });

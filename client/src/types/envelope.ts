@@ -25,10 +25,11 @@ export type EvidenceTier = z.infer<typeof EvidenceTierSchema>;
 export const CanonicalRoleSchema = z.enum(['solution', 'verdict', 'capture']);
 export type CanonicalRole = z.infer<typeof CanonicalRoleSchema>;
 export type LegacyEnvelopeRole = 'restoration';
-export type Role = CanonicalRole | LegacyEnvelopeRole;
+export type RawEnvelopeRole = CanonicalRole | LegacyEnvelopeRole;
+export type Role = CanonicalRole;
 export const RawRoleSchema = z.union([CanonicalRoleSchema, z.literal('restoration')]);
 
-export function normalizeEnvelopeRole(role: Role): CanonicalRole;
+export function normalizeEnvelopeRole(role: RawEnvelopeRole): CanonicalRole;
 export function normalizeEnvelopeRole(role: unknown): unknown;
 export function normalizeEnvelopeRole(role: unknown): unknown {
   return role === 'restoration' ? 'solution' : role;
