@@ -51,6 +51,7 @@ const SOLVER_NET_ID = 'sn-test-1';
 const MANIFEST_CID = 'QmTestSolverNetManifestCid000000000000000001';
 const MANIFEST_HASH =
   '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+const PREDICTION_CONTRACT = { id: 'prediction', version: 'v1' };
 
 type LifecycleTarget = 'paused' | 'launched' | 'retired';
 type RegistrySummary = Record<string, unknown> & {
@@ -61,15 +62,10 @@ type JoinedSolverNetEntry = Record<string, unknown> & {
   manifestCid: string;
   roles: Array<'solver' | 'evaluator'>;
 };
-interface ObservedSetMetadataCall {
-  agentId: string;
-  key: string;
-  value: {
-    schemaVersion: 'solvernet.lifecycle.v1';
-    status: LifecycleTarget;
-    at: string;
-    hash: string;
-  };
+interface ObservedLifecycleRequest {
+  method: string;
+  solverNetId: string;
+  payload: { target: LifecycleTarget };
 }
 
 const RUNNING_BOOTSTRAP = {
@@ -113,7 +109,7 @@ const SOLVERNETS_CATALOG = {
       name: 'prediction',
       description:
         'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-      contract: { id: 'prediction', version: 'v1' },
+      contract: PREDICTION_CONTRACT,
       state: 'live',
       supportedRoles: ['solving', 'evaluating'],
       compatibleHarnesses: [
@@ -187,7 +183,7 @@ test.afterAll(async () => {
 interface MockState {
   draft: Record<string, unknown> | null;
   observedLaunches: Array<{ draftId: string }>;
-  observedSetMetadataCalls: ObservedSetMetadataCall[];
+  observedLifecycleRequests: ObservedLifecycleRequest[];
   /** How many times GET /v1/solvernets/launched/sn-test-1 has been called. */
   launchedReadCount: number;
   launchedRecord: Record<string, unknown> | null;
@@ -199,7 +195,7 @@ function makeMockState(overrides: Partial<MockState> = {}): MockState {
   return {
     draft: null,
     observedLaunches: [],
-    observedSetMetadataCalls: [],
+    observedLifecycleRequests: [],
     launchedReadCount: 0,
     launchedRecord: null,
     registrySummaries: [],
@@ -284,8 +280,7 @@ const MOCK_MANIFEST = {
     agentId: '9001',
   },
   contract: {
-    id: 'prediction.v1',
-    version: '1',
+    ...PREDICTION_CONTRACT,
     schemas: { task: {}, solution: {}, verdict: {} },
     claimPolicyDefaults: {
       mode: 'parallel',
@@ -333,8 +328,8 @@ function buildRegistrySummary(
     launcherSafeAddress: '0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF',
     status: 'launched',
     statusUpdatedAt: '2026-05-05T00:00:00.000Z',
-    contractId: 'prediction.v1',
-    contractVersion: '1',
+    contractId: PREDICTION_CONTRACT.id,
+    contractVersion: PREDICTION_CONTRACT.version,
     solutionPriceWei: '100000000000000',
     verdictPriceWei: '50000000000000',
     openRoles: ['solver', 'evaluator'],
@@ -343,17 +338,8 @@ function buildRegistrySummary(
   };
 }
 
-function buildLifecycleSetMetadataCall(target: LifecycleTarget): ObservedSetMetadataCall {
-  return {
-    agentId: '9001',
-    key: `solvernet-manifest:${MANIFEST_CID}`,
-    value: {
-      schemaVersion: 'solvernet.lifecycle.v1',
-      status: target,
-      at: `2026-05-05T00:00:0${target === 'paused' ? 1 : target === 'launched' ? 2 : 3}.000Z`,
-      hash: MANIFEST_HASH,
-    },
-  };
+function lifecycleResponseTimestamp(target: LifecycleTarget): string {
+  return `2026-05-05T00:00:0${target === 'paused' ? 1 : target === 'launched' ? 2 : 3}.000Z`;
 }
 
 async function fulfillLifecycleTransition(
@@ -381,17 +367,20 @@ async function fulfillLifecycleTransition(
     });
   }
 
-  const metadataCall = buildLifecycleSetMetadataCall(target);
-  state.observedSetMetadataCalls.push(metadataCall);
+  state.observedLifecycleRequests.push({
+    method: req.method(),
+    solverNetId: id,
+    payload: { target },
+  });
   state.launchedRecord = {
     ...state.launchedRecord,
     status: target,
-    statusUpdatedAt: metadataCall.value.at,
+    statusUpdatedAt: lifecycleResponseTimestamp(target),
     generatorEnabled: target === 'launched',
     registry: {
       metadataTxHash:
-        `0x${String(state.observedSetMetadataCalls.length).padStart(64, '0')}`,
-      metadataBlockNumber: 12345 + state.observedSetMetadataCalls.length,
+        `0x${String(state.observedLifecycleRequests.length).padStart(64, '0')}`,
+      metadataBlockNumber: 12345 + state.observedLifecycleRequests.length,
     },
   };
   return route.fulfill({
@@ -798,7 +787,7 @@ test('Launcher happy-path: walks Create wizard and lands on the post-launch dash
   expect(state.launchedReadCount).toBeGreaterThanOrEqual(3);
 });
 
-test('Launcher lifecycle transitions: Pause, Resume, Retire publish lifecycle setMetadata payloads and update status', async ({
+test('Launcher lifecycle transitions: Pause, Resume, Retire send lifecycle requests and update status', async ({
   page,
 }) => {
   await clearLocalStorage(page);
@@ -851,10 +840,22 @@ test('Launcher lifecycle transitions: Pause, Resume, Retire publish lifecycle se
   );
   await expect(page.getByTestId('launcher-launched-terminal-pill')).toBeVisible();
 
-  expect(state.observedSetMetadataCalls).toEqual([
-    buildLifecycleSetMetadataCall('paused'),
-    buildLifecycleSetMetadataCall('launched'),
-    buildLifecycleSetMetadataCall('retired'),
+  expect(state.observedLifecycleRequests).toEqual([
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'paused' },
+    },
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'launched' },
+    },
+    {
+      method: 'PATCH',
+      solverNetId: SOLVER_NET_ID,
+      payload: { target: 'retired' },
+    },
   ]);
 });
 
@@ -898,7 +899,7 @@ test('Operator catalog join flow writes manifest-cid keyed evaluator config from
   expect(state.joinedSolverNets[MANIFEST_CID]).toMatchObject({
     manifestCid: MANIFEST_CID,
     name: MOCK_MANIFEST.name,
-    contract: { id: 'prediction.v1', version: '1' },
+    contract: PREDICTION_CONTRACT,
     roles: ['evaluator'],
   });
   expect(state.joinedSolverNets[MANIFEST_CID].harness).toBeUndefined();
