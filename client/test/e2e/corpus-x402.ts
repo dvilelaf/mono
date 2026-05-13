@@ -47,6 +47,7 @@ import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
 const BASE_USDC_BALANCE_SLOT = 9n;
+const DEFAULT_BASE_FORK_BLOCK = 45_930_000;
 const MOCK_IDENTITY_REGISTRY = '0x1000000000000000000000000000000000008004' as const;
 const PRODUCER_PRIVATE_KEY = '0xe8995487b20e0a75915567c5c8976b9deaed52d78b75ab5e04ce69c380007ea6' as const;
 const CONSUMER_PRIVATE_KEY = '0x2a1a0e4897413cbd6f28fd0571ce6538fbce72a9a9cc189ec9d7f843ab2b7ba4' as const;
@@ -67,6 +68,14 @@ const ERC20_BALANCE_ABI = [
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function corpusForkBlock(): number {
+  const raw = process.env['JINN_CORPUS_X402_FORK_BLOCK'];
+  if (raw === undefined || raw === '') return DEFAULT_BASE_FORK_BLOCK;
+  const block = Number(raw);
+  assert(Number.isSafeInteger(block) && block > 0, `invalid JINN_CORPUS_X402_FORK_BLOCK=${raw}`);
+  return block;
 }
 
 function sha256Hex(bytes: Buffer): string {
@@ -128,6 +137,14 @@ async function usdcBalance(publicClient: PublicClient, account: Address): Promis
     functionName: 'balanceOf',
     args: [account],
   });
+}
+
+async function alignForkTimestampToWallClock(anvil: AnvilHarness): Promise<void> {
+  const forkNow = BigInt(await anvil.now());
+  const wallClockNow = BigInt(Math.floor(Date.now() / 1000));
+  if (forkNow >= wallClockNow) return;
+  await anvilJsonRpc(anvil.rpcUrl, 'evm_setNextBlockTimestamp', [toHex(wallClockNow)]);
+  await anvilJsonRpc(anvil.rpcUrl, 'anvil_mine', ['0x1']);
 }
 
 async function publishEnvelopeMetadata(args: {
@@ -274,10 +291,12 @@ async function run(): Promise<void> {
   try {
     anvil = await spawnAnvilFork({
       forkUrl: process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org',
+      forkBlock: corpusForkBlock(),
       chain: base,
       silent: true,
       readyTimeoutMs: 30_000,
     });
+    await alignForkTimestampToWallClock(anvil);
     const publicClient = createPublicClient({
       chain: base,
       transport: http(anvil.rpcUrl),
@@ -293,7 +312,13 @@ async function run(): Promise<void> {
       producer.address,
       toHex(parseUnits('10', 18)),
     ]);
-    await setBaseUsdcBalance(anvil.rpcUrl, consumer.address, parseUnits('10', 6));
+    const fundedConsumerUsdc = parseUnits('10', 6);
+    await setBaseUsdcBalance(anvil.rpcUrl, consumer.address, fundedConsumerUsdc);
+    const consumerBalanceAfterFunding = await usdcBalance(publicClient, consumer.address);
+    assert(
+      consumerBalanceAfterFunding === fundedConsumerUsdc,
+      `consumer funded USDC balance=${formatUnits(consumerBalanceAfterFunding, 6)} expected ${formatUnits(fundedConsumerUsdc, 6)}`,
+    );
 
     producerStore = new Store(join(tmpDir, 'producer.sqlite'));
     consumerStore = new Store(join(tmpDir, 'consumer.sqlite'));
@@ -378,7 +403,14 @@ async function run(): Promise<void> {
       },
     });
 
-    const producerBalanceBefore = await usdcBalance(publicClient, producer.address);
+    const [producerBalanceBefore, consumerBalanceBefore] = await Promise.all([
+      usdcBalance(publicClient, producer.address),
+      usdcBalance(publicClient, consumer.address),
+    ]);
+    assert(
+      consumerBalanceBefore === fundedConsumerUsdc,
+      `consumer USDC before first read=${formatUnits(consumerBalanceBefore, 6)} expected ${formatUnits(fundedConsumerUsdc, 6)}`,
+    );
     let first: Awaited<ReturnType<typeof corpus.read>>;
     try {
       first = await corpus.read({
@@ -411,15 +443,28 @@ async function run(): Promise<void> {
     assert(networkRow.paidAmountUsdc === PRICE_USDC, `network_artifacts paid=${networkRow.paidAmountUsdc}`);
     assert(networkRow.content.equals(artifactBytes), 'network_artifacts bytes mismatch');
 
-    const producerBalanceAfterFirst = await usdcBalance(publicClient, producer.address);
+    const [producerBalanceAfterFirst, consumerBalanceAfterFirst] = await Promise.all([
+      usdcBalance(publicClient, producer.address),
+      usdcBalance(publicClient, consumer.address),
+    ]);
     assert(
       producerBalanceAfterFirst - producerBalanceBefore === priceUnits,
       `producer USDC delta=${formatUnits(producerBalanceAfterFirst - producerBalanceBefore, 6)} expected ${PRICE_USDC}`,
+    );
+    assert(
+      consumerBalanceBefore - consumerBalanceAfterFirst === priceUnits,
+      `consumer USDC delta=${formatUnits(consumerBalanceBefore - consumerBalanceAfterFirst, 6)} expected ${PRICE_USDC}`,
     );
     const paidEventsAfterFirst = producerStore
       .listArtifactAccessEvents({ sha256: artifactSha256 })
       .filter((event) => event.outcome === 'paid_served');
     assert(paidEventsAfterFirst.length === 1, `paid serve events after first read=${paidEventsAfterFirst.length}`);
+    const paidEventAfterFirst = paidEventsAfterFirst[0]!;
+    assert(
+      paidEventAfterFirst.payer?.toLowerCase() === consumer.address.toLowerCase(),
+      `paid serve payer=${paidEventAfterFirst.payer}, expected ${consumer.address}`,
+    );
+    assert(paidEventAfterFirst.settlementTx, 'paid serve event missing settlement tx');
 
     const second = await corpus.read({
       query: {
@@ -436,10 +481,17 @@ async function run(): Promise<void> {
     assert(routeResolverCalls === 1, `route resolver was called on cache hit (${routeResolverCalls})`);
     assert(acquireCalls === 1, `acquire was called on cache hit (${acquireCalls})`);
 
-    const producerBalanceAfterSecond = await usdcBalance(publicClient, producer.address);
+    const [producerBalanceAfterSecond, consumerBalanceAfterSecond] = await Promise.all([
+      usdcBalance(publicClient, producer.address),
+      usdcBalance(publicClient, consumer.address),
+    ]);
     assert(
       producerBalanceAfterSecond === producerBalanceAfterFirst,
       'producer USDC balance changed on cached read',
+    );
+    assert(
+      consumerBalanceAfterSecond === consumerBalanceAfterFirst,
+      'consumer USDC balance changed on cached read',
     );
     const paidEventsAfterSecond = producerStore
       .listArtifactAccessEvents({ sha256: artifactSha256 })
@@ -454,6 +506,7 @@ async function run(): Promise<void> {
         `artifactSha256=${artifactSha256}`,
         `paid=${PRICE_USDC}`,
         `producerUsdcDelta=${formatUnits(producerBalanceAfterFirst - producerBalanceBefore, 6)}`,
+        `consumerUsdcDelta=${formatUnits(consumerBalanceBefore - consumerBalanceAfterFirst, 6)}`,
       ].join(' ') + '\n',
     );
   } finally {
