@@ -20,7 +20,7 @@
  * Refs: jinn-mono-uy6v.9.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
@@ -66,6 +66,10 @@ function isValidFile(raw: unknown, evalSemanticsVersion: string): raw is Validat
 export class ValidatedPoolStore {
   private readonly file: string;
   private cache: ValidatedPoolFile | null = null;
+  /** mtime-keyed cache for `getScorableIds`. The generator's tick reads this
+   *  every poll (every few seconds); the file only changes during infrequent
+   *  `validate-pool` CLI runs. Invalidate on mtime change. */
+  private scorableIdsCache: { mtimeMs: number; semanticsVersion: string; ids: Set<string> | null } | null = null;
 
   constructor(opts: { stateDir: string }) {
     this.file = join(opts.stateDir, 'validated-pool.json');
@@ -95,11 +99,20 @@ export class ValidatedPoolStore {
 
   /** The set of instance ids known scorable for `evalSemanticsVersion`, or
    *  `null` if there is no validation data for this semantics version (the
-   *  on-disk file is absent or built for a different version). */
+   *  on-disk file is absent or built for a different version). Memoised by
+   *  mtime so the generator's tick doesn't re-parse the JSON every poll. */
   async getScorableIds(evalSemanticsVersion: string): Promise<Set<string> | null> {
+    const mtimeMs = await stat(this.file).then((s) => s.mtimeMs).catch(() => -1);
+    const cached = this.scorableIdsCache;
+    if (cached && cached.mtimeMs === mtimeMs && cached.semanticsVersion === evalSemanticsVersion) {
+      return cached.ids;
+    }
     const raw = await this.readRaw();
-    if (!isValidFile(raw, evalSemanticsVersion)) return null;
-    return new Set(Object.entries(raw.entries).filter(([, e]) => e.scorable).map(([id]) => id));
+    const ids = isValidFile(raw, evalSemanticsVersion)
+      ? new Set(Object.entries(raw.entries).filter(([, e]) => e.scorable).map(([id]) => id))
+      : null;
+    this.scorableIdsCache = { mtimeMs, semanticsVersion: evalSemanticsVersion, ids };
+    return ids;
   }
 
   /** The entry for `instanceId`, or `null` if not validated for this semantics version. */

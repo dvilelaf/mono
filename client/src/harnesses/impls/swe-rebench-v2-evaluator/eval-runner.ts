@@ -90,6 +90,14 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
+/** The pinned `test_log` size cap (the tail is what matters — pytest's
+ *  summary + last failures live there). */
+const MAX_LOG_SIZE = 1024 * 1024;
+function capLogTail(log: string): string {
+  if (log.length <= MAX_LOG_SIZE) return log;
+  return `[… ${log.length - MAX_LOG_SIZE} bytes truncated …]\n${log.slice(-MAX_LOG_SIZE)}`;
+}
+
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -231,7 +239,10 @@ export class PythonEvalRunner implements EvalRunner {
         logBody = '';
       }
     }
-    const fullLog = stdout + logBody;
+    // Cap the log we hand back. The harness pins this verbatim to IPFS as the
+    // verdict's `test_log_cid` — a long pytest run can produce 10s of MB, and
+    // we only need the tail (pytest summary + last failures) to be useful.
+    const fullLog = capLogTail(stdout + logBody);
 
     await rm(tmp, { recursive: true, force: true });
 

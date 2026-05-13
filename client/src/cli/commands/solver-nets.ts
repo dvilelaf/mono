@@ -283,16 +283,14 @@ Output flags:
       }
       // The upstream eval harness must be set up (`jinn harnesses enable
       // swe-rebench-v2-evaluator`) — that's where the eval.py repo lives.
-      const evalStatePath = join(homedir(), '.jinn-client', 'engine', 'impl-state', 'swe-rebench-v2-evaluator', 'state.json');
-      let upstreamRepoDir: string | undefined;
-      try {
-        const s = JSON.parse(readFileSync(evalStatePath, 'utf-8')) as { upstreamRepoDir?: string };
-        upstreamRepoDir = typeof s.upstreamRepoDir === 'string' ? s.upstreamRepoDir : undefined;
-      } catch { /* fall through to the error below */ }
-      if (!upstreamRepoDir || !existsSync(upstreamRepoDir)) {
+      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+        await import('../../harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
         fail(ctx, 'swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator` first');
         return;
       }
+      const upstreamRepoDir = enabled.upstreamRepoDir;
       // Docker must be reachable, or every gold-eval would be classified as
       // ungradeable and the whole pool wrongly marked unscorable.
       if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
