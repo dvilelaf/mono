@@ -1211,6 +1211,53 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     });
   });
 
+  it('uses the manifest contract before solverNetId when validating generator config patches', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const solverNetId = 'legacy-swe-record';
+    const cid = 'bafylegacyswemanifest1234567890';
+    const baseManifest = makeManifest({ solverNetId, manifestCid: cid });
+    const sweManifest: SolverNetManifestV1 = {
+      ...baseManifest,
+      contract: {
+        ...baseManifest.contract,
+        id: 'swe-rebench-v2',
+        version: 'v1',
+      },
+    };
+    const manifestPath = await store.writeManifestCache(cid, sweManifest);
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({ solverNetId, status: 'paused' }),
+      manifestCid: cid,
+      manifestHash: manifestHash(sweManifest),
+      manifestPath,
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ cooldown_ms: 300_000 }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      N_target_successes: 5,
+      N_max_postings_per_task: 15,
+      cooldown_ms: 300_000,
+    });
+  });
+
   it('rejects swe-rebench-v2 claim policy with per-operator claims above max claims', async () => {
     const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
     const launchBundle = makeLaunchDeps({ store, pendingGenerators });
@@ -1241,6 +1288,83 @@ describe('PATCH /v1/solvernets/launched/:id/generator-config (Task 14)', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message?: string };
     expect(body.message).toMatch(/maxClaimsPerOperator/);
+  });
+
+  it('rejects partial swe-rebench-v2 patches that violate merged posting invariants', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ N_target_successes: 20 }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      message?: string;
+      issues?: Array<{ path: string; message: string }>;
+    };
+    expect(body.message).toMatch(/N_target_successes/);
+    expect(body.issues).toContainEqual({
+      path: 'N_max_postings_per_task',
+      message: 'must be >= N_target_successes',
+    });
+    const onDisk = await store.loadRecord(launched.solverNetId);
+    expect(onDisk?.generatorConfig).toEqual(launched.generatorConfig);
+  });
+
+  it('rejects prediction-shaped patches for swe-rebench-v2 records with schema issues', async () => {
+    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
+    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
+    const { app } = buildTestApp({ store, launch: launchBundle.launch });
+    const launched: LaunchedSolverNetRecord = {
+      ...makeOwnedRecord({
+        solverNetId: '5474_swe-rebench-v2-v1_edb172d3',
+        status: 'paused',
+      }),
+      generatorEnabled: true,
+      generatorConfig: {
+        N_target_successes: 5,
+        N_max_postings_per_task: 15,
+        cooldown_ms: 86_400_000,
+      },
+    };
+    await store.writeRecord(launched);
+
+    const res = await app.request(
+      `/v1/solvernets/launched/${launched.solverNetId}/generator-config`,
+      {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ cadenceMs: 60_000, maxOpenRounds: 3 }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      kind?: string;
+      issues?: Array<{ message: string }>;
+    };
+    expect(body.kind).toBe('schema_validation_failed');
+    expect(body.issues?.some((issue) => issue.message.includes('cadenceMs'))).toBe(true);
   });
 
   it('rejects unknown record id with 404', async () => {

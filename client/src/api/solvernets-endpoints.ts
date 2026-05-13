@@ -74,7 +74,10 @@ import type {
   PendingGeneratorSpawn,
   SolverNetCatalogCache,
 } from '../solvernets/daemon-init.js';
-import { resolveContractFromSolverNetId } from '../solvernets/launched-record-dispatcher.js';
+import {
+  resolveLaunchedRecordContract,
+  type LaunchedRecordContractRef,
+} from '../solvernets/launched-record-dispatcher.js';
 import type {
   SignerWithAgentEoa,
   SolverNetManifestSummary,
@@ -312,12 +315,11 @@ const SweRebenchV2GeneratorConfigPatchSchema = z
     }
   });
 
-function isRecordForContract(
-  record: LaunchedSolverNetRecord,
+function isContractRefFor(
+  contract: LaunchedRecordContractRef | null,
   id: string,
   version: string,
 ): boolean {
-  const contract = resolveContractFromSolverNetId(record.solverNetId);
   return contract?.id === id && contract.version === version;
 }
 
@@ -339,6 +341,7 @@ function defaultSweRebenchV2ClaimPolicy(): {
 
 function mergeGeneratorConfigPatchForRecord(
   record: LaunchedSolverNetRecord,
+  contract: LaunchedRecordContractRef | null,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
   const nextConfig: Record<string, unknown> = {
@@ -346,7 +349,7 @@ function mergeGeneratorConfigPatchForRecord(
     ...patch,
   };
   if (
-    isRecordForContract(record, 'swe-rebench-v2', 'v1') &&
+    isContractRefFor(contract, 'swe-rebench-v2', 'v1') &&
     typeof patch.claimPolicy === 'object' &&
     patch.claimPolicy !== null
   ) {
@@ -364,10 +367,26 @@ function mergeGeneratorConfigPatchForRecord(
 }
 
 function validateSweRebenchV2EffectiveConfig(
-  record: LaunchedSolverNetRecord,
+  contract: LaunchedRecordContractRef | null,
   config: Record<string, unknown>,
-): string | undefined {
-  if (!isRecordForContract(record, 'swe-rebench-v2', 'v1')) return undefined;
+): { path: string; message: string } | undefined {
+  if (!isContractRefFor(contract, 'swe-rebench-v2', 'v1')) return undefined;
+  const targetSuccesses = typeof config.N_target_successes === 'number'
+    ? config.N_target_successes
+    : undefined;
+  const maxPostingsPerTask = typeof config.N_max_postings_per_task === 'number'
+    ? config.N_max_postings_per_task
+    : undefined;
+  if (
+    targetSuccesses !== undefined &&
+    maxPostingsPerTask !== undefined &&
+    maxPostingsPerTask < targetSuccesses
+  ) {
+    return {
+      path: 'N_max_postings_per_task',
+      message: 'must be >= N_target_successes',
+    };
+  }
   const defaults = defaultSweRebenchV2ClaimPolicy();
   const rawPolicy =
     typeof config.claimPolicy === 'object' && config.claimPolicy !== null
@@ -380,19 +399,32 @@ function validateSweRebenchV2EffectiveConfig(
     ? rawPolicy.maxClaimsPerOperator
     : defaults.maxClaimsPerOperator;
   if (maxClaimsPerOperator > maxClaims) {
-    return 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims';
+    return {
+      path: 'claimPolicy.maxClaimsPerOperator',
+      message: 'claimPolicy.maxClaimsPerOperator must be <= claimPolicy.maxClaims',
+    };
   }
   return undefined;
 }
 
 function parseGeneratorConfigPatchForRecord(
-  record: LaunchedSolverNetRecord,
+  contract: LaunchedRecordContractRef | null,
   raw: unknown,
 ): z.SafeParseReturnType<unknown, Record<string, unknown>> {
-  if (isRecordForContract(record, 'swe-rebench-v2', 'v1')) {
+  if (isContractRefFor(contract, 'swe-rebench-v2', 'v1')) {
     return SweRebenchV2GeneratorConfigPatchSchema.safeParse(raw);
   }
   return PredictionV1GeneratorConfigPatchSchema.safeParse(raw);
+}
+
+function zodIssuesForResponse(error: z.ZodError): Array<{
+  path: string;
+  message: string;
+}> {
+  return error.issues.map((issue) => ({
+    path: issue.path.join('.') || '<body>',
+    message: issue.message,
+  }));
 }
 
 // ── Launch helpers ──────────────────────────────────────────────────────────
@@ -1242,14 +1274,16 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
 
-    const parsed = parseGeneratorConfigPatchForRecord(record, raw);
+    const contract = await resolveLaunchedRecordContract(record);
+    const parsed = parseGeneratorConfigPatchForRecord(contract, raw);
     if (!parsed.success) {
+      const issues = zodIssuesForResponse(parsed.error);
       return c.json(
         {
           error: 'invalid_body',
-          message: parsed.error.issues
-            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
-            .join('; '),
+          kind: 'schema_validation_failed',
+          issues,
+          message: issues.map((i) => `${i.path}: ${i.message}`).join('; '),
         },
         400,
       );
@@ -1257,13 +1291,20 @@ export function registerSolverNetsEndpoints(
 
     // Patch semantics: merge the provided fields over the existing config.
     // Operators editing one field shouldn't have to re-send the rest.
-    const nextConfig = mergeGeneratorConfigPatchForRecord(record, parsed.data);
-    const effectiveConfigError = validateSweRebenchV2EffectiveConfig(record, nextConfig);
+    const nextConfig = mergeGeneratorConfigPatchForRecord(record, contract, parsed.data);
+    const effectiveConfigError = validateSweRebenchV2EffectiveConfig(contract, nextConfig);
     if (effectiveConfigError) {
       return c.json(
         {
           error: 'invalid_body',
-          message: effectiveConfigError,
+          kind: 'schema_validation_failed',
+          issues: [
+            {
+              path: effectiveConfigError.path,
+              message: effectiveConfigError.message,
+            },
+          ],
+          message: effectiveConfigError.message,
         },
         400,
       );
