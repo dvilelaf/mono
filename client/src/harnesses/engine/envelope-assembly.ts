@@ -17,6 +17,7 @@ import type {
   SignedEnvelope,
   Artifact,
 } from '../../types/envelope.js';
+import { normalizeEnvelopeRole } from '../../types/envelope.js';
 import { validatePayload } from '../../types/payloads/index.js';
 import { validateManifestForPublish } from './validate-manifest.js';
 
@@ -75,14 +76,15 @@ export async function assembleAndSignEnvelope(
   const attestation = inputs.attestation ?? null;
   const trajectory = inputs.trajectory ?? null;
   const generatedAt = inputs.generatedAt ?? Date.now();
+  const role = normalizeEnvelopeRole(inputs.role);
 
   // Validate the payload against the registry before building the envelope.
-  validatePayload(inputs.solverType, inputs.role, inputs.payload);
+  validatePayload(inputs.solverType, role, inputs.payload);
 
   const unsigned = {
     schemaVersion: 'jinn.execution.v1' as const,
     solverType: inputs.solverType,
-    role: inputs.role,
+    role,
     generatedAt,
     task: inputs.task,
     participant: inputs.participant,

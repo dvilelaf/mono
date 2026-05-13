@@ -162,8 +162,8 @@ describe('SignedEnvelopeSchema', () => {
     expect(() => SignedEnvelopeSchema.parse(baseSigned)).not.toThrow();
   });
 
-  it('normalizes signed legacy restoration envelopes to solution on read', () => {
+  it('preserves signed legacy restoration envelopes for hash verification', () => {
     const parsed = SignedEnvelopeSchema.parse({ ...baseSigned, role: 'restoration' });
-    expect(parsed.role).toBe('solution');
+    expect(parsed.role).toBe('restoration');
   });
 });

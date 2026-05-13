@@ -79,6 +79,15 @@ describe('checkPayload', () => {
     expect(result.layer).toBe(1);
   });
 
+  it('normalizes legacy restoration role only for payload schema lookup', async () => {
+    const ctx = await buildGoodCtx();
+    const result = checkPayload({
+      ...ctx,
+      envelope: { ...ctx.envelope!, role: 'restoration' },
+    });
+    expect(result.passed).toBe(true);
+  });
+
   it('fails when payload is malformed for the declared kind+role', async () => {
     const ctx = await buildGoodCtx();
     const bad: ConformanceContext = {

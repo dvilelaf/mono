@@ -26,6 +26,7 @@ export const CanonicalRoleSchema = z.enum(['solution', 'verdict', 'capture']);
 export type CanonicalRole = z.infer<typeof CanonicalRoleSchema>;
 export type LegacyEnvelopeRole = 'restoration';
 export type Role = CanonicalRole | LegacyEnvelopeRole;
+export const RawRoleSchema = z.union([CanonicalRoleSchema, z.literal('restoration')]);
 
 export function normalizeEnvelopeRole(role: Role): CanonicalRole;
 export function normalizeEnvelopeRole(role: unknown): unknown;
@@ -183,7 +184,7 @@ export const UnsignedEnvelopeSchema = z
 export type UnsignedEnvelope = z.infer<typeof UnsignedEnvelopeSchema>;
 
 export const SignedEnvelopeSchema = z
-  .object({ ...BaseEnvelopeFields, signature: SignatureSchema })
+  .object({ ...BaseEnvelopeFields, role: RawRoleSchema, signature: SignatureSchema })
   .refine(
     (e) => e.evidenceTier !== 'attested' || e.executor.source !== undefined,
     { message: 'attested tier requires executor.source', path: ['executor', 'source'] },

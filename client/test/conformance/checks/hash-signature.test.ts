@@ -3,6 +3,8 @@ import { checkHashAndSignature } from '../../../src/conformance/checks/hash-sign
 import type { ConformanceContext } from '../../../src/conformance/types.js';
 import { assembleAndSignEnvelope } from '../../../src/harnesses/engine/envelope-assembly.js';
 import type { EnvelopeInputs, EnvelopeAssemblyDeps } from '../../../src/harnesses/engine/envelope-assembly.js';
+import { signCanonical } from '../../../src/harnesses/engine/signing.js';
+import { SignedEnvelopeSchema } from '../../../src/types/envelope.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn(async () => 'bafy-mock-cid'),
@@ -70,6 +72,40 @@ async function buildGoodCtx(): Promise<ConformanceContext> {
   };
 }
 
+async function buildLegacyRestorationCtx(): Promise<ConformanceContext> {
+  const unsigned = {
+    schemaVersion: 'jinn.execution.v1' as const,
+    solverType: baseInputs.solverType,
+    role: 'restoration' as const,
+    generatedAt: baseInputs.generatedAt!,
+    task: baseInputs.task,
+    participant: baseInputs.participant,
+    window: baseInputs.window,
+    executor: { ...baseInputs.executor, mode: 'train' as const },
+    evidenceTier: 'self-signed' as const,
+    attestation: null,
+    trajectory: null,
+    artifacts: baseInputs.artifacts,
+    payload: baseInputs.payload,
+  };
+  const signed = await signCanonical(unsigned, TEST_PK, TEST_ADDRESS);
+  const envelope = SignedEnvelopeSchema.parse({
+    ...unsigned,
+    signature: {
+      algo: 'secp256k1',
+      signer: TEST_ADDRESS,
+      hash: signed.hash,
+      sig: signed.sig,
+    },
+  });
+
+  return {
+    envelope,
+    envelopeCid: 'bafy-legacy-test',
+    options: {},
+  };
+}
+
 describe('checkHashAndSignature', () => {
   it('passes on a valid envelope with correct hash and signature', async () => {
     const ctx = await buildGoodCtx();
@@ -77,6 +113,13 @@ describe('checkHashAndSignature', () => {
     expect(result.passed).toBe(true);
     expect(result.id).toBe('envelope.hash-signature');
     expect(result.layer).toBe(1);
+  });
+
+  it('passes on a legacy restoration envelope signed before role canonicalization', async () => {
+    const ctx = await buildLegacyRestorationCtx();
+    expect(ctx.envelope!.role).toBe('restoration');
+    const result = await checkHashAndSignature(ctx);
+    expect(result.passed).toBe(true);
   });
 
   it('fails when signature.hash does not match recomputed hash', async () => {

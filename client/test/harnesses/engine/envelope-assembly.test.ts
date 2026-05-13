@@ -87,6 +87,11 @@ describe('assembleAndSignEnvelope', () => {
     expect(result.envelope.evidenceTier).toBe('self-signed');
   });
 
+  it('normalizes legacy restoration input to canonical solution before signing', async () => {
+    const result = await assembleAndSignEnvelope(baseInputs, deps);
+    expect(result.envelope.role).toBe('solution');
+  });
+
   it('defaults attestation and trajectory to null', async () => {
     const result = await assembleAndSignEnvelope(baseInputs, deps);
     expect(result.envelope.attestation).toBeNull();
