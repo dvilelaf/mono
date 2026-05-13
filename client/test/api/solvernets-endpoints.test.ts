@@ -30,6 +30,7 @@ import {
   LaunchAction,
   type LaunchActionDeps,
 } from '../../src/solvernets/launch-state-machine.js';
+import { manifestHash } from '../../src/solvernets/manifest.js';
 import {
   LifecycleTransition,
   type LifecycleTransitionDeps,
@@ -2009,6 +2010,7 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
     await store.writeRecord({
       ...makeOwnedRecord({ solverNetId: 'owned-local', status: 'launched' }),
       manifestCid: cid,
+      manifestHash: manifestHash(manifest),
       manifestPath,
     });
 
@@ -2036,6 +2038,67 @@ describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
     });
     expect(registry.getManifestCalls).toEqual([]);
   });
+
+  it('ignores an owned cached manifest whose canonical hash does not match the record', async () => {
+    const cid = 'bafyownedhashmismatch1234567890';
+    const manifest = makeManifest({
+      solverNetId: 'owned-hash-mismatch',
+      manifestCid: cid,
+    });
+    const manifestPath = await store.writeManifestCache(cid, manifest);
+    await store.writeRecord({
+      ...makeOwnedRecord({ solverNetId: 'owned-hash-mismatch', status: 'launched' }),
+      manifestCid: cid,
+      manifestHash: `0x${'11'.repeat(32)}`,
+      manifestPath,
+    });
+
+    const { app } = buildTestApp({ store });
+
+    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('registry_unavailable');
+  });
+
+  it.each(['launching', 'failed'] as const)(
+    'does not serve an owned cached %s manifest before the lifecycle is anchored',
+    async (status) => {
+      const cid = `bafyowned${status}prebroadcast1234567890`;
+      const solverNetId = `owned-${status}-prebroadcast`;
+      const manifest = makeManifest({ solverNetId, manifestCid: cid });
+      const manifestPath = await store.writeManifestCache(cid, manifest);
+      await store.writeRecord({
+        ...makeOwnedRecord({ solverNetId, status }),
+        manifestCid: cid,
+        manifestHash: manifestHash(manifest),
+        manifestPath,
+        registry: {},
+        launchProgress: {
+          phase: 'broadcasting',
+          attemptCount: status === 'failed' ? 3 : 0,
+          ...(status === 'failed'
+            ? { txError: { message: 'setMetadata failed', at: '2026-05-06T00:00:00.000Z' } }
+            : {}),
+        },
+      });
+
+      const { app } = buildTestApp({ store });
+
+      const res = await app.request(`/v1/solvernets/registry/${cid}`, {
+        method: 'GET',
+        headers: authHeaders(),
+      });
+
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('registry_unavailable');
+    },
+  );
 
   it('happy path: returns the manifest + lifecycle status', async () => {
     const cid = 'bafyabcdef1234567890';

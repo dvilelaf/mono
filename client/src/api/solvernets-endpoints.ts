@@ -64,6 +64,7 @@ import {
   type SolverNetStore,
 } from '../solvernets/store.js';
 import {
+  manifestHash,
   signManifest,
   type UnsignedSolverNetManifestV1,
 } from '../solvernets/manifest.js';
@@ -585,6 +586,7 @@ async function tryGetOwnedCachedManifest(
     const manifest = await store.loadManifestCache(record.manifestPath);
     if (!manifest) continue;
     if (manifest.solverNetId !== record.solverNetId) continue;
+    if (manifestHash(manifest) !== record.manifestHash) continue;
     return { record, manifest };
   }
   return null;
@@ -594,14 +596,16 @@ function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
   status: 'launched' | 'paused' | 'retired';
   statusUpdatedAt: string;
   sourceBlock: number;
-} {
+} | null {
+  const sourceBlock = record.registry.metadataBlockNumber;
+  if (sourceBlock === undefined) return null;
   return {
     status:
       record.status === 'paused' || record.status === 'retired'
         ? record.status
         : 'launched',
     statusUpdatedAt: record.statusUpdatedAt,
-    sourceBlock: record.registry.metadataBlockNumber ?? 0,
+    sourceBlock,
   };
 }
 
@@ -1484,10 +1488,13 @@ export function registerSolverNetsEndpoints(
       );
     }
     if (ownedCached) {
-      return c.json({
-        manifest: ownedCached.manifest,
-        lifecycle: localLifecycleForRecord(ownedCached.record),
-      });
+      const lifecycle = localLifecycleForRecord(ownedCached.record);
+      if (lifecycle) {
+        return c.json({
+          manifest: ownedCached.manifest,
+          lifecycle,
+        });
+      }
     }
 
     if (!deps.registry) {
