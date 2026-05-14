@@ -103,4 +103,71 @@ describe('validatePayload', () => {
       validatePayload('portfolio.v0', 'solution', { bogus: true }),
     ).toThrow();
   });
+
+  it('accepts legacy verdict payload restorationEnvelope and normalizes through the schema', () => {
+    const legacyVerdict = {
+      restorationEnvelope: { cid: 'bafy-solution', sha256: 'a'.repeat(64) },
+      verificationOfRestoration: {
+        claimedTier: 'self-signed',
+        sdkVersion: '1.0.0',
+        timestamp: 1,
+        checks: [{ name: 'schema', passed: true }],
+        overall: 'valid',
+      },
+      verdict: 'PASS',
+      score: '1.0',
+      scoreBasis: 'brier.v1',
+      scoreVersion: '1.0.0',
+      oracleReading: {
+        feed: `0x${'1'.repeat(40)}`,
+        roundId: '1',
+        answer: '1',
+        updatedAt: 1,
+      },
+      claimed: {
+        probability: '0.55',
+        submittedAt: 1,
+        modelId: 'm',
+      },
+      groundTruth: 'YES',
+      checks: [{ name: 'schema', status: 'PASS' }],
+    };
+
+    expect(() => validatePayload('prediction.v0', 'verdict', legacyVerdict)).not.toThrow();
+  });
+
+  it('accepts prediction.v1 legacy verdict payload restorationEnvelope as a read alias', () => {
+    const legacyVerdict = {
+      verdict: 'SCORED',
+      outcome: 'YES',
+      resolvedAt: '2026-05-04T00:00:00.000Z',
+      resolutionSource: {
+        venue: 'polymarket',
+        url: 'https://polymarket.com/event/test-market',
+        marketId: 'mkt-1',
+        conditionId: '0xabc',
+      },
+      task: { cid: 'bafy-task', id: 'prediction-v1-polymarket-abc' },
+      restorationEnvelope: { cid: 'bafy-solution', sha256: 'a'.repeat(64) },
+      claimed: {
+        probabilityYes: '0.5700',
+        submittedAt: '2026-05-02T01:00:00.000Z',
+        modelId: 'prediction-v1-baseline/consensus',
+      },
+      benchmark: {
+        probabilityYes: '0.6200',
+        sampledAt: '2026-05-02T00:00:00.000Z',
+        method: 'best-bid-ask-midpoint',
+      },
+      scores: {
+        scoreBasis: 'brier-loss.v1',
+        solverBrier: '0.184900',
+        consensusBrier: '0.144400',
+        brierSpread: '0.040500',
+      },
+      checks: [{ name: 'solution.schema', status: 'PASS' }],
+    };
+
+    expect(() => validatePayload('prediction.v1', 'verdict', legacyVerdict)).not.toThrow();
+  });
 });

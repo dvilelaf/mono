@@ -6,7 +6,8 @@ import type {
 import { normalizeEnvelopeRole, type SignedEnvelope } from '../types/envelope.js';
 import type { Task } from '../types/task.js';
 
-const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid';
+const SOLUTION_TASK_CID_CONTEXT_KEY = 'solutionTaskCid';
+const LEGACY_RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid';
 
 export interface ProjectEnvelopeOptions {
   envelopeCid?: string | null;
@@ -101,7 +102,7 @@ function projectPredictionV1Fields(
   const resolutionSource = record(payload?.resolutionSource);
   const payloadTask = record(payload?.task);
   const scores = record(payload?.scores);
-  const solutionEnvelope = record(payload?.solutionEnvelope);
+  const solutionEnvelope = record(payload?.solutionEnvelope) ?? record(payload?.restorationEnvelope);
 
   setMetadata(metadata, 'solverType', envelope.solverType);
   setMetadata(metadata, 'role', normalizeEnvelopeRole(envelope.role));
@@ -127,9 +128,13 @@ function resolveProjectedTaskCid(
   options: ProjectEnvelopeOptions,
 ): string | null {
   if (options.taskCid) return options.taskCid;
-  const contextTaskCid = options.task?.context?.[RESTORATION_TASK_CID_CONTEXT_KEY];
-  if (typeof contextTaskCid === 'string' && contextTaskCid.length > 0) {
-    return contextTaskCid;
+  const solutionTaskCid = options.task?.context?.[SOLUTION_TASK_CID_CONTEXT_KEY];
+  if (typeof solutionTaskCid === 'string' && solutionTaskCid.length > 0) {
+    return solutionTaskCid;
+  }
+  const legacyTaskCid = options.task?.context?.[LEGACY_RESTORATION_TASK_CID_CONTEXT_KEY];
+  if (typeof legacyTaskCid === 'string' && legacyTaskCid.length > 0) {
+    return legacyTaskCid;
   }
   const payloadTask = record(record(envelope.payload)?.task);
   const payloadTaskCid = stringValue(payloadTask?.cid);
