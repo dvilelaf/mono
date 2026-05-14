@@ -21,27 +21,22 @@ If the launch event encodes (or appears to encode) extractive structure, founder
 
 We are gating mainnet on launch quality. Therefore we must define what *quality* means concretely enough that we can tell when we have it.
 
-## Principles, re-established
+## Principles
 
-These principles were established prior to the canonical docs, and I will create a separate PR to land them in canon. They should govern every gate below.
+The principles that govern every Jinn design and operational decision now live in canon at [PRINCIPLES.md](https://github.com/Jinn-Network/mono/blob/main/PRINCIPLES.md) (landing via [#230](https://github.com/Jinn-Network/mono/pull/230)). They are the upstream legitimacy commitments that every gate below must trace back to.
 
-**Meta-principle: Legitimacy** (Buterin sense — the coordination equilibrium maintained by higher-order expectations that other participants will continue to cooperate). Every gate below exists to build or defend legitimacy.
+**Meta-principle: Legitimacy** (Buterin sense) — every gate exists to build or defend the coordination equilibrium where participants, even at the edges, believe Jinn is and will continue to be the right decentralised agentic AI network to coordinate around.
 
-Legitimacy is purchased by stacking multiple sources. Single-source legitimacy is fragile. Jinn's principal sources, in priority order:
+Six derived principles:
 
-1. **Fairness / neutrality / minimum viable extraction.** Bought through credible neutrality — signals that are cheap-if-genuine and expensive-to-fake. Disclosure is not commitment.
-2. **Learning maximisation (the Bitter Lesson).** Discovery beats encoded cleverness. We defer to the loop rather than to our own taste. This is process-source legitimacy applied to the protocol's own evolution.
-3. **Governance minimisation.** Governance itself is a vector of capture; every governance surface is a potential extraction point. We minimise the on-chain governance footprint, push decisions to mechanism where possible, and rely on ve-JINN gauge voting (rather than discretionary admin) for the directions where governance is unavoidable. This cuts across performance (is our decision-making structurally better than competitors'?), participation (a simple governance model lowers the cost of meaningful participation), and process (governance architecture is itself part of process legitimacy).
+1. **Neutral** — honest signalling; the network does not structurally benefit any individual or entity above any other; fairness and minimal viable extraction.
+2. **Learning Maximised** — Bitter-Lesson alignment; discovery beats encoded cleverness; Jinn must be more performant than comparable networks.
+3. **Governance Minimal** — every governance surface is a capture surface; decisions about Jinn are made via the most minimal mechanism, in a public and rule-bound way.
+4. **Permissionless** — the path from outsider to participant has no privileged shortcuts; the network's output is composable without permission.
+5. **Prestige** — Jinn participants seek freely conferred deference based on demonstrated competence and value, not deference based on coercive power.
+6. **Legible** — every claim Jinn makes about itself must be independently and robustly verifiable, on-chain where possible; legibility is what turns the other principles from private belief into common knowledge.
 
-Auxiliary sources we should also engineer for:
-
-- **Performance** — raw, observable results from the loop.
-- **Participation** — early operators have both skin and voice.
-- **Process** — the way we make decisions (including the launch decision itself) is legitimate.
-
-Brute force and pure continuity are not available to us, and we do not want them.
-
-Every gate below should trace back to one of these sources. If a candidate gate does not, it should be dropped or the principle stack should be revisited.
+If a candidate gate below does not trace back to one of these principles, it should be dropped or the principle stack revisited.
 
 ## Question set
 
