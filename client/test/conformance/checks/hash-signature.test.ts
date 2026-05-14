@@ -19,7 +19,7 @@ const TEST_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 const baseInputs: EnvelopeInputs = {
   solverType: 'portfolio.v0',
-  role: 'restoration',
+  role: 'solution',
   task: {
     cid: 'bafy-task',
     onchainCreationTx: '0x' + 'ab'.repeat(32),
@@ -67,6 +67,7 @@ async function buildGoodCtx(): Promise<ConformanceContext> {
   const result = await assembleAndSignEnvelope(baseInputs, deps);
   return {
     envelope: result.envelope,
+    rawEnvelope: result.envelope,
     envelopeCid: 'bafy-test',
     options: {},
   };
@@ -145,6 +146,10 @@ describe('checkHashAndSignature', () => {
       ...ctx,
       envelope: {
         ...ctx.envelope!,
+        generatedAt: ctx.envelope!.generatedAt + 1,
+      },
+      rawEnvelope: {
+        ...ctx.rawEnvelope!,
         generatedAt: ctx.envelope!.generatedAt + 1,
       },
     };

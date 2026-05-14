@@ -86,7 +86,7 @@ describe('Store envelope projection index', () => {
   it('persists generic envelope projections without prediction metadata', () => {
     const projection = projectEnvelope(makeEnvelope({
       solverType: 'legacy.v0',
-      role: 'restoration',
+      role: 'solution',
       generatedAt: 1000,
       taskCid: 'bafy-generic-task',
       requestId: `0x${'5'.repeat(64)}`,
@@ -105,6 +105,28 @@ describe('Store envelope projection index', () => {
       solutionEnvelopeRef: null,
     });
     expect(results[0].metadata['source.venue']).toBeUndefined();
+  });
+
+  it('queries and normalizes legacy restoration projection rows through solution role filters', () => {
+    const projection = projectEnvelope(makeEnvelope({
+      solverType: 'legacy.v0',
+      role: 'solution',
+      generatedAt: 1000,
+      taskCid: 'bafy-legacy-task',
+      requestId: `0x${'6'.repeat(64)}`,
+      signatureHash: `0x${'f'.repeat(64)}`,
+      payload: { text: 'legacy' },
+    }));
+
+    store.saveEnvelopeProjection(projection);
+    store.db.prepare('UPDATE envelope_projections SET role = ? WHERE envelope_id = ?')
+      .run('restoration', projection.envelopeId);
+
+    const results = store.queryEnvelopeProjections({ solverType: 'legacy.v0', role: 'solution' });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].role).toBe('solution');
+    expect(results[0].taskCid).toBe('bafy-legacy-task');
   });
 
   it('migrates older envelope projection tables with missing Task scoreboard columns', () => {
@@ -184,7 +206,7 @@ function makeEvaluationTask(): Task {
     ...makePredictionTask(),
     id: 'prediction-v1-eval',
     role: 'evaluation',
-    context: { restorationTaskCid: TASK_CID },
+    context: { solutionTaskCid: TASK_CID },
   };
 }
 
@@ -208,7 +230,7 @@ function verdictPayload(solutionCid: string, solutionSha256: string, verdict: st
 
 function makeEnvelope(overrides: {
   solverType?: string;
-  role: 'restoration' | 'verdict';
+  role: 'solution' | 'verdict';
   generatedAt: number;
   taskCid: string;
   requestId: string;
