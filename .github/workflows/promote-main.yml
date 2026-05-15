@@ -38,7 +38,21 @@ jobs:
           SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
           echo "release_sha=$SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Skip if main already at release SHA
+        id: skip_check
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          MAIN_SHA="$(git rev-parse HEAD)"
+          if [ "$MAIN_SHA" = "$RELEASE_SHA" ]; then
+            echo "::notice::main is already at $RELEASE_SHA — nothing to promote (hotfix path). Exiting cleanly."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Verify release SHA is reachable from next
+        if: steps.skip_check.outputs.skip != 'true'
         env:
           RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
         run: |
@@ -51,6 +65,7 @@ jobs:
           fi
 
       - name: Verify fast-forward only
+        if: steps.skip_check.outputs.skip != 'true'
         env:
           RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
         run: |
@@ -65,11 +80,13 @@ jobs:
           fi
 
       - name: Fast-forward main
+        if: steps.skip_check.outputs.skip != 'true'
         env:
           RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --ff-only "$RELEASE_SHA"
           git push origin main
-          echo "::notice::main advanced to $RELEASE_SHA (release ${{ github.event.release.tag_name }})"
+          echo "::notice::main advanced to $RELEASE_SHA (release $RELEASE_TAG)"

@@ -106,7 +106,7 @@ jobs:
           PREV_DATE: ${{ steps.window.outputs.prev_date }}
         shell: bash
         run: |
-          # Query GitHub directly for PRs merged to main since the window start. This is the
+          # Query GitHub directly for PRs merged to next since the window start. This is the
           # accurate path — walking commit subjects for `#N` over-counts (old issue/PR refs in
           # commit messages aren't PRs merged in this window). `merged:><date>` filters precisely.
           # --limit 200 covers a generous weekly window; bump if a week ever exceeds it.
