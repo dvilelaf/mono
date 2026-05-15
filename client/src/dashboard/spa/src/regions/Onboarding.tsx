@@ -63,8 +63,19 @@ function bootstrapPhaseFor(step: string): BootstrapPhaseDescriptor {
   return PHASE_FOR_STEP[step] ?? { phase: 2, subState: null };
 }
 
-function statusFor(rowPhase: Phase, currentPhase: Phase): PhaseStatus {
-  if (rowPhase < currentPhase) return 'done';
+/** @internal exported for unit tests */
+export function statusFor(rowPhase: Phase, currentPhase: Phase, fundingTargetMet?: boolean): PhaseStatus {
+  if (rowPhase < currentPhase) {
+    // Phase 3 (Fund your wallet) stays 'active' until the endpoint explicitly
+    // signals that the balance target is met. This prevents a momentary drip
+    // that briefly crossed the threshold from flipping phase 3 to DONE before
+    // the bootstrapper has actually advanced past awaiting_funding on-chain.
+    //
+    // `fundingTargetMet === false` (explicit false from the funding gate) means
+    // the gate is still open; absent funding block means the gate has cleared.
+    if (rowPhase === 3 && fundingTargetMet === false) return 'active';
+    return 'done';
+  }
   if (rowPhase === currentPhase) return 'active';
   return 'queued';
 }
@@ -104,6 +115,8 @@ export function Onboarding(): JSX.Element {
   // claude reports authenticated:true. Phases 2/3/4 are bootstrap-driven.
   const authDone = claudeAuth?.authenticated === true;
   const currentPhase: Phase = !authDone ? 1 : bootstrapPhase;
+  // Explicit false means the funding gate is still open; absent means cleared.
+  const fundingTargetMet = bootstrap.funding?.targetMet;
 
   return (
     <div
@@ -130,7 +143,7 @@ export function Onboarding(): JSX.Element {
 
           <ol className="flex flex-col">
             {([1, 2, 3, 4] as Phase[]).map((p) => {
-              const status = statusFor(p, currentPhase);
+              const status = statusFor(p, currentPhase, fundingTargetMet);
               const showError = bootstrapError && p === currentPhase && p !== 1;
               return (
                 <PhaseRow key={p} phase={p} status={showError ? 'error' : status}>

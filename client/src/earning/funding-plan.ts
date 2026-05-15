@@ -22,6 +22,7 @@ import { FleetStateStore } from './store.js';
 import { decryptMnemonic, deriveMasterAddress } from './wallet.js';
 import { isOperationalServiceStep, type FleetState, type FundingRequirement, type StakingMode } from './types.js';
 import { createJinnPublicClient, type JinnOnchainNetwork } from './viem-clients.js';
+import { STANDARD_MASTER_BOOTSTRAP_MULTIPLIER } from './bootstrap.js';
 
 export interface FundingPlanOptions {
   earningDir?: string;
@@ -89,7 +90,6 @@ export interface FundingPlan {
 }
 
 const SELF_BOND_ETH_PER_SERVICE = 30_000_000_000_000_000n; // 0.03 ETH
-const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -224,14 +224,16 @@ export async function planFleetFunding(
 
   const completedCount = fleetState?.services.filter((svc) => isOperationalServiceStep(svc.step)).length ?? 0;
   const standardFleetAlreadyComplete = stakingMode === 'standard' && completedCount >= targetServices;
-  const standardFleetHasInProgressServices =
-    stakingMode === 'standard' && (fleetState?.services.length ?? 0) > 0;
+  // "Cold in liability": applies 2× headroom when no service has a persisted on-chain anchor.
+  // Covers both fresh fleets (services array empty) and migration-wiped fleets
+  // (services exist in shape but service_id === null). See bootstrap.ts STANDARD_MASTER_BOOTSTRAP_MULTIPLIER.
+  const hasPersistedOnChain = (fleetState?.services ?? []).some(s => s.service_id != null);
   const requiredMasterEth =
     stakingMode === 'standard'
       ? (
           standardFleetAlreadyComplete
             ? 0n
-            : config.minEoaGasEth * (standardFleetHasInProgressServices ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
+            : config.minEoaGasEth * (hasPersistedOnChain ? 1n : STANDARD_MASTER_BOOTSTRAP_MULTIPLIER)
         )
       : SELF_BOND_ETH_PER_SERVICE * BigInt(targetServices);
 
