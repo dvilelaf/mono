@@ -932,6 +932,27 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   let retryBootstrapResolve: (() => void) | null = null;
   let retryBootstrapReject: ((err: unknown) => void) | null = null;
 
+  // jinn-mono-hjex.8: mutable status gather config — main.ts populates
+  // `solvernetSubsystemError` in the SolverNet subsystem init catch block so
+  // the operator can see the error from the Overview status page (/v1/status).
+  // The same object is captured by the /v1/status handler closure, so any
+  // mutation is visible on the next request without restarting the server.
+  const setupStatusGatherConfig: import('./api/gather-status.js').StatusGatherConfig = {
+    earningDir: config.earningDir,
+    rpcUrl: config.rpcUrl,
+    network: config.network,
+    pollIntervalMs: config.pollIntervalMs,
+    masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
+    rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+    testnetL2DeploymentPath: config.testnetL2DeploymentPath,
+    testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
+    testnetMechDeploymentPath: config.testnetMechDeploymentPath,
+    testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
+    engine: config.engine,
+    config,
+    configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
+  };
+
   let setupApiServer: ApiServer;
   try {
     setupApiServer = await startApiServer({
@@ -1135,21 +1156,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           });
         },
       },
-      status: {
-        earningDir: config.earningDir,
-        rpcUrl: config.rpcUrl,
-        network: config.network,
-        pollIntervalMs: config.pollIntervalMs,
-        masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
-        rewardClaimIntervalMs: config.rewardClaimIntervalMs,
-        testnetL2DeploymentPath: config.testnetL2DeploymentPath,
-        testnetL2TokenDeploymentPath: config.testnetL2TokenDeploymentPath,
-        testnetMechDeploymentPath: config.testnetMechDeploymentPath,
-        testnetStolasDeploymentPath: config.testnetStolasDeploymentPath,
-        engine: config.engine,
-        config,
-        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
-      },
+      status: setupStatusGatherConfig,
       // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
       // generator and Safe address are constructed after bootstrap, after
       // this `startApiServer` call. By the time the SPA hits the route,
@@ -2132,9 +2139,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
       }
     } catch (err) {
-      console.warn(
-        `[main] SolverNet subsystem init failed; continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+      // jinn-mono-hjex.8: log loudly (error vs. warn) and surface the failure
+      // via /v1/status so operators can diagnose why /v1/solvernets/* returns 503.
+      const errMessage = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[main] SolverNet subsystem init failed; /v1/solvernets/* will return 503: ${errMessage}`,
       );
+      setupStatusGatherConfig.solvernetSubsystemError = errMessage;
     }
   } else {
     console.log(

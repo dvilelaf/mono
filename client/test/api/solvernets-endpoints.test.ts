@@ -2101,6 +2101,29 @@ describe('GET /v1/solvernets/registry (Task 15)', () => {
     expect(body.error).toBe('invalid_query');
   });
 
+  it('returns a typed envelope when getCatalog throws (jinn-mono-hjex.8)', async () => {
+    // Simulate a catalog whose getCatalog() method throws — e.g. IPFS read
+    // failure after the subsystem started successfully. The handler must catch
+    // this and return a typed 503 instead of letting the 500 bubble through.
+    const throwingCatalog: SolverNetCatalogCache = {
+      getCatalog: () => { throw new Error('IPFS unreachable'); },
+      async refresh() {},
+      stop() {},
+      lastRefreshedAt: () => null,
+      lastError: () => null,
+    };
+    const { app } = buildTestApp({ store, catalog: throwingCatalog });
+
+    const res = await app.request('/v1/solvernets/registry', {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe('registry_unavailable');
+    expect(body.message).toContain('IPFS');
+  });
+
   it('requires auth', async () => {
     const catalog = makeMockCatalog({});
     const { app } = buildTestApp({ store, catalog });

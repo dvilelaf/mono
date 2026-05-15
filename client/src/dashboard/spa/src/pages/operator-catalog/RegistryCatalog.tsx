@@ -58,6 +58,15 @@ function errorCode(error: unknown): string | null {
 }
 
 function registryErrorCopy(error: unknown): { title: string; detail: string } {
+  // jinn-mono-hjex.8: distinguish four failure modes with actionable copy.
+  // Daemon unreachable is detected by the transport-level TypeError that fetch
+  // raises when the connection is refused (no HTTP response at all).
+  if (error instanceof TypeError && error.message === 'Failed to fetch') {
+    return {
+      title: 'Daemon unreachable.',
+      detail: 'Check that `jinn run` is still active, then retry.',
+    };
+  }
   switch (errorCode(error)) {
     case 'subsystem_not_ready':
       return {

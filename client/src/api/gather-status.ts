@@ -102,6 +102,12 @@ export interface StatusGatherConfig {
   /** Full config enables SolverNet/plugin/Harness diagnostics in /v1/status. */
   config?: JinnConfig;
   configPath?: string;
+  /**
+   * Error from SolverNet subsystem init (jinn-mono-hjex.8). Set by main.ts
+   * in the catch block around initSolverNetSubsystem so the operator can
+   * see why /v1/solvernets/* returns 503 via the Overview status page.
+   */
+  solvernetSubsystemError?: string;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -553,6 +559,11 @@ export async function gatherGatheredStatusRaw(
     serviceBalances: {},
     pendingByService: {},
     claimedByService: store.getClaimedRewardsByService(),
+    // jinn-mono-hjex.8: surface subsystem init failure so operators can see
+    // why /v1/solvernets/* returns 503 from the Overview status page.
+    ...(status?.solvernetSubsystemError !== undefined
+      ? { solvernetSubsystemError: status.solvernetSubsystemError }
+      : {}),
   };
 
   if (!status) {

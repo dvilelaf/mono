@@ -1469,27 +1469,40 @@ export function registerSolverNetsEndpoints(
       statusFilter = ['launched', 'paused'];
     }
 
-    if (c.req.query('refresh') === '1') {
-      // Force a refresh before reading the snapshot. The cache itself
-      // suppresses errors — they land in `lastError` which we surface in
-      // the response, so the SPA can show "couldn't refresh, here's the
-      // last cached snapshot" rather than a blank page.
-      await catalog.refresh();
+    try {
+      if (c.req.query('refresh') === '1') {
+        // Force a refresh before reading the snapshot. The cache itself
+        // suppresses errors — they land in `lastError` which we surface in
+        // the response, so the SPA can show "couldn't refresh, here's the
+        // last cached snapshot" rather than a blank page.
+        await catalog.refresh();
+      }
+
+      const snapshot = catalog.getCatalog();
+      const summaries = snapshot.filter((s) => statusFilter.includes(s.status));
+
+      const lastRefreshedAt = catalog.lastRefreshedAt();
+      const lastError = catalog.lastError();
+      return c.json({
+        summaries,
+        lastRefreshedAt: lastRefreshedAt === null ? null : lastRefreshedAt.toISOString(),
+        lastError:
+          lastError === null
+            ? null
+            : { message: lastError.message, at: lastError.at.toISOString() },
+      });
+    } catch (err) {
+      // jinn-mono-hjex.8: surface catalog read failures as a typed 503 instead
+      // of letting the unhandled rejection bubble to a generic 500. The SPA
+      // error classifier reads the `error` field to produce actionable copy.
+      return c.json(
+        {
+          error: 'registry_unavailable',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        503,
+      );
     }
-
-    const snapshot = catalog.getCatalog();
-    const summaries = snapshot.filter((s) => statusFilter.includes(s.status));
-
-    const lastRefreshedAt = catalog.lastRefreshedAt();
-    const lastError = catalog.lastError();
-    return c.json({
-      summaries,
-      lastRefreshedAt: lastRefreshedAt === null ? null : lastRefreshedAt.toISOString(),
-      lastError:
-        lastError === null
-          ? null
-          : { message: lastError.message, at: lastError.at.toISOString() },
-    });
   });
 
   // GET /v1/solvernets/registry/:cid — fetch a specific manifest from the

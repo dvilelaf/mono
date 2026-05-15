@@ -91,6 +91,12 @@ export interface GatheredStatusRaw {
    * Value is the `inactivity` field from the ServiceInfo struct (seconds).
    */
   inactivityByServiceIndex?: Record<number, number>;
+  /**
+   * Error message from SolverNet subsystem init, if it failed (jinn-mono-hjex.8).
+   * Set by main.ts in the catch block of initSolverNetSubsystem and surfaced
+   * via /v1/status so the operator can diagnose why /v1/solvernets/* returns 503.
+   */
+  solvernetSubsystemError?: string;
 }
 
 export interface StatusV1Response {
@@ -155,6 +161,14 @@ export interface StatusV1Response {
   predictionV1?: PredictionV1Status;
   /** Generic task-run lifecycle data across all SolverNets. */
   taskRuns?: TaskRunsStatus;
+  /**
+   * Error from SolverNet subsystem init (jinn-mono-hjex.8). Present when
+   * initSolverNetSubsystem threw; absent when the subsystem is healthy or
+   * the daemon is running on mainnet (where the subsystem is not started).
+   * The operator can read this from the SPA Overview page to diagnose why
+   * /v1/solvernets/* routes return 503.
+   */
+  solvernetSubsystemError?: string;
 }
 
 /**
@@ -394,5 +408,8 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
+    ...(raw.solvernetSubsystemError !== undefined
+      ? { solvernetSubsystemError: raw.solvernetSubsystemError }
+      : {}),
   };
 }

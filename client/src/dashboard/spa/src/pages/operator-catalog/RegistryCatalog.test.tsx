@@ -340,6 +340,21 @@ describe('RegistryCatalog', () => {
     expect(screen.getByText(/check daemon logs/i)).toBeTruthy();
   });
 
+  it('explains Failed to fetch as daemon unreachable (jinn-mono-hjex.8)', async () => {
+    // Simulates the browser TypeError raised when the daemon is not running —
+    // fetch raises this when the connection is refused at the transport layer.
+    listRegistryMock.mockRejectedValue(
+      Object.assign(new TypeError('Failed to fetch'), {}),
+    );
+
+    render(withProviders(<RegistryCatalog />));
+
+    await waitFor(() =>
+      expect(screen.getByText(/daemon unreachable/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/jinn run.*still active/i)).toBeTruthy();
+  });
+
   it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {
     listRegistryMock.mockResolvedValue({
       summaries: [],
