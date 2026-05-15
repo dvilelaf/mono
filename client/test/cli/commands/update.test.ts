@@ -12,6 +12,7 @@ import type { FleetState, ServiceState } from '@/earning/types.js';
 import { DEFAULT_TESTNET_ARTIFACTS, getChainConfig } from '@/earning/contracts.js';
 import { resolveTaskNativeReadiness } from '@/cli/task-native-readiness.js';
 import { Store } from '@/store/store.js';
+import type { StopResult } from '@/cli/commands/stop.js';
 
 // MOCK_JUSTIFICATION: node:child_process is a leaf Node built-in; execSync is a syscall and cannot be DI'd without a shim module we don't own.
 vi.mock('node:child_process', async (importOriginal) => {
@@ -36,12 +37,39 @@ describe('update command', () => {
     return dir;
   }
 
+  function makeStoppedResult(pid: number | null = null): StopResult {
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      state: 'stopped',
+      pid,
+      killed: false,
+      pidfilePath: '/tmp/daemon.pid',
+      pidfileRemoved: false,
+      stalePidfileCleaned: false,
+    };
+  }
+
+  function makeKilledResult(pid: number): StopResult {
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      state: 'stopping',
+      pid,
+      killed: true,
+      pidfilePath: '/tmp/daemon.pid',
+      pidfileRemoved: false,
+      stalePidfileCleaned: false,
+    };
+  }
+
   function makeUpdateCommand(
     earningDir: string,
     integrationsRun = vi.fn(async () => {}),
     opts: {
       dbPath?: string;
       storeFactory?: (dbPath: string) => Pick<Store, 'close'>;
+      jinnStopFn?: () => Promise<StopResult>;
     } = {},
   ) {
     return createUpdateCommand({
@@ -53,6 +81,7 @@ describe('update command', () => {
       },
       fleetStateStoreFactory: (dir) => new FleetStateStore(dir),
       storeFactory: opts.storeFactory ?? (() => ({ close: () => {} })),
+      jinnStopFn: opts.jinnStopFn ?? vi.fn().mockResolvedValue(makeStoppedResult()),
     });
   }
 
@@ -466,5 +495,94 @@ describe('update command', () => {
     expect(earningStep).toMatchObject({ status: 'skipped' });
     expect(earningStep?.detail).toContain('not bootstrapped');
     expect(await new FleetStateStore(earningDir).tryLoadExisting()).toBeNull();
+  });
+
+  // ── jinn-mono-hjex.5: stop daemon before npm update ───────────────────────
+
+  it('stops a running daemon before swapping the binary (jinn-mono-hjex.5)', async () => {
+    const earningDir = await makeEarningDir();
+    const stopMock = vi.fn().mockResolvedValue(makeKilledResult(19958));
+    const execSyncMock = (await import('node:child_process')).execSync as ReturnType<typeof vi.fn>;
+
+    const cmd = makeUpdateCommand(earningDir, vi.fn(async () => {}), {
+      jinnStopFn: stopMock,
+    });
+    const { envelopes } = await runCommand(cmd, { argv: ['--json', '--skip-plugins'] });
+
+    // stop must be called before execSync (npm update)
+    expect(stopMock).toHaveBeenCalled();
+    const stopCallOrder = stopMock.mock.invocationCallOrder[0];
+    const execCallOrder = execSyncMock.mock.invocationCallOrder[0];
+    // stopMock called first (lower invocation call order index)
+    if (execCallOrder !== undefined && stopCallOrder !== undefined) {
+      expect(stopCallOrder).toBeLessThan(execCallOrder);
+    }
+
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
+    const stopStep = payload.steps.find((step) => step.step === 'stop-daemon');
+    expect(stopStep).toBeDefined();
+    expect(stopStep?.status).toBe('ok');
+    expect(stopStep?.detail).toContain('19958');
+  });
+
+  it('reports no daemon to stop when jinnStop returns already-stopped (jinn-mono-hjex.5)', async () => {
+    const earningDir = await makeEarningDir();
+    const stopMock = vi.fn().mockResolvedValue(makeStoppedResult());
+
+    const cmd = makeUpdateCommand(earningDir, vi.fn(async () => {}), {
+      jinnStopFn: stopMock,
+    });
+    const { envelopes } = await runCommand(cmd, { argv: ['--json', '--skip-plugins'] });
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
+
+    const stopStep = payload.steps.find((step) => step.step === 'stop-daemon');
+    expect(stopStep).toBeDefined();
+    expect(stopStep?.status).toBe('skipped');
+    expect(stopStep?.detail).toContain('No running daemon');
+  });
+
+  it('aborts update if daemon stop fails (jinn-mono-hjex.5)', async () => {
+    const earningDir = await makeEarningDir();
+    const stopMock = vi.fn().mockRejectedValue(new Error('permission denied'));
+
+    const cmd = makeUpdateCommand(earningDir, vi.fn(async () => {}), {
+      jinnStopFn: stopMock,
+    });
+    const { envelopes } = await runCommand(cmd, { argv: ['--json', '--skip-plugins'] });
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
+
+    expect(payload.ok).toBe(false);
+    const stopStep = payload.steps.find((step) => step.step === 'stop-daemon');
+    expect(stopStep?.status).toBe('error');
+    expect(stopStep?.detail).toContain('permission denied');
+    // npm-update step should NOT appear because we aborted early
+    expect(payload.steps.find((step) => step.step === 'npm-update')).toBeUndefined();
+  });
+
+  it('skip-npm bypasses the stop-daemon step (jinn-mono-hjex.5)', async () => {
+    const earningDir = await makeEarningDir();
+    const stopMock = vi.fn().mockResolvedValue(makeStoppedResult());
+
+    const cmd = makeUpdateCommand(earningDir, vi.fn(async () => {}), {
+      jinnStopFn: stopMock,
+    });
+    const { envelopes } = await runCommand(cmd, { argv: ['--json', '--skip-npm', '--skip-plugins'] });
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
+
+    // With --skip-npm there is no binary swap, so stop is not needed
+    expect(stopMock).not.toHaveBeenCalled();
+    expect(payload.steps.find((step) => step.step === 'stop-daemon')).toBeUndefined();
   });
 });
