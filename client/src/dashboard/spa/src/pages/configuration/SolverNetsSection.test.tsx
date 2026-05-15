@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, act, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -147,6 +147,54 @@ describe('SolverNetsSection', () => {
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeiaaa')).toBeTruthy();
     expect(cards.find((c) => c.getAttribute('data-manifest-cid') === 'bafybeibbb')).toBeTruthy();
     expect(screen.getByText('Other Net')).toBeTruthy();
+  });
+
+  it('does not paint "Failed to load" banner when data is present from a prior success (jinn-mono-hjex.9)', async () => {
+    // First render: succeed so react-query caches data.
+    vi.mocked(api.operator.listJoined).mockResolvedValue({
+      joinedSolverNets: {
+        bafybeiswe: {
+          manifestCid: 'bafybeiswe',
+          name: 'SWE-rebench v2',
+          roles: ['solver'],
+          harness: 'claude-code-learner',
+          plugins: [],
+          model: 'claude-haiku-4-5-20251001',
+        },
+      },
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+    const { hook } = memoryLocation({ path: '/operator' });
+    render(
+      <QueryClientProvider client={qc}>
+        <Router hook={hook}>
+          <SolverNetsSection />
+        </Router>
+      </QueryClientProvider>,
+    );
+    // Wait for the initial successful fetch to render the card.
+    await waitFor(() => expect(screen.getByText('SWE-rebench v2')).toBeTruthy());
+
+    // Now make refetch fail (simulates a failed background poll).
+    vi.mocked(api.operator.listJoined).mockRejectedValue(new Error('network error'));
+
+    // Force a refetch by invalidating the cache — this is what the 30s interval does.
+    // refetchQueries resolves even when the query fails; query state transitions to
+    // isError=true while retaining the previous data.
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ['operator', 'joined'] });
+    });
+
+    // The stale card data is still visible (react-query keeps previous data).
+    await waitFor(() => expect(screen.getByText('SWE-rebench v2')).toBeTruthy());
+
+    // The fatal red banner must NOT appear alongside stale-but-valid data.
+    expect(screen.queryByText(/Failed to load joined SolverNets/i)).toBeNull();
+
+    // A low-severity stale indicator must appear instead.
+    // (RegistryCatalog inside SolverNetsSection also uses the ['operator','joined']
+    // query, so two stale indicators may appear — one per consumer. Use getAllByTitle.)
+    await waitFor(() => expect(screen.getAllByTitle(/last refresh failed/i).length).toBeGreaterThan(0));
   });
 
   it('auto-expands the joined card whose cid matches joinedHashFragment', async () => {

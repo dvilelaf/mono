@@ -115,7 +115,7 @@ export function SolverNetsSection({
               >
                 Joined · {joinedEntries.length}
               </span>
-              {joinedQuery.isError && (
+              {joinedQuery.isError && joinedQuery.data === undefined && (
                 <span
                   role="alert"
                   style={{
@@ -125,6 +125,18 @@ export function SolverNetsSection({
                   }}
                 >
                   Failed to load joined SolverNets.
+                </span>
+              )}
+              {joinedQuery.isError && joinedQuery.data !== undefined && (
+                <span
+                  title="Last refresh failed"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    color: 'var(--wane)',
+                  }}
+                >
+                  &#x26A0; stale
                 </span>
               )}
             </div>
