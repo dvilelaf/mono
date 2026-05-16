@@ -1,0 +1,120 @@
+---
+import Sigil from './Sigil.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  currentSlug?: string;
+}
+const { currentSlug } = Astro.props;
+
+const docs = (await getCollection('canonical')).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+---
+
+<nav class="site-nav" aria-label="Canonical docs">
+  <div class="site-nav__inner">
+    <a class="site-nav__brand" href="/">
+      <Sigil size={22} />
+      <span class="site-nav__brand-text">jinn</span>
+      <span class="site-nav__brand-sub">canonical</span>
+    </a>
+    <ul class="site-nav__list">
+      {
+        docs.map((doc) => (
+          <li>
+            <a
+              href={`/${doc.data.slug}`}
+              class:list={[
+                'site-nav__link',
+                currentSlug === doc.data.slug && 'site-nav__link--active',
+              ]}
+              aria-current={currentSlug === doc.data.slug ? 'page' : undefined}
+            >
+              {doc.data.sourceFile.replace(/\.md$/, '')}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</nav>
+
+<style>
+  .site-nav {
+    border-bottom: var(--border-hair);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    backdrop-filter: blur(8px);
+  }
+
+  .site-nav__inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: var(--space-3) var(--space-5);
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+  }
+
+  .site-nav__brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    text-decoration: none;
+    color: var(--fg);
+    line-height: 1;
+  }
+  .site-nav__brand :global(svg) {
+    color: var(--gold);
+    transform: translateY(4px);
+  }
+  .site-nav__brand-text {
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    letter-spacing: var(--tracking-display);
+  }
+  .site-nav__brand-sub {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--fg-dim);
+  }
+
+  .site-nav__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    margin-left: auto;
+  }
+
+  .site-nav__link {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-1);
+    transition: color var(--dur-base) var(--ease-linear),
+      background var(--dur-base) var(--ease-linear);
+  }
+  .site-nav__link:hover {
+    color: var(--fg);
+    background: var(--bg-elevated);
+  }
+  .site-nav__link--active {
+    color: var(--gold);
+  }
+  .site-nav__link--active:hover {
+    color: var(--gold-hover);
+  }
+</style>

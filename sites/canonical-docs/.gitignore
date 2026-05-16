@@ -1,0 +1,25 @@
+# Astro
+dist/
+.astro/
+
+# Node
+node_modules/
+.yarn/cache/
+.yarn/install-state.gz
+.pnp.*
+.yarn/build-state.yml
+.yarn/sdks
+.yarn/versions
+.yarn/unplugged
+
+# Synced canonical docs — sourced from repo root at build time
+src/content/canonical/*.md
+!src/content/canonical/.gitkeep
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store

@@ -1,0 +1,52 @@
+---
+import '../styles/colors_and_type.css';
+import '../styles/foundations.css';
+import '../styles/prose.css';
+
+import SiteNav from '../components/SiteNav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  currentSlug?: string;
+}
+const { title, description, currentSlug } = Astro.props;
+
+const fullTitle =
+  title === 'Canon' ? 'Jinn — Canon' : `${title} — Jinn Canon`;
+const desc =
+  description ??
+  'Canonical docs for the Jinn protocol — stable sources of truth.';
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={desc} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={desc} />
+    <meta property="og:type" content="article" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <title>{fullTitle}</title>
+  </head>
+  <body>
+    <SiteNav currentSlug={currentSlug} />
+    <main class="page">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>
+
+<style>
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: var(--space-7) var(--space-5) var(--space-8);
+  }
+</style>

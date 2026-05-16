@@ -1,0 +1,161 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const docs = await getCollection('canonical');
+  return docs.map((doc) => ({
+    params: { slug: doc.data.slug },
+    props: { doc },
+  }));
+}
+
+const { doc } = Astro.props;
+const { Content, headings } = await render(doc);
+
+// Top-level headings (h2) for the side rail. h1 is the page title and
+// already rendered above the body.
+const toc = headings.filter((h) => h.depth === 2);
+---
+
+<BaseLayout
+  title={doc.data.title}
+  description={doc.data.summary}
+  currentSlug={doc.data.slug}
+>
+  <article class="doc">
+    <header class="doc__header">
+      <p class="label doc__eyebrow">
+        <a href="/">Canon</a>
+        <span class="doc__sep">/</span>
+        {doc.data.sourceFile}
+      </p>
+      <h1 class="doc__title">{doc.data.title}</h1>
+      <p class="doc__summary">{doc.data.summary}</p>
+    </header>
+
+    <div class:list={['doc__layout', toc.length > 1 && 'doc__layout--has-toc']}>
+      {
+        toc.length > 1 && (
+          <aside class="doc__toc" aria-label="Sections">
+            <p class="label doc__toc-label">Sections</p>
+            <ol>
+              {toc.map((h) => (
+                <li>
+                  <a href={`#${h.slug}`}>{h.text}</a>
+                </li>
+              ))}
+            </ol>
+          </aside>
+        )
+      }
+
+      <div class="prose doc__body">
+        <Content />
+      </div>
+    </div>
+  </article>
+</BaseLayout>
+
+<style>
+  .doc__header {
+    max-width: 72ch;
+    margin: 0 auto var(--space-7);
+    padding-bottom: var(--space-5);
+    border-bottom: var(--border-hair);
+  }
+
+  .doc__eyebrow {
+    margin: 0 0 var(--space-3);
+    color: var(--fg-dim);
+  }
+  .doc__eyebrow a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+  .doc__eyebrow a:hover {
+    color: var(--accent);
+  }
+  .doc__sep {
+    margin: 0 var(--space-2);
+    color: var(--fg-dim);
+  }
+
+  .doc__title {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: var(--text-5xl);
+    line-height: var(--lh-tight);
+    margin: 0 0 var(--space-3);
+    color: var(--fg);
+  }
+
+  .doc__summary {
+    font-family: var(--font-mono);
+    font-size: var(--text-md);
+    line-height: var(--lh-base);
+    color: var(--fg-muted);
+    margin: 0;
+    max-width: 60ch;
+  }
+
+  .doc__layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-7);
+  }
+
+  @media (min-width: 960px) {
+    .doc__layout--has-toc {
+      grid-template-columns: 220px 1fr;
+      align-items: start;
+    }
+    .doc__layout--has-toc .doc__body {
+      margin: 0;
+    }
+  }
+
+  .doc__toc {
+    position: sticky;
+    top: calc(var(--space-7) + 56px);
+    align-self: start;
+    padding: var(--space-4);
+    border: var(--border-hair);
+    border-radius: var(--radius-3);
+    background: var(--bg-elevated);
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+  }
+  .doc__toc-label {
+    margin: 0 0 var(--space-3);
+    color: var(--fg-dim);
+  }
+  .doc__toc ol {
+    list-style: none;
+    counter-reset: toc;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .doc__toc li {
+    counter-increment: toc;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: var(--lh-base);
+  }
+  .doc__toc li::before {
+    content: counter(toc, decimal-leading-zero) '.';
+    color: var(--fg-dim);
+    margin-right: var(--space-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .doc__toc a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+  .doc__toc a:hover {
+    color: var(--accent);
+  }
+</style>

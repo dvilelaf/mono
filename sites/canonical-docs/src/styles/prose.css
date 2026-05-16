@@ -1,0 +1,278 @@
+/* ============================================================
+   prose.css — markdown body styles for canonical docs
+   Builds on colors_and_type.css + foundations.css; never invents
+   new tokens. Scoped to .prose so chrome (nav, footer) is untouched.
+   ============================================================ */
+
+.prose {
+  max-width: 72ch;
+  margin: 0 auto;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: var(--lh-loose);
+  letter-spacing: var(--tracking-mono);
+}
+
+/* ---- Headings ----
+   h1 + h2 are the only display-serif. h3+ are mono. Matches the
+   design system semantic type classes. */
+
+.prose h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-5xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-display);
+  margin: 0 0 var(--space-5);
+  color: var(--fg);
+}
+
+.prose h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--text-3xl);
+  line-height: var(--lh-snug);
+  margin: var(--space-8) 0 var(--space-4);
+  padding-top: var(--space-5);
+  border-top: var(--border-hair);
+  color: var(--fg);
+}
+
+.prose h3 {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-lg);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-mono);
+  margin: var(--space-6) 0 var(--space-3);
+  color: var(--fg);
+}
+
+.prose h4 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-base);
+  line-height: var(--lh-snug);
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--fg);
+}
+
+.prose h5,
+.prose h6 {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+/* Heading anchors — invisible wrap link, becomes visible on hover */
+.prose .heading-anchor {
+  color: inherit;
+  text-decoration: none;
+  position: relative;
+}
+.prose .heading-anchor:hover {
+  color: inherit;
+}
+.prose .heading-anchor::before {
+  content: '#';
+  position: absolute;
+  left: -1.25em;
+  color: var(--fg-dim);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-linear);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+.prose h2:hover .heading-anchor::before,
+.prose h3:hover .heading-anchor::before,
+.prose h4:hover .heading-anchor::before,
+.prose h5:hover .heading-anchor::before,
+.prose h6:hover .heading-anchor::before {
+  opacity: 1;
+}
+
+/* ---- Body text ---- */
+
+.prose p {
+  margin: 0 0 var(--space-4);
+}
+
+.prose strong {
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+.prose a:hover {
+  color: var(--accent-hover);
+}
+
+/* ---- Lists ---- */
+
+.prose ul,
+.prose ol {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+
+.prose li {
+  margin: 0 0 var(--space-2);
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin: var(--space-2) 0 0;
+}
+
+.prose ul li::marker {
+  color: var(--fg-dim);
+}
+.prose ol li::marker {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Code ---- */
+
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  padding: 1px 5px;
+  border-radius: var(--radius-1);
+  border: var(--border-hair);
+}
+
+.prose pre {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+  background: var(--bg-sunken);
+  border: var(--border-hair);
+  border-radius: var(--radius-3);
+  overflow-x: auto;
+  font-size: var(--text-sm);
+  line-height: var(--lh-base);
+}
+
+.prose pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  border-radius: 0;
+}
+
+/* ---- Blockquote ---- */
+
+.prose blockquote {
+  margin: var(--space-5) 0;
+  padding: var(--space-3) var(--space-5);
+  border-left: 2px solid var(--gold);
+  background: var(--bg-elevated);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--text-xl);
+  line-height: var(--lh-base);
+  color: var(--fg);
+  border-radius: 0 var(--radius-2) var(--radius-2) 0;
+}
+.prose blockquote p {
+  margin: 0;
+}
+
+/* ---- Tables ---- */
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.prose thead {
+  background: var(--bg-elevated);
+}
+
+.prose th {
+  text-align: left;
+  font-weight: 600;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-hair);
+}
+
+.prose td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-hair);
+  vertical-align: top;
+}
+
+.prose tbody tr:nth-child(even) td {
+  background: color-mix(in oklab, var(--bg-elevated) 50%, transparent);
+}
+
+/* ---- Horizontal rule ---- */
+
+.prose hr {
+  border: 0;
+  border-top: var(--border-hair);
+  margin: var(--space-7) 0;
+}
+
+/* ---- Images ---- */
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-3);
+  border: var(--border-hair);
+  display: block;
+  margin: var(--space-5) auto;
+}
+
+/* ---- Definition lists (GFM doesn't emit, but be ready) ---- */
+
+.prose dl {
+  margin: 0 0 var(--space-4);
+}
+.prose dt {
+  font-weight: 600;
+  color: var(--fg);
+}
+.prose dd {
+  margin: 0 0 var(--space-3) var(--space-4);
+  color: var(--fg-muted);
+}
+
+/* ---- Footnotes (GFM) ---- */
+
+.prose .footnotes {
+  margin-top: var(--space-8);
+  padding-top: var(--space-5);
+  border-top: var(--border-hair);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+.prose .footnotes ol {
+  padding-left: var(--space-4);
+}

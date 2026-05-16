@@ -1,0 +1,63 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p class="site-footer__line">
+      <span class="label">Canon</span>
+      <span class="site-footer__sep">·</span>
+      Stable sources of truth. Change only via approved PRs.
+    </p>
+    <p class="site-footer__line">
+      <a href="https://github.com/Jinn-Network/mono" rel="noreferrer">source</a>
+      <span class="site-footer__sep">·</span>
+      <a href="https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-28-canonical-docs.md" rel="noreferrer">
+        canonical-docs spec
+      </a>
+      <span class="site-footer__sep">·</span>
+      <span class="site-footer__year">{year}</span>
+    </p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: var(--border-hair);
+    margin-top: var(--space-9);
+  }
+  .site-footer__inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: var(--space-5);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-6);
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .site-footer__line {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-mono);
+    color: var(--fg-muted);
+  }
+  .site-footer__sep {
+    margin: 0 var(--space-2);
+    color: var(--fg-dim);
+  }
+  .site-footer__year {
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-dim);
+  }
+  .site-footer a {
+    color: var(--fg-muted);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+  .site-footer a:hover {
+    color: var(--accent);
+  }
+</style>
