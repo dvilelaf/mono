@@ -84,12 +84,22 @@ function extractTitle(raw) {
 }
 
 async function main() {
+  // If the canonical sources aren't reachable (e.g. building inside a
+  // restricted build context like Railway, where only the service dir is
+  // uploaded), skip sync and trust the committed copies.
+  const firstSrc = resolve(REPO_ROOT, DOCS[0].file);
+  if (!existsSync(firstSrc)) {
+    process.stdout.write(
+      `sync-docs: canonical sources not reachable at ${REPO_ROOT}; using committed copies\n`,
+    );
+    return;
+  }
+
   // Wipe + recreate so removed docs disappear.
   if (existsSync(CONTENT_DIR)) {
     await rm(CONTENT_DIR, { recursive: true });
   }
   await mkdir(CONTENT_DIR, { recursive: true });
-  // Keep the .gitkeep alive so the dir survives in version control.
   await writeFile(resolve(CONTENT_DIR, '.gitkeep'), '');
 
   for (const doc of DOCS) {

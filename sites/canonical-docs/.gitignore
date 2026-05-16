@@ -12,9 +12,9 @@ node_modules/
 .yarn/versions
 .yarn/unplugged
 
-# Synced canonical docs — sourced from repo root at build time
-src/content/canonical/*.md
-!src/content/canonical/.gitkeep
+# Synced canonical docs are committed so prod builds (restricted build
+# context) work without needing the repo root. They are refreshed by
+# `yarn sync` whenever the canonical sources change.
 
 # Env
 .env
