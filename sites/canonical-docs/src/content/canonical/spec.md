@@ -1,7 +1,7 @@
 ---
 title: "SPEC"
 slug: "spec"
-order: 1
+order: 2
 summary: "The protocol loop, roles, contracts, phase boundaries. Read before reasoning about how Jinn works on-chain."
 sourceFile: "SPEC.md"
 ---

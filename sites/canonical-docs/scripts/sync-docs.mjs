@@ -21,37 +21,44 @@ const CONTENT_DIR = resolve(SITE_ROOT, 'src', 'content', 'canonical');
  */
 const DOCS = [
   {
+    slug: 'principles',
+    file: 'PRINCIPLES.md',
+    order: 1,
+    summary:
+      'The load-bearing principles every design and operational decision runs through. Upstream of SPEC and THESIS.',
+  },
+  {
     slug: 'spec',
     file: 'SPEC.md',
-    order: 1,
+    order: 2,
     summary:
       'The protocol loop, roles, contracts, phase boundaries. Read before reasoning about how Jinn works on-chain.',
   },
   {
     slug: 'thesis',
     file: 'THESIS.md',
-    order: 2,
+    order: 3,
     summary:
       'Why Jinn exists. The bet, the non-goals, what we are explicitly not. Read before positioning or pitch.',
   },
   {
     slug: 'brand',
     file: 'BRAND.md',
-    order: 3,
+    order: 4,
     summary:
       'Voice, headless-brand posture, content non-negotiables. Read before any user-facing artifact.',
   },
   {
     slug: 'growth',
     file: 'GROWTH.md',
-    order: 4,
+    order: 5,
     summary:
       'Distribution strategy, target cluster, GTM sequence. Read before planning channels or campaigns.',
   },
   {
     slug: 'glossary',
     file: 'GLOSSARY.md',
-    order: 5,
+    order: 6,
     summary:
       'Jinn-specific terms. Read whenever a domain word appears; never redefine terms locally.',
   },

@@ -1,7 +1,7 @@
 ---
 title: "GLOSSARY"
 slug: "glossary"
-order: 5
+order: 6
 summary: "Jinn-specific terms. Read whenever a domain word appears; never redefine terms locally."
 sourceFile: "GLOSSARY.md"
 ---

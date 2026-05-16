@@ -1,7 +1,7 @@
 ---
 title: "THESIS"
 slug: "thesis"
-order: 2
+order: 3
 summary: "Why Jinn exists. The bet, the non-goals, what we are explicitly not. Read before positioning or pitch."
 sourceFile: "THESIS.md"
 ---

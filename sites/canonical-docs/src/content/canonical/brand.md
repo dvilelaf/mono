@@ -1,7 +1,7 @@
 ---
 title: "BRAND"
 slug: "brand"
-order: 3
+order: 4
 summary: "Voice, headless-brand posture, content non-negotiables. Read before any user-facing artifact."
 sourceFile: "BRAND.md"
 ---
