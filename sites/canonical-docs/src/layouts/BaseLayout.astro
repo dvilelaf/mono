@@ -24,29 +24,93 @@ const desc =
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content={desc} />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={desc} />
     <meta property="og:type" content="article" />
+    <meta name="theme-color" content="#0c1628" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+    />
     <title>{fullTitle}</title>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <SiteNav currentSlug={currentSlug} />
-    <main class="page">
+    <main id="main" class="page" tabindex="-1">
       <slot />
     </main>
     <Footer />
   </body>
 </html>
 
+<style is:global>
+  /* Respect reduced-motion: zero out all transitions/animations. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Reserve smooth-scroll for anchors only, and only when the user
+     hasn't opted out (covered by the rule above). */
+  html { scroll-behavior: smooth; }
+
+  /* Skip link — visually hidden until focused. */
+  .skip-link {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    transform: translateY(-200%);
+    z-index: var(--z-modal);
+    background: var(--bg-elevated);
+    color: var(--fg);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-hair);
+    border-radius: var(--radius-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    text-decoration: none;
+    transition: transform var(--dur-base) var(--ease-linear);
+  }
+  .skip-link:focus,
+  .skip-link:focus-visible {
+    transform: translateY(0);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  main:focus { outline: none; }
+</style>
+
 <style>
   .page {
     max-width: 1100px;
     margin: 0 auto;
-    padding: var(--space-7) var(--space-5) var(--space-8);
+    padding:
+      var(--space-6)
+      max(var(--space-4), env(safe-area-inset-right))
+      var(--space-8)
+      max(var(--space-4), env(safe-area-inset-left));
+  }
+  @media (min-width: 640px) {
+    .page {
+      padding:
+        var(--space-7)
+        max(var(--space-5), env(safe-area-inset-right))
+        var(--space-8)
+        max(var(--space-5), env(safe-area-inset-left));
+    }
   }
 </style>

@@ -21,22 +21,24 @@
 .prose h1 {
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: var(--text-5xl);
+  font-size: clamp(40px, 9vw, 64px);
   line-height: var(--lh-tight);
   letter-spacing: var(--tracking-display);
   margin: 0 0 var(--space-5);
   color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .prose h2 {
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: var(--text-3xl);
+  font-size: clamp(26px, 5.5vw, 34px);
   line-height: var(--lh-snug);
   margin: var(--space-8) 0 var(--space-4);
   padding-top: var(--space-5);
   border-top: var(--border-hair);
   color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .prose h3 {
@@ -78,22 +80,26 @@
 .prose .heading-anchor:hover {
   color: inherit;
 }
-.prose .heading-anchor::before {
-  content: '#';
-  position: absolute;
-  left: -1.25em;
-  color: var(--fg-dim);
-  opacity: 0;
-  transition: opacity var(--dur-base) var(--ease-linear);
-  font-family: var(--font-mono);
-  font-weight: 400;
-}
-.prose h2:hover .heading-anchor::before,
-.prose h3:hover .heading-anchor::before,
-.prose h4:hover .heading-anchor::before,
-.prose h5:hover .heading-anchor::before,
-.prose h6:hover .heading-anchor::before {
-  opacity: 1;
+/* Anchor "#" only visible on hover-capable pointers, and only on
+   wide-enough viewports where it won't overflow the body container. */
+@media (hover: hover) and (min-width: 720px) {
+  .prose .heading-anchor::before {
+    content: '#';
+    position: absolute;
+    left: -1.25em;
+    color: var(--fg-dim);
+    opacity: 0;
+    transition: opacity var(--dur-base) var(--ease-linear);
+    font-family: var(--font-mono);
+    font-weight: 400;
+  }
+  .prose h2:hover .heading-anchor::before,
+  .prose h3:hover .heading-anchor::before,
+  .prose h4:hover .heading-anchor::before,
+  .prose h5:hover .heading-anchor::before,
+  .prose h6:hover .heading-anchor::before {
+    opacity: 1;
+  }
 }
 
 /* ---- Body text ---- */
@@ -165,8 +171,9 @@
   border: var(--border-hair);
   border-radius: var(--radius-3);
   overflow-x: auto;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--lh-base);
+  -webkit-overflow-scrolling: touch;
 }
 
 .prose pre code {
@@ -180,20 +187,25 @@
 
 /* ---- Blockquote ---- */
 
+/* Full hairline border, never a side-stripe (DESIGN.md §6).
+   The serif italic and the deeper sunken background do the lifting. */
 .prose blockquote {
   margin: var(--space-5) 0;
-  padding: var(--space-3) var(--space-5);
-  border-left: 2px solid var(--gold);
-  background: var(--bg-elevated);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-hair);
+  background: var(--bg-sunken);
   font-family: var(--font-display);
   font-style: italic;
   font-size: var(--text-xl);
   line-height: var(--lh-base);
   color: var(--fg);
-  border-radius: 0 var(--radius-2) var(--radius-2) 0;
+  border-radius: var(--radius-3);
 }
 .prose blockquote p {
   margin: 0;
+}
+.prose blockquote p + p {
+  margin-top: var(--space-3);
 }
 
 /* ---- Tables ---- */

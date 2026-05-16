@@ -13,9 +13,8 @@ export async function getStaticPaths() {
 const { doc } = Astro.props;
 const { Content, headings } = await render(doc);
 
-// Top-level headings (h2) for the side rail. h1 is the page title and
-// already rendered above the body.
 const toc = headings.filter((h) => h.depth === 2);
+const hasToc = toc.length > 1;
 ---
 
 <BaseLayout
@@ -34,19 +33,39 @@ const toc = headings.filter((h) => h.depth === 2);
       <p class="doc__summary">{doc.data.summary}</p>
     </header>
 
-    <div class:list={['doc__layout', toc.length > 1 && 'doc__layout--has-toc']}>
+    <div class:list={['doc__layout', hasToc && 'doc__layout--has-toc']}>
       {
-        toc.length > 1 && (
-          <aside class="doc__toc" aria-label="Sections">
-            <p class="label doc__toc-label">Sections</p>
-            <ol>
-              {toc.map((h) => (
-                <li>
-                  <a href={`#${h.slug}`}>{h.text}</a>
-                </li>
-              ))}
-            </ol>
-          </aside>
+        hasToc && (
+          <>
+            {/* Inline collapsible TOC on mobile */}
+            <details class="doc__toc-mobile">
+              <summary>
+                <span class="label">Sections</span>
+                <span class="doc__toc-mobile-count">
+                  {String(toc.length).padStart(2, '0')}
+                </span>
+              </summary>
+              <ol>
+                {toc.map((h) => (
+                  <li>
+                    <a href={`#${h.slug}`}>{h.text}</a>
+                  </li>
+                ))}
+              </ol>
+            </details>
+
+            {/* Sticky side rail on desktop only */}
+            <aside class="doc__toc" aria-label="Sections">
+              <p class="label doc__toc-label">Sections</p>
+              <ol>
+                {toc.map((h) => (
+                  <li>
+                    <a href={`#${h.slug}`}>{h.text}</a>
+                  </li>
+                ))}
+              </ol>
+            </aside>
+          </>
         )
       }
 
@@ -81,13 +100,16 @@ const toc = headings.filter((h) => h.depth === 2);
     color: var(--fg-dim);
   }
 
+  /* Fluid display size — never overflows narrow viewports. */
   .doc__title {
     font-family: var(--font-display);
     font-weight: 400;
-    font-size: var(--text-5xl);
+    font-size: clamp(40px, 9vw, 64px);
     line-height: var(--lh-tight);
+    letter-spacing: var(--tracking-display);
     margin: 0 0 var(--space-3);
     color: var(--fg);
+    overflow-wrap: anywhere;
   }
 
   .doc__summary {
@@ -102,60 +124,134 @@ const toc = headings.filter((h) => h.depth === 2);
   .doc__layout {
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-7);
+    gap: var(--space-6);
   }
 
-  @media (min-width: 960px) {
-    .doc__layout--has-toc {
-      grid-template-columns: 220px 1fr;
-      align-items: start;
-    }
-    .doc__layout--has-toc .doc__body {
-      margin: 0;
-    }
-  }
+  /* Mobile-first: inline collapsible TOC, body below. */
+  .doc__toc { display: none; }
 
-  .doc__toc {
-    position: sticky;
-    top: calc(var(--space-7) + 56px);
-    align-self: start;
-    padding: var(--space-4);
+  .doc__toc-mobile {
+    max-width: 72ch;
+    margin: 0 auto var(--space-5);
     border: var(--border-hair);
     border-radius: var(--radius-3);
     background: var(--bg-elevated);
-    max-height: calc(100vh - 120px);
-    overflow-y: auto;
+    overflow: hidden;
   }
-  .doc__toc-label {
-    margin: 0 0 var(--space-3);
+  .doc__toc-mobile summary {
+    list-style: none;
+    cursor: pointer;
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    min-height: 44px;
+    user-select: none;
+  }
+  .doc__toc-mobile summary::-webkit-details-marker { display: none; }
+  .doc__toc-mobile summary::after {
+    content: '+';
+    font-family: var(--font-mono);
+    font-size: var(--text-lg);
     color: var(--fg-dim);
+    line-height: 1;
+    transition: transform var(--dur-base) var(--ease-linear);
   }
-  .doc__toc ol {
+  .doc__toc-mobile[open] summary::after { content: '−'; }
+  .doc__toc-mobile-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+    margin-left: auto;
+  }
+  .doc__toc-mobile ol {
     list-style: none;
     counter-reset: toc;
-    padding: 0;
     margin: 0;
+    padding: 0 var(--space-4) var(--space-4);
+    border-top: var(--border-hair);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
-  .doc__toc li {
+  .doc__toc-mobile li {
     counter-increment: toc;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     line-height: var(--lh-base);
+    padding-top: var(--space-2);
   }
-  .doc__toc li::before {
+  .doc__toc-mobile li:first-child { padding-top: var(--space-3); }
+  .doc__toc-mobile li::before {
     content: counter(toc, decimal-leading-zero) '.';
     color: var(--fg-dim);
     margin-right: var(--space-2);
     font-variant-numeric: tabular-nums;
   }
-  .doc__toc a {
+  .doc__toc-mobile a {
     color: var(--fg-muted);
     text-decoration: none;
   }
-  .doc__toc a:hover {
+  .doc__toc-mobile a:hover,
+  .doc__toc-mobile a:focus-visible {
     color: var(--accent);
+  }
+
+  @media (min-width: 960px) {
+    .doc__toc-mobile { display: none; }
+    .doc__layout--has-toc {
+      grid-template-columns: 220px 1fr;
+      gap: var(--space-7);
+      align-items: start;
+    }
+    .doc__layout--has-toc .doc__body { margin: 0; }
+
+    .doc__toc {
+      display: block;
+      position: sticky;
+      top: calc(var(--space-7) + 56px);
+      align-self: start;
+      padding: var(--space-4);
+      border: var(--border-hair);
+      border-radius: var(--radius-3);
+      background: var(--bg-elevated);
+      max-height: calc(100vh - 120px);
+      overflow-y: auto;
+    }
+    .doc__toc-label {
+      margin: 0 0 var(--space-3);
+      color: var(--fg-dim);
+    }
+    .doc__toc ol {
+      list-style: none;
+      counter-reset: toc;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+    .doc__toc li {
+      counter-increment: toc;
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      line-height: var(--lh-base);
+    }
+    .doc__toc li::before {
+      content: counter(toc, decimal-leading-zero) '.';
+      color: var(--fg-dim);
+      margin-right: var(--space-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .doc__toc a {
+      color: var(--fg-muted);
+      text-decoration: none;
+    }
+    .doc__toc a:hover,
+    .doc__toc a:focus-visible {
+      color: var(--accent);
+    }
   }
 </style>

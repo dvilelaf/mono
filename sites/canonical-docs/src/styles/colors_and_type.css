@@ -3,7 +3,8 @@
    The primitives. Everything else is built from here.
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+/* Fonts are loaded in <head> via <link rel="stylesheet"> for
+   non-blocking discovery — see BaseLayout.astro. */
 
 /* ------------------------------------------------------------
    COLOR — sky / moon / lamplight

@@ -47,17 +47,19 @@ const docs = (await getCollection('canonical')).sort(
     position: sticky;
     top: 0;
     z-index: var(--z-sticky);
-    backdrop-filter: blur(8px);
   }
 
   .site-nav__inner {
     max-width: 1100px;
     margin: 0 auto;
-    padding: var(--space-3) var(--space-5);
+    padding: var(--space-3) var(--space-4);
     display: flex;
     align-items: center;
-    gap: var(--space-6);
+    gap: var(--space-4) var(--space-6);
     flex-wrap: wrap;
+  }
+  @media (min-width: 640px) {
+    .site-nav__inner { padding: var(--space-3) var(--space-5); }
   }
 
   .site-nav__brand {
@@ -88,24 +90,36 @@ const docs = (await getCollection('canonical')).sort(
   .site-nav__list {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-2) var(--space-4);
+    gap: var(--space-1) var(--space-3);
     margin: 0;
     padding: 0;
     list-style: none;
-    margin-left: auto;
+  }
+  @media (min-width: 640px) {
+    .site-nav__list { margin-left: auto; gap: var(--space-2) var(--space-4); }
   }
 
   .site-nav__link {
+    display: inline-flex;
+    align-items: center;
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     letter-spacing: var(--tracking-label);
     text-transform: uppercase;
     color: var(--fg-muted);
     text-decoration: none;
-    padding: var(--space-1) var(--space-2);
+    padding: var(--space-2) var(--space-2);
+    min-height: 32px;
     border-radius: var(--radius-1);
     transition: color var(--dur-base) var(--ease-linear),
       background var(--dur-base) var(--ease-linear);
+  }
+  /* Larger tap area on touch input */
+  @media (pointer: coarse) {
+    .site-nav__link {
+      padding: var(--space-3);
+      min-height: 44px;
+    }
   }
   .site-nav__link:hover {
     color: var(--fg);
