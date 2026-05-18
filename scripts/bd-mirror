@@ -32,6 +32,9 @@
 # Dependencies: bd, gh (authenticated with `project` scope — `gh auth refresh -s project`), jq.
 #
 # Changelog:
+# - v0.3 (jinn-mono-2cl.22, 2026-05-18): `--update` now resolves the mirrored
+#   issue directly and looks up its Project item via GraphQL instead of scanning
+#   up to 500 Project items client-side.
 # - v0.2 (jinn-mono-2cl.21, 2026-05-12): Sprint field is an Iteration (not a Date) — resolve
 #   @current/@next/<title> to an iteration id and set with --iteration-id. Epic is set to the
 #   human-readable single-select option (mapped from the bead's parent epic via epic_option_for()),
@@ -178,11 +181,51 @@ set_item_fields() {
   gh project item-edit --id "$item_id" --project-id "$PROJECT_NODE_ID" --field-id "$STATUS_FIELD_ID" --single-select-option-id "$STATUS_OPTION_ID" >/dev/null || echo "warning: set Status failed on $item_id" >&2
 }
 
+parse_issue_number_from_ref() {
+  local issue_url="$1"
+  local prefix="https://github.com/$REPO/issues/"
+
+  case "$issue_url" in
+    "$prefix"*)
+      issue_url="${issue_url#$prefix}"
+      issue_url="${issue_url%/}"
+      [[ "$issue_url" =~ ^[0-9]+$ ]] || return 1
+      printf '%s\n' "$issue_url"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+lookup_project_item_for_issue_ref() {
+  local issue_ref="$1"
+  local issue_number
+
+  issue_number="$(parse_issue_number_from_ref "$issue_ref")" || return 1
+  gh api graphql -f query='
+    query($owner:String!,$name:String!,$number:Int!){
+      repository(owner:$owner,name:$name){
+        issue(number:$number){
+          projectItems(first:100){
+            nodes {
+              id
+              project { id }
+            }
+          }
+        }
+      }
+    }' \
+    -F owner="$ORG" -F name="${REPO#*/}" -F number="$issue_number" 2>/dev/null \
+    | jq -r --arg project_id "$PROJECT_NODE_ID" '.data.repository.issue.projectItems.nodes[]? | select(.project.id==$project_id) | .id' \
+    | head -1
+}
+
 # --- idempotency / --update --------------------------------------------------
 if [[ -n "$BD_EXTERNAL_REF" && "$BD_EXTERNAL_REF" == *"$REPO"* ]]; then
   if [[ "$UPDATE_ONLY" -eq 1 ]]; then
     [[ "$DRY_RUN" -eq 1 ]] && { echo "DRY RUN — would re-apply (sprint=${SPRINT_ITER_TITLE:-none} epic=${EPIC_OPTION_NAME:-none} status=$STATUS_NAME) to the item for $BD_EXTERNAL_REF"; exit 0; }
-    ITEM_ID="$(gh project item-list "$PROJECT_NUMBER" --owner "$ORG" --format json --limit 500 2>/dev/null | jq -r --arg u "$BD_EXTERNAL_REF" '.items[]? | select(.content.url==$u) | .id' | head -1)"
+    ITEM_ID="$(lookup_project_item_for_issue_ref "$BD_EXTERNAL_REF" || true)"
     [[ -z "$ITEM_ID" || "$ITEM_ID" == "null" ]] && { echo "error: $BD_ID maps to $BD_EXTERNAL_REF but no matching Project item found." >&2; exit 1; }
     set_item_fields "$ITEM_ID"
     echo "Updated $BD_ID ($BD_EXTERNAL_REF): sprint=${SPRINT_ITER_TITLE:-none} epic=${EPIC_OPTION_NAME:-none} status=$STATUS_NAME"; exit 0
