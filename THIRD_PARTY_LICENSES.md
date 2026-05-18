@@ -19,7 +19,7 @@ are the legal source of truth.
 | `contracts/src/vendor/stolas/solmate/` | [stolas](https://github.com/valory-xyz/autonolas-stolas) fork of [Solmate](https://github.com/transmissions11/solmate) | **AGPL-3.0-only** | 4 files: `ERC20.sol`, `ERC4626.sol`, `SafeTransferLib.sol`, `FixedPointMathLib.sol`. Upstream Solmate is MIT; the Valory `stolas` fork relicensed to AGPL-3.0-only. **Resolution needed** — see follow-up below. |
 | `contracts/src/vendor/mech/lib/Account.sol` | [zodiac-modifier-roles](https://github.com/gnosis/zodiac) / mech | **GPL-3.0** | Single file. |
 | `contracts/src/vendor/mech/lib/Mech.sol`, `IMechGnosis.sol`, `IFactoryFriendly.sol`, `Receiver.sol` | [mech](https://github.com/gnosis/mech) | **LGPL-3.0** (variants) | 4 files. |
-| `contracts/src/vendor/registries/`, `contracts/src/vendor/governance/`, `contracts/src/vendor/tokenomics/`, `contracts/src/vendor/bridge/` | [autonolas-registries](https://github.com/valory-xyz/autonolas-registries), [autonolas-governance](https://github.com/valory-xyz/autonolas-governance), [autonolas-tokenomics](https://github.com/valory-xyz/autonolas-tokenomics) (OLAS) | MIT | Vendored OLAS contracts that Jinn forks or depends on. |
+| `contracts/src/vendor/registries/`, `contracts/src/vendor/governance/`, `contracts/src/vendor/tokenomics/`, `contracts/src/vendor/bridge/` | [autonolas-registries](https://github.com/valory-xyz/autonolas-registries), [autonolas-governance](https://github.com/valory-xyz/autonolas-governance), [autonolas-tokenomics](https://github.com/valory-xyz/autonolas-tokenomics) | MIT | Vendored upstream contracts; Jinn-authored Solidity in `contracts/src/` may import these. |
 
 ### Known copyleft-resolution work (not in this PR)
 

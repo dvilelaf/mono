@@ -50,9 +50,10 @@ In scope:
 
 Out of scope:
 
-- Third-party services we depend on (Base RPC providers, OLAS
-  contracts, Autonolas IPFS gateway, npm registry). Report those to
-  the relevant upstream.
+- Third-party services and contracts we interact with at runtime
+  (RPC providers, external smart contracts, IPFS gateways, npm
+  registry, and similar). Report vulnerabilities in those to the
+  relevant upstream.
 - Issues that require already-compromised operator keys, root on the
   operator's machine, or a malicious browser extension. We will read
   these but they will generally not be treated as security issues
