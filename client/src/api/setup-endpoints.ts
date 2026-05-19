@@ -81,6 +81,19 @@ export interface SetupRoutesConfig {
   /** Returns the chain default RPC URL — used by POST /v1/setup/network when
    *  the operator clears the field to revert to the default. */
   defaultRpcUrlForChain?: () => string;
+  /**
+   * When set, POST /v1/setup/restake/:serviceId is enabled.
+   * Calls the provided function to re-stake an evicted service on demand
+   * (the "Re-stake now" dashboard CTA). jinn-mono-hjex.3
+   *
+   * Contract: `serviceId` is the on-chain OLAS service ID (positive integer
+   * minted by the service registry — *not* the display-index / row number).
+   * The SPA reads `fleet.services[].serviceId` from `/v1/status` and passes
+   * it back unchanged. main.ts resolves the matching `ServiceState` via
+   * `state.services.find(s => s.service_id === serviceId)` before invoking
+   * `recoverEvictedService`.
+   */
+  restake?: (serviceId: number) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void {
@@ -743,6 +756,36 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       restartRequired: true,
       rpcUrl: nextRpcUrl,
     });
+  });
+
+  // POST /v1/setup/restake/:serviceId — operator-triggered re-stake for an
+  // evicted service. Backs the "Re-stake now" dashboard CTA. jinn-mono-hjex.3
+  //
+  // The path parameter is the on-chain OLAS service ID (uint256, surfaced as
+  // `fleet.services[].serviceId` in `/v1/status`). It is **not** the
+  // display-index / row number. Resolving the service is the callback's
+  // responsibility (see `SetupRoutesConfig.restake` docstring).
+  app.post('/v1/setup/restake/:serviceId', async (c) => {
+    if (!config.restake) {
+      return c.json({ error: 'restake_not_configured' }, 503);
+    }
+    const raw = c.req.param('serviceId');
+    const serviceId = Number.parseInt(raw, 10);
+    if (!Number.isFinite(serviceId) || serviceId <= 0) {
+      return c.json({ error: 'invalid_service_id' }, 400);
+    }
+    try {
+      const result = await config.restake(serviceId);
+      if (!result.ok) {
+        return c.json({ ok: false, error: result.error ?? 'restake_failed' }, 500);
+      }
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        500,
+      );
+    }
   });
 
   app.post('/v1/setup/change-password', async (c) => {

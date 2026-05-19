@@ -84,4 +84,32 @@ describe('assembleFleetV1', () => {
     const out = assembleFleetV1(raw);
     expect(out.network).toBe('mainnet');
   });
+
+  it('populates staking.evicted from evictedByServiceIndex (jinn-mono-hjex.3)', () => {
+    // The display index for service at index 1 (via displayFleetServiceIndex) is 0
+    // (fleet-display-index uses 0-based display index from the services array position).
+    const raw = makeRaw({ evictedByServiceIndex: { 0: true } });
+    const out = assembleFleetV1(raw);
+    expect(out.services[0]!.staking.evicted).toBe(true);
+  });
+
+  it('defaults staking.evicted to false when evictedByServiceIndex absent (jinn-mono-hjex.3)', () => {
+    const raw = makeRaw();
+    const out = assembleFleetV1(raw);
+    expect(out.services[0]!.staking.evicted).toBe(false);
+  });
+
+  it('emits attention.kind=evicted when evictedByServiceIndex is true (jinn-mono-hjex.3 review #3)', () => {
+    const raw = makeRaw({ evictedByServiceIndex: { 0: true } });
+    const out = assembleFleetV1(raw);
+    expect(out.services[0]!.attention?.kind).toBe('evicted');
+    expect(out.services[0]!.attention?.hint).toMatch(/evicted/i);
+    expect(out.services[0]!.attention?.exampleCli).toBe('jinn bootstrap --json');
+  });
+
+  it('does not set attention.kind=evicted when evictedByServiceIndex is false (jinn-mono-hjex.3)', () => {
+    const raw = makeRaw({ evictedByServiceIndex: { 0: false } });
+    const out = assembleFleetV1(raw);
+    expect(out.services[0]!.attention).toBeNull();
+  });
 });
