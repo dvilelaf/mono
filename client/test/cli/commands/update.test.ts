@@ -513,10 +513,12 @@ describe('update command', () => {
     expect(stopMock).toHaveBeenCalled();
     const stopCallOrder = stopMock.mock.invocationCallOrder[0];
     const execCallOrder = execSyncMock.mock.invocationCallOrder[0];
+    // Fail loudly rather than passing vacuously if either side wasn't recorded
+    // (e.g. npm-update step regression that skips execSync, or stop wired wrong).
+    expect(stopCallOrder).toBeDefined();
+    expect(execCallOrder).toBeDefined();
     // stopMock called first (lower invocation call order index)
-    if (execCallOrder !== undefined && stopCallOrder !== undefined) {
-      expect(stopCallOrder).toBeLessThan(execCallOrder);
-    }
+    expect(stopCallOrder).toBeLessThan(execCallOrder as number);
 
     const payload = envelopes[envelopes.length - 1] as {
       ok: boolean;

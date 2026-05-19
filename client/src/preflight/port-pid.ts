@@ -41,7 +41,7 @@ function tryLsof(port: number): PortHolder | null {
       timeout: 5000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return parseLsofOutput(out, port);
+    return parseLsofOutput(out);
   } catch {
     return null;
   }
@@ -51,8 +51,9 @@ function tryLsof(port: number): PortHolder | null {
  * Parse lsof -F pcu output. The -F flag gives field output:
  *   p<pid>\nc<command>\nu<user>\n...
  * We look for lines with 'p' (pid) and 'c' (command).
+ * Exported for unit testing.
  */
-function parseLsofOutput(out: string, _port: number): PortHolder | null {
+export function parseLsofOutput(out: string): PortHolder | null {
   if (!out.trim()) return null;
   const lines = out.split('\n');
   let pid: number | null = null;
@@ -67,39 +68,13 @@ function parseLsofOutput(out: string, _port: number): PortHolder | null {
     if (pid !== null && command !== null) break;
   }
   if (pid === null || command === null) {
-    // Fallback: try plain text output (lsof without -F)
-    return parseLsofPlainOutput(out);
+    return null;
   }
   return {
     pid,
     command,
     uptimeSeconds: tryGetProcessUptimeSeconds(pid),
   };
-}
-
-/**
- * Parse plain lsof output (without -F) as a fallback. Looks for lines
- * where the NAME column contains :<port>.
- */
-function parseLsofPlainOutput(out: string): PortHolder | null {
-  const lines = out.split('\n').filter(Boolean);
-  // Skip the header line (COMMAND PID USER ...)
-  for (const line of lines.slice(1)) {
-    const cols = line.trim().split(/\s+/);
-    // COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-    if (cols.length >= 9) {
-      const cmdCol = cols[0];
-      const pidCol = parseInt(cols[1] ?? '', 10);
-      if (Number.isFinite(pidCol) && cmdCol) {
-        return {
-          pid: pidCol,
-          command: cmdCol,
-          uptimeSeconds: tryGetProcessUptimeSeconds(pidCol),
-        };
-      }
-    }
-  }
-  return null;
 }
 
 function trySs(port: number): PortHolder | null {
@@ -119,8 +94,9 @@ function trySs(port: number): PortHolder | null {
 /**
  * Parse ss -lntp output. Lines look like:
  *   LISTEN  0  128  0.0.0.0:7331  0.0.0.0:*  users:(("node",pid=12345,fd=20))
+ * Exported for unit testing.
  */
-function parseSsOutput(out: string): PortHolder | null {
+export function parseSsOutput(out: string): PortHolder | null {
   const lines = out.split('\n').filter(Boolean);
   for (const line of lines) {
     const m = line.match(/users:\(\("([^"]+)",pid=(\d+)/);

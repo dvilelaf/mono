@@ -22,6 +22,10 @@ export interface StopResult {
   discoveredVia?: 'port';
   /** Pidfile mode discriminator, e.g. 'setup-halted' for a halted bootstrap. */
   pidfileMode?: string | null;
+  /** Set true when we awaited exit and the process actually exited within the deadline. */
+  exited?: boolean;
+  /** Set true when SIGTERM did not bring the process down and we escalated to SIGKILL. */
+  escalatedToSigkill?: boolean;
 }
 
 export type PortPidLookupFn = (port: number) => Promise<PortHolder | null>;
@@ -33,15 +37,40 @@ export interface JinnStopOptions {
   lsofImpl?: PortPidLookupFn;
   /** Skip SIGTERM and just report state (used by jinn update for pre-flight check). */
   dryRun?: boolean;
+  /**
+   * Poll `processAlive(pid)` after dispatching SIGTERM until the process exits or
+   * the deadline elapses. Required by callers (e.g. `jinn update`) that must not
+   * race a subsequent action against the running daemon — the SIGTERM handler in
+   * `main.ts` is async (closes API server, flushes SQLite) and takes time.
+   * Default: false.
+   */
+  waitForExit?: boolean;
+  /** Override the wait-for-exit deadline in ms. Default: 10_000. */
+  waitForExitTimeoutMs?: number;
+  /**
+   * When set, after `waitForExit` exhausts the deadline without the process
+   * exiting, escalate to SIGKILL. Default: false. Implies `waitForExit`.
+   */
+  force?: boolean;
 }
 
-function processAlive(pid: number): boolean {
+/** Exported so callers (e.g. `jinn update`) can poll for exit themselves. */
+export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
+}
+
+async function waitForProcessExit(pid: number, deadlineMs: number): Promise<boolean> {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return !processAlive(pid);
 }
 
 /**
@@ -96,7 +125,16 @@ function removePidfile(path: string): boolean {
  *   3. If nothing found, return `state: 'stopped'`.
  */
 export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
-  const { pidfilePath, port, dbPath, lsofImpl = defaultPortPidLookup, dryRun = false } = opts;
+  const {
+    pidfilePath,
+    port,
+    dbPath,
+    lsofImpl = defaultPortPidLookup,
+    dryRun = false,
+    force = false,
+    waitForExit = force,
+    waitForExitTimeoutMs = 10_000,
+  } = opts;
   const now = () => new Date().toISOString();
 
   // ── Path A: pidfile exists ────────────────────────────────────────────────
@@ -105,6 +143,8 @@ export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
     let killed = false;
     let stalePidfileCleaned = false;
     let pidfileRemoved = false;
+    let exited = false;
+    let escalatedToSigkill = false;
 
     if (pid !== null && processAlive(pid)) {
       if (!dryRun) {
@@ -117,6 +157,24 @@ export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
           pidfileRemoved = removePidfile(pidfilePath);
           markShutdownClean(dbPath);
         }
+
+        // Wait for the SIGTERM handler to actually run — main.ts shuts the
+        // API server, flushes SQLite, then exits, which on a loaded node can
+        // take a few seconds. Callers that swap the binary (jinn update) MUST
+        // await exit, otherwise they race the running daemon.
+        if (killed && waitForExit) {
+          exited = await waitForProcessExit(pid, waitForExitTimeoutMs);
+          if (!exited && force) {
+            try {
+              process.kill(pid, 'SIGKILL');
+              escalatedToSigkill = true;
+              exited = await waitForProcessExit(pid, 2_000);
+            } catch {
+              /* process exited between SIGTERM and SIGKILL */
+              exited = !processAlive(pid);
+            }
+          }
+        }
       }
     } else {
       // PID is null or process is gone — stale pidfile.
@@ -128,13 +186,15 @@ export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
     return {
       schemaVersion: 1,
       generatedAt: now(),
-      state: killed || (pid !== null && processAlive(pid)) ? 'stopping' : 'stopped',
+      state: killed && !exited ? 'stopping' : pid !== null && processAlive(pid) ? 'stopping' : 'stopped',
       pid,
       killed,
       pidfilePath,
       pidfileRemoved,
       stalePidfileCleaned,
       pidfileMode,
+      ...(killed && waitForExit ? { exited } : {}),
+      ...(escalatedToSigkill ? { escalatedToSigkill: true } : {}),
     };
   }
 
@@ -149,6 +209,8 @@ export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
 
     if (holder !== null) {
       let killed = false;
+      let exited = false;
+      let escalatedToSigkill = false;
       if (!dryRun) {
         try {
           process.kill(holder.pid, 'SIGTERM');
@@ -156,18 +218,33 @@ export async function jinnStop(opts: JinnStopOptions): Promise<StopResult> {
         } catch {
           /* process gone by the time we tried to kill it */
         }
+
+        if (killed && waitForExit) {
+          exited = await waitForProcessExit(holder.pid, waitForExitTimeoutMs);
+          if (!exited && force) {
+            try {
+              process.kill(holder.pid, 'SIGKILL');
+              escalatedToSigkill = true;
+              exited = await waitForProcessExit(holder.pid, 2_000);
+            } catch {
+              exited = !processAlive(holder.pid);
+            }
+          }
+        }
       }
       markShutdownClean(dbPath);
       return {
         schemaVersion: 1,
         generatedAt: now(),
-        state: killed || processAlive(holder.pid) ? 'stopping' : 'stopped',
+        state: killed && !exited ? 'stopping' : processAlive(holder.pid) ? 'stopping' : 'stopped',
         pid: holder.pid,
         killed,
         pidfilePath,
         pidfileRemoved: false,
         stalePidfileCleaned: false,
         discoveredVia: 'port',
+        ...(killed && waitForExit ? { exited } : {}),
+        ...(escalatedToSigkill ? { escalatedToSigkill: true } : {}),
       };
     }
   }
@@ -194,6 +271,7 @@ async function run(ctx: CommandContext): Promise<void> {
       options: {
         json: { type: 'boolean', default: false },
         human: { type: 'boolean', default: false },
+        force: { type: 'boolean', default: false },
         config: { type: 'string' },
       },
       allowPositionals: false,
@@ -237,10 +315,13 @@ async function run(ctx: CommandContext): Promise<void> {
   const apiPort = config?.apiPort ?? 7331;
   const pidPath = join(earningDir, 'daemon.pid');
 
+  const force = Boolean(parsed.values.force);
   const result = await jinnStop({
     pidfilePath: pidPath,
     port: apiPort,
     dbPath,
+    force,
+    waitForExit: force,
   });
 
   emitResult(
@@ -248,11 +329,17 @@ async function run(ctx: CommandContext): Promise<void> {
     (v) => {
       const value = v as StopResult;
       if (value.discoveredVia === 'port') {
+        if (value.escalatedToSigkill) {
+          return `Discovered daemon on port ${apiPort} (PID ${value.pid}); SIGTERM did not resolve, escalated to SIGKILL.`;
+        }
         return value.killed
           ? `Discovered daemon on port ${apiPort} (PID ${value.pid}); sent SIGTERM.`
           : value.pid !== null
             ? `Daemon PID ${value.pid} was already gone (found via port ${apiPort}); cleaned stale state.`
             : `Daemon is already stopped.`;
+      }
+      if (value.escalatedToSigkill) {
+        return `SIGTERM did not bring down daemon pid ${value.pid}; escalated to SIGKILL.`;
       }
       if (value.killed) {
         return `Sent SIGTERM to daemon pid ${value.pid}.`;
@@ -275,16 +362,21 @@ async function run(ctx: CommandContext): Promise<void> {
 const command: CommandModule = {
   name: 'stop',
   summary: 'Signal a running jinn daemon to shut down gracefully',
-  helpText: `Usage: jinn stop [--human]
+  helpText: `Usage: jinn stop [--human] [--force]
 
 Reads the daemon pid from <earningDir>/daemon.pid and sends SIGTERM.
 If the pidfile is missing, falls back to port-based discovery (lsof / ss).
 Idempotent: if the daemon is already stopped, returns state=stopped and
 killed=false with exit 0. Stale pidfiles are removed.
 
+With --force, waits up to 10s for graceful exit after SIGTERM and then
+escalates to SIGKILL if the daemon is still alive. Use this to recover
+when a previous shutdown got stuck (e.g. EADDRINUSE on relaunch).
+
 Examples:
   jinn stop
   jinn stop --human
+  jinn stop --force
 `,
   run,
 };

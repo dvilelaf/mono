@@ -402,13 +402,31 @@ Examples:
 
         console.error('[update] Checking for running daemon...');
         try {
-          const stopResult = await deps.jinnStopFn({ pidfilePath, port: apiPort, dbPath });
+          // waitForExit + force: SIGTERM alone is not enough — the daemon's
+          // signal handler (main.ts) closes the API server and flushes
+          // SQLite asynchronously and can take seconds, so we must await
+          // the process actually exiting before swapping the binary. If
+          // it does not exit within the deadline, escalate to SIGKILL so
+          // npm install never races a still-running daemon.
+          const stopResult = await deps.jinnStopFn({
+            pidfilePath,
+            port: apiPort,
+            dbPath,
+            waitForExit: true,
+            force: true,
+          });
           if (stopResult.state === 'stopping' || stopResult.killed) {
-            console.error(`[update] Daemon (PID ${stopResult.pid}) signalled to stop.`);
+            const via = stopResult.discoveredVia === 'port' ? ` (discovered via port ${apiPort})` : '';
+            const exitNote = stopResult.escalatedToSigkill
+              ? '; SIGTERM did not resolve, escalated to SIGKILL'
+              : stopResult.exited
+                ? '; exited cleanly'
+                : '';
+            console.error(`[update] Daemon (PID ${stopResult.pid}) signalled to stop${exitNote}.`);
             steps.push({
               step: 'stop-daemon',
               status: 'ok',
-              detail: `Sent SIGTERM to daemon PID ${stopResult.pid}${stopResult.discoveredVia === 'port' ? ` (discovered via port ${apiPort})` : ''}.`,
+              detail: `Sent SIGTERM to daemon PID ${stopResult.pid}${via}${exitNote}.`,
             });
           } else if (stopResult.pid !== null && stopResult.stalePidfileCleaned) {
             steps.push({
