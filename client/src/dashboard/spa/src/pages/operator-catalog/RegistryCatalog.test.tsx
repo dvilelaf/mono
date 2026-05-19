@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -409,6 +409,40 @@ describe('RegistryCatalog', () => {
 
     // A low-severity stale indicator must appear instead.
     await waitFor(() => expect(screen.getByTitle(/last refresh failed/i)).toBeTruthy());
+  });
+
+  it('retry refetches BOTH registry and joined queries when joined-list fatal arm fires (jinn-mono-hjex.9)', async () => {
+    // Registry query succeeds; joined-list query has never succeeded. This is
+    // the second fatal arm — `joinedQuery.isError && joinedQuery.data === undefined`.
+    // The Retry button must refetch BOTH queries, not just `refetch` (registry),
+    // otherwise the user is stuck because the failing query (joined-list) is
+    // never re-triggered.
+    listRegistryMock.mockResolvedValue({
+      summaries: [],
+      lastRefreshedAt: '2026-05-05T01:00:00Z',
+      lastError: null,
+    });
+    listJoinedMock.mockRejectedValue(new Error('joined list network error'));
+
+    render(withProviders(<RegistryCatalog />));
+
+    // Fatal panel renders because joined-list has no data.
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-error')).toBeTruthy(),
+    );
+    expect(screen.getByText(/joined list network error/i)).toBeTruthy();
+
+    // Baseline: each query was called once on mount.
+    expect(listRegistryMock).toHaveBeenCalledTimes(1);
+    expect(listJoinedMock).toHaveBeenCalledTimes(1);
+
+    // Click Retry; both queries must refetch.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('registry-catalog-retry'));
+    });
+
+    await waitFor(() => expect(listJoinedMock).toHaveBeenCalledTimes(2));
+    expect(listRegistryMock).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {

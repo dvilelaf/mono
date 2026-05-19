@@ -376,6 +376,7 @@ export function RegistryCatalog({
           type="button"
           onClick={() => {
             void refetch();
+            if (joinedQuery.isError) void joinedQuery.refetch();
           }}
           data-testid="registry-catalog-retry"
           style={{
