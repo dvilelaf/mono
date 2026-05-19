@@ -680,4 +680,131 @@ describe('solver-nets command', () => {
       expect(raw).toContain('prediction.v1');
     });
   });
+
+  describe('solver-nets list — joinedSolverNets enumeration (jinn-mono-hjex.2)', () => {
+    it('enumerates legacy solverNets entries with source: legacy', async () => {
+      const configPath = tempConfig(predictionConfig());
+      const result = await runSolverNets(['list', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
+      expect(nets.length).toBeGreaterThan(0);
+      const legacyEntry = nets.find((n) => n['name'] === 'prediction');
+      expect(legacyEntry).toBeDefined();
+      expect(legacyEntry?.['source']).toBe('legacy');
+    });
+
+    it('enumerates joinedSolverNets entries with source: joined', async () => {
+      const configPath = tempConfig({
+        solverNets: {},
+        joinedSolverNets: {
+          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
+            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
+            name: 'SWE-rebench v2',
+            roles: ['solver', 'evaluator'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+        },
+      });
+      const result = await runSolverNets(['list', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
+      expect(nets.length).toBe(1);
+      expect(nets[0]?.['source']).toBe('joined');
+      expect(nets[0]?.['name']).toBe('SWE-rebench v2');
+      expect(nets[0]?.['manifestCid']).toBe('bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi');
+    });
+
+    it('returns both legacy and joined entries when both are present', async () => {
+      const configPath = tempConfig({
+        ...predictionConfig(),
+        joinedSolverNets: {
+          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
+            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
+            name: 'SWE-rebench v2',
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+        },
+      });
+      const result = await runSolverNets(['list', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
+      expect(nets.length).toBe(2);
+      const sources = nets.map((n) => n['source']);
+      expect(sources).toContain('legacy');
+      expect(sources).toContain('joined');
+    });
+
+    it('solver-nets list --human includes joined SolverNet name in output', async () => {
+      const configPath = tempConfig({
+        solverNets: {},
+        joinedSolverNets: {
+          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
+            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
+            name: 'SWE-rebench v2',
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+        },
+      });
+      const made = makeCommandCtx({ argv: ['list', '--human', '--config', configPath] });
+      await solverNetsCommand.run(made.ctx);
+      const raw = made.writes.join('');
+
+      expect(made.exits).toEqual([]);
+      expect(raw.trim().startsWith('{')).toBe(false);
+      expect(raw).toContain('SWE-rebench v2');
+      expect(raw).toContain('joined');
+    });
+
+    it('derives solverType for joined entries from contract.id.contract.version (jinn-mono-hjex.2)', async () => {
+      // Regression: solverType was previously hardcoded to 'prediction.v1' for
+      // all joined entries, masking the actual SolverNet contract a joined
+      // operator has subscribed to.
+      const configPath = tempConfig({
+        solverNets: {},
+        joinedSolverNets: {
+          'bafkreipredictioncid000000000000000000000000000000000000000000': {
+            manifestCid: 'bafkreipredictioncid000000000000000000000000000000000000000000',
+            name: 'Prediction Net',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+          'bafkreiswerebenchv2cid000000000000000000000000000000000000000000': {
+            manifestCid: 'bafkreiswerebenchv2cid000000000000000000000000000000000000000000',
+            name: 'SWE-rebench v2',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver'],
+            harness: 'swe-rebench-v2-runner',
+            plugins: [],
+          },
+          'bafkreiunknowncontractcid00000000000000000000000000000000000000': {
+            manifestCid: 'bafkreiunknowncontractcid00000000000000000000000000000000000000',
+            name: 'Legacy join (no contract)',
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+        },
+      });
+      const result = await runSolverNets(['list', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
+      const byName = Object.fromEntries(nets.map((n) => [n['name'] as string, n]));
+      expect(byName['Prediction Net']?.['solverType']).toBe('prediction.v1');
+      expect(byName['SWE-rebench v2']?.['solverType']).toBe('swe-rebench-v2.v1');
+      // Joined entries without a `contract` field surface as '(unknown)' rather
+      // than masquerading as prediction.v1.
+      expect(byName['Legacy join (no contract)']?.['solverType']).toBe('(unknown)');
+    });
+  });
 });

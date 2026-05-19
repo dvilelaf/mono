@@ -19,6 +19,8 @@ import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/predicti
 import type { SolverPluginEntry } from '../plugins/types.js';
 import {
   loadSolverNets as defaultLoadSolverNets,
+  rolesFromJoinedConfig,
+  type JoinedSolverNetConfig,
   type LoadedSolverNet,
   type SolverNetConfig,
   type SolverNetOperatorRole,
@@ -214,6 +216,28 @@ function missingSolverNetStatus(
   };
 }
 
+/**
+ * Build a synthetic SolverNetConfig from the first entry in joinedSolverNets.
+ * This lets the diagnostic loop run unchanged when an operator has joined a
+ * SolverNet via the manifest-keyed flow but has no legacy solverNets[name] entry.
+ */
+function synthesizeFromJoined(
+  joinedSolverNets: Record<string, JoinedSolverNetConfig>,
+  solverType = 'prediction.v1',
+): SolverNetConfig {
+  const first = Object.values(joinedSolverNets)[0];
+  const roles = rolesFromJoinedConfig(first);
+  return {
+    enabled: true,
+    solverType,
+    roles: roles.length > 0 ? roles : ['solving'],
+    harness: first.harness ?? '',
+    model: first.model,
+    plugins: (first.plugins ?? []) as SolverNetConfig['plugins'],
+    taskGenerator: { enabled: false },
+  };
+}
+
 export async function buildPredictionOperatorStatus({
   config,
   configPath,
@@ -223,8 +247,24 @@ export async function buildPredictionOperatorStatus({
   loadSolverNets = defaultLoadSolverNets,
   daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
-  const net = config.solverNets[name];
-  if (!net) return missingSolverNetStatus(configPath, name, daemonRunning);
+  const legacy = config.solverNets[name];
+  const joinedEntries = Object.values(config.joinedSolverNets ?? {});
+  const firstJoined = joinedEntries[0];
+  // Only synthesize from joinedSolverNets when the first joined entry is a
+  // prediction.v1 SolverNet. A joined entry whose contract resolves to a
+  // different SolverType (e.g. swe-rebench-v2.v1) is not a prediction operator,
+  // so we fall through to missingSolverNetStatus instead of producing false
+  // prediction_solver_type_mismatch diagnostics. An entry with no `contract`
+  // field (older shape / test stub) is treated as prediction.v1 for backwards
+  // compatibility — production joined entries always carry the contract ref.
+  const firstJoinedIsPrediction =
+    firstJoined !== undefined &&
+    (firstJoined.contract === undefined ||
+      `${firstJoined.contract.id}.${firstJoined.contract.version}` === 'prediction.v1');
+  if (!legacy && !firstJoinedIsPrediction) {
+    return missingSolverNetStatus(configPath, name, daemonRunning);
+  }
+  const net: SolverNetConfig = legacy ?? synthesizeFromJoined(config.joinedSolverNets!, 'prediction.v1');
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;
