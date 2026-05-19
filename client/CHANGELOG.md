@@ -2,6 +2,174 @@
 
 ## Unreleased
 
+## v0.1.6 — Hermes Loop
+
+_Released 2026-05-19_
+
+# v0.1.6 — "Hermes Loop"
+
+2026-05-19 · 48 PRs · 296 commits · 3 contributors
+
+Hermes is live. An operator can join a SolverNet on Base Sepolia with the Hermes harness, pick a model from the dashboard catalog, and close the loop: claim → solve → deliver → get scored. The 2026-05-08 "evaluations silently broken" failure mode from v0.1.5 is demonstrably absent in v0.1.6 — verified end-to-end on real testnet with `verdictCode: 1` on a real sympy fix.
+
+But the loop closing is downstream of a much larger story. v0.1.6 ships the first end-to-end builder workflow, the Network explorer, an admission substrate that makes evals actually trustworthy, and the per-harness auth cutover that decouples claim-loop liveness from harness-specific credentials.
+
+## Highlights
+
+### 🧩 Plug-in builder system — scaffold to chain in 60 seconds
+
+The first release where a contributor can ship a SolverPlugin end-to-end without leaving the toolchain.
+
+- **`jinn create plugin`** (#210) — scaffolds a working plug-in package (two patterns: SolverType plug-in or runtime plug-in) modelled on the production `swe-rebench-v2-runtime` package. New skeleton compiles, tests pass, ready to edit.
+- **`jinn solver-plugins publish` + revoke** (#213) — packs the plug-in, uploads to IPFS, writes a `plugin:<cid>` record to the on-chain IdentityRegistry under the builder's agentId. Lazy Stage-1 identity bootstrap on first publish.
+- **Ponder indexer for plug-ins** (#214) — `PluginPublication` entity + `plugin:*` MetadataSet handler + `PublishedArtifact` base. Plug-ins are discoverable across the network.
+- **Discovery API REST routes** (#215) — five new `/v1/discovery/*` routes (plugin-publications, builder-artifacts, plugin-scores, launched-solvernets, claimable-tasks).
+- **`/build` SPA page** (#216, #228, #292) — the canonical operator-app surface for builders. Lists published plug-ins for a SolverNet, your own published plug-ins under your builder agentId, the shape reference, and a quickstart. Designed against `DESIGN.md` tokens.
+- **Discovery auth gate** (#227) — `/v1/discovery/*` routes get the same auth treatment as every other `/v1/*` daemon route.
+
+A builder can today: scaffold → edit a skill → publish → see it appear on `/build` under their agentId → another operator installs it via `jinn solver-nets add-plugin` and the next task's signed envelope carries the plug-in CID in `executor.plugins[]`.
+
+### 🌐 Network explorer
+
+The data layer becomes visible. Operators and builders can finally see what's happening across the network.
+
+- **Full explorer surface** (#181) — design, indexer schema/routes/enrichment, and the SPA. Network-level views of tasks, attempts, verdicts, operators, and plug-ins.
+- **Solve-rate hero on Network view** (#251) — leads with the load-bearing metric.
+
+### 🔬 SWE-rebench v2 eval substrate (fufn)
+
+The work that made today's `verdictCode: 1` verification possible at all.
+
+- **Eval admission + verdict-time substrate recheck** (#234) — operators maintain a validated pool of scorable instances; the generator only posts admitted instances; the evaluator re-verifies HF row hash + Docker image digest at verdict time. Reproducible verdicts; no more silently grading against drifted substrate.
+
+### 🔐 Per-harness auth + claim-loop readiness (vh74.2)
+
+The bootstrap stops being gated on Claude auth. Each harness reports its own readiness, and claim-loop refuses to attempt with an unready harness.
+
+- **Per-harness readiness registry** (#248) — `claude-code-learner`, `codex-code-learner`, and `hermes-agent` each expose an `isReady()` snapshot via `/v1/harnesses/readiness` + `/v1/harnesses/:name/readiness`. Onboarding drops from 4 phases to 3 (no more "Sign in to Claude" step at bootstrap).
+
+### 🚀 Hermes harness production-usable
+
+The headline that named the release.
+
+- **Hermes harness + model catalog** (part of #292) — 10 canonical models in the dashboard dropdown: Anthropic Opus 4.7 (default, OpenRouter), Sonnet 4.6, Hy3 Preview, DeepSeek V4 Pro / Flash, Gemini 3.1 Flash Lite, Kimi K2.6, Owl Alpha, MiniMax M2.7, Hermes 4 405B.
+- **Harness-aware PluginPicker** (part of #292) — `claude-code-learner` is no longer force-included as a default plug-in when the operator picks Hermes (Hermes has its own learning loop).
+- **Provider routing** (#298) — `<org>/<model>` model ids auto-route to OpenRouter, so the catalog actually works without operators manually editing their `hermes config.yaml`.
+- **MCP launcher path resolution** (#299) — the `jinn-client` MCP server starts correctly in dev-layout installs, unblocking solution submission.
+
+### 🏗 Bootstrap reliability (u34i / h74p / hjex.4 / 3nc5 / k1ng)
+
+- **Bootstrap reliability stack** (#262, #275, #279, #237, #238, #255, #257) — gate+transfer parity, faucet/gate single source, `getCode` retry, panel auto-continue, harness-readiness holder, fresh-Safe race retry, `setAgentWallet` revert reason surfacing, Stage 1 `bindResult` narrowing, Docker stage copies docs.
+- **One-shot funding + Tenderly default RPC** (#292) — operators send 0.020 ETH once; daemon doesn't re-prompt. Tenderly gateway replaces rate-limited `sepolia.base.org`. Shared-RPC panel warning with CTAs when on the bundled key.
+
+### 🛤 Two-train release cadence (qlol)
+
+- **Promote-main workflow + canary trigger** (#252, #253) — every push to `next` ships a `@canary` to npm; named-stable cuts trigger `npm @latest` + auto-FF of `main`. Handbook + CLAUDE + hotfix runbook updated.
+
+### 📜 Canonical docs
+
+- **PRINCIPLES.md** (#230) — privileged canon. Agents read it at session start; all decision-making runs through it.
+- **BRAND + GLOSSARY** (#196) — builder-pitch learnings captured into canon.
+
+### 🪲 Ghost-task floor (band-aid for #300)
+
+Caught during the cut itself.
+
+- **Backlog floor across all ingestion paths** (#301 + #303 + #305) — fresh operators on v0.1.6+ skip the 9 known pre-pool-rebuild ghost tasks on Base Sepolia. Three pieces because the band-aid surface had three call sites (adapter default, main.ts shadow, DiscoveryAPI consumption). #300 is the proper-fix investigation.
+
+## Live verification
+
+A3 closed end-to-end on Base Sepolia during the cut. Hermes-on-DeepSeek-V4-Flash produced a patch for `sympy__sympy-27510` ("Printing multiplication by negative number with custom (infix) function not correctly parenthesized"); the patch applied, the FAIL_TO_PASS tests passed, and Op A's evaluator scored it `verdictCode: 1`. Full transaction hashes and envelope CIDs in `log/decisions/2026-05-19-v0.1.6-stewardship.md`.
+
+## Full changelog
+
+### feat
+- (#181) feat(ebu7): network explorer — design, indexer schema/routes/enrichment, SPA
+- (#209) docs(52x3): plug-in builder entry point — spec + plan
+- (#210) feat(et6s): `jinn create plugin` scaffold (two patterns)
+- (#213) feat(1pbc): `jinn solver-plugins publish` + revoke — on-chain plug-in registry via setMetadata
+- (#214) feat(attd): Ponder indexer — `PluginPublication` entity + `plugin:*` MetadataSet handler + `PublishedArtifact` base
+- (#215) feat(ttz8): five Discovery API REST routes per spec §6.5
+- (#216) feat(hfmf): `/build` SPA route + canonical `/docs/build/` tree
+- (#251) feat(explorer): lead Network view with solve-rate hero
+
+### fix
+- (#227) fix(0nih): auth-gate `/v1/discovery/*` daemon API routes
+- (#234) fix(fufn): SWE-rebench v2 eval admission + verdict-time substrate recheck
+- (#237) fix(h74p): retry safe-binding to absorb fresh-Safe race window
+- (#238) fix(hjex.4): surface `setAgentWallet` revert reason in `attention.hint`
+- (#255) fix(3nc5): narrow Stage 1 `bindResult` before reading txHash
+- (#257) fix(3nc5): Dockerfile build stage copies `client/docs/` for `/build` SPA
+- (#262) fix(u34i): bootstrap reliability stack
+- (#279) fix(k1ng): `setAgentWallet` retries on returned `ok:false`, not just thrown errors
+- (#292) fix(u34i): post-bootstrap operator-app polish — Tenderly default RPC, one-shot funding, discovery holder, `/build` design, Hermes catalog, harness-aware PluginPicker
+- (#298) fix(hermes): infer `--provider openrouter` from `<org>/<model>` model ids (closes #293)
+- (#299) fix(hermes): inject `JINN_NETWORK_TOOLS_CLIENT_ROOT` into MCP server env (closes #294)
+- (#301) fix(mech): bump Base Sepolia TaskCreated backlog floor past v3 pool rebuild (#300 band-aid pt.1)
+- (#303) fix(mech): remove main.ts shadow of TaskCreated backlog floor (#300 band-aid pt.2)
+- (#305) fix(mech): apply backlog floor to DiscoveryAPI candidates too (#300 band-aid pt.3)
+
+### refactor
+- (#140) refactor: rename `claude-code-learner` → learner + Hermes design docs
+- (#174) refactor: solution envelope role schema
+- (#212) refactor(nghf): staged bootstrap — fleet-level Stage 1 + `ensureStage1` / `ensureStage1And2` entry points
+- (#228) refactor(gxuf): extract `PanelCard` to DRY `/build` SPA panel sections
+- (#248) refactor(vh74.2): per-harness readiness registry + daemon-level Claude gate removal
+
+### chore / release plumbing
+- (#164) chore(2cl.21): bd-mirror writes Sprint iteration + human Epic options
+- (#221) chore: sync main into next after current release
+- (#226) chore(52x3): simplify epic surface (post-merge cleanup)
+- (#252) chore(qlol): two-train plumbing — promote-main workflow + canary trigger
+- (#253) docs(qlol): two-train cutover — handbook + CLAUDE + hotfix runbook
+- (#256) chore(3nc5): bump client to v0.1.6 for the Monday cut
+
+### canon
+- (#196) canon: builder-pitch learnings in `BRAND` and `GLOSSARY`
+- (#230) canonical docs: introduce `PRINCIPLES.md` as privileged canon
+
+### test
+- (#173) test: real two-operator corpus-read e2e on Anvil fork (incl. x402 USDC payment)
+- (#224) test(r83r): reference plug-in + cold-start E2E acceptance gate
+- (#275) test(u34i): tier-2 regression coverage — Playwright sequential-state E2E, late-mount lint, boundary tests
+
+### docs
+- (#306) docs(stewardship): READY-FOR-CUT decision-log entry for this cut
+
+### other
+- (#232) codeowners: drop @ritsuKai2000 (secondary account) from canon ownership
+
+## Known issues / v0.1.7 follow-ups
+
+v0.1.6 ships three band-aid patches in the floor stack (#301 + #303 + #305) for the ghost-task class. Each has a paired investigation issue framed as "understand the code first, then propose":
+
+| Issue | Class | What |
+|-------|-------|------|
+| #295 | catalog schema | Provider as a first-class field on `LearnerModelOption`. Replaces the regex inference in #298. |
+| #296 | plugin layout | Per-task plugin-mount audit. Replaces the env injection in #299. |
+| #297 | test surface | Real-Hermes E2E test shape. Stub-based E2E missed the bug classes caught live. |
+| #300 | admission | Ghost-task class — symmetric solver-side admission filter, contract-side `cancelTask`, self-bumping floor anchored to pool `updatedAt`. Replaces the three-piece floor band-aid. |
+| #302 | harness layer | `codex-code-learner` session-start hook missing on dev-layout install. |
+| #304 | CI hygiene | `transcript-watcher.test.ts > shutdown stops further dispatches` — 8s `waitFor` times out under CI load. |
+| #307 | release process | qlol cutover removed the holistic-review-at-main gate. Investigate restoring it. |
+
+## Stats
+
+- Window: v0.1.5 → next HEAD (`92ba5361`)
+- 296 commits · 48 PRs · 466 files changed, +66,489 / −1,446
+- 3 contributors
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+<!-- jinn-release-evidence:v1
+release-tag=v0.1.6
+release-commit=579541cd7fefe305289a51b0ac5da19587e00ad2
+release-client-prepare=passed
+donation-consumption=skipped:#310
+app-first-testnet-acceptance=passed
+-->
+
 ## v0.1.5 — Operator App
 
 _Released 2026-05-13_
