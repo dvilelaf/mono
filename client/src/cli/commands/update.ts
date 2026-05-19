@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
@@ -14,6 +15,8 @@ import { FleetStateStore } from '../../earning/store.js';
 import type { FleetState, ServiceState } from '../../earning/types.js';
 import { Store } from '../../store/store.js';
 import integrationsCommand from './integrations.js';
+import { jinnStop } from './stop.js';
+import type { JinnStopOptions, StopResult } from './stop.js';
 
 class StringWriter {
   private chunks: string[] = [];
@@ -60,6 +63,8 @@ export interface UpdateDeps {
   getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
   fleetStateStoreFactory: (earningDir: string) => Pick<FleetStateStore, 'dir' | 'hasStateFile' | 'tryLoadExisting' | 'save'>;
   storeFactory: (dbPath: string) => Pick<Store, 'close'>;
+  /** Injectable for tests; defaults to the real jinnStop. */
+  jinnStopFn: (opts: JinnStopOptions) => Promise<StopResult>;
 }
 
 const PRODUCTION_DEPS: UpdateDeps = {
@@ -68,6 +73,7 @@ const PRODUCTION_DEPS: UpdateDeps = {
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
   fleetStateStoreFactory: (earningDir) => new FleetStateStore(earningDir),
   storeFactory: (dbPath) => new Store(dbPath),
+  jinnStopFn: jinnStop,
 };
 
 type UpdateStepStatus = 'ok' | 'error' | 'skipped' | 'warning' | 'state-integrity';
@@ -374,6 +380,100 @@ Examples:
       const skipPlugins = parsed.values['skip-plugins'] as boolean;
 
       const steps: UpdateStep[] = [];
+
+      // ── Step 0: Stop the running daemon (if any) before swapping the binary ──
+      if (!skipNpm) {
+        let stopConfig;
+        try {
+          const configPath =
+            deps.getConfigPathFromArgs(ctx.argv ?? []) ??
+            (typeof process !== 'undefined' ? deps.getConfigPathFromArgs(process.argv.slice(2)) : undefined);
+          stopConfig = deps.loadConfig(configPath);
+        } catch {
+          /* config unavailable — use defaults */
+        }
+        const earningDir =
+          ctx.env['JINN_EARNING_DIR'] ??
+          stopConfig?.earningDir ??
+          join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
+        const dbPath = ctx.env['JINN_DB_PATH'] ?? stopConfig?.dbPath;
+        const apiPort = stopConfig?.apiPort ?? 7331;
+        const pidfilePath = join(earningDir, 'daemon.pid');
+
+        console.error('[update] Checking for running daemon...');
+        try {
+          // waitForExit + force: SIGTERM alone is not enough — the daemon's
+          // signal handler (main.ts) closes the API server and flushes
+          // SQLite asynchronously and can take seconds, so we must await
+          // the process actually exiting before swapping the binary. If
+          // it does not exit within the deadline, escalate to SIGKILL so
+          // npm install never races a still-running daemon.
+          const stopResult = await deps.jinnStopFn({
+            pidfilePath,
+            port: apiPort,
+            dbPath,
+            waitForExit: true,
+            force: true,
+          });
+          if (stopResult.state === 'stopping' || stopResult.killed) {
+            const via = stopResult.discoveredVia === 'port' ? ` (discovered via port ${apiPort})` : '';
+            const exitNote = stopResult.escalatedToSigkill
+              ? '; SIGTERM did not resolve, escalated to SIGKILL'
+              : stopResult.exited
+                ? '; exited cleanly'
+                : '';
+            console.error(`[update] Daemon (PID ${stopResult.pid}) signalled to stop${exitNote}.`);
+            steps.push({
+              step: 'stop-daemon',
+              status: 'ok',
+              detail: `Sent SIGTERM to daemon PID ${stopResult.pid}${via}${exitNote}.`,
+            });
+          } else if (stopResult.pid !== null && stopResult.stalePidfileCleaned) {
+            steps.push({
+              step: 'stop-daemon',
+              status: 'ok',
+              detail: `Daemon PID ${stopResult.pid} was already gone; cleaned stale state.`,
+            });
+          } else {
+            // Nothing running — proceed without warning.
+            steps.push({ step: 'stop-daemon', status: 'skipped', detail: 'No running daemon found.' });
+          }
+        } catch (err) {
+          // If we can't stop the daemon, refuse to swap the binary to avoid EADDRINUSE on re-launch.
+          const message = err instanceof Error ? err.message : String(err);
+          steps.push({
+            step: 'stop-daemon',
+            status: 'error',
+            detail: `Could not stop running daemon: ${message}. Aborting update to avoid port conflict.`,
+          });
+          console.error(`[update] Could not stop daemon, aborting: ${message}`);
+          const allOk = false;
+          emitResult(
+            {
+              schemaVersion: 1,
+              generatedAt: new Date().toISOString(),
+              verb: 'update',
+              ok: allOk,
+              steps,
+            },
+            (v) => {
+              const value = v as { ok: boolean; steps: UpdateStep[] };
+              const lines = value.steps.map(
+                (s) => `  ${s.step.padEnd(20)} ${s.status}: ${s.detail}`,
+              );
+              return `Update ${value.ok ? 'complete' : 'completed with errors'}:\n${lines.join('\n')}`;
+            },
+            {
+              json: Boolean(parsed.values.json),
+              human: Boolean(parsed.values.human),
+              writer: ctx.writer,
+              stdoutIsTty: ctx.stdoutIsTty,
+              noColor: Boolean(ctx.env['NO_COLOR']),
+            },
+          );
+          return;
+        }
+      }
 
       // ── Step 1: Update the npm package ──
       if (!skipNpm) {

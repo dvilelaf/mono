@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HermesPrecheckPanel } from './HermesPrecheckPanel.js';
 import { useLocation, useParams } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +21,7 @@ import {
   harnessOptionLabel,
 } from '../configuration/harnessNames.js';
 import { PluginPicker } from '../configuration/PluginPicker.js';
+import { CostEstimatePanel, useCostSurfaceDecision } from '../configuration/CostEstimatePanel.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
 
 const HERMES_AGENT_DESCRIPTION =
@@ -127,25 +128,34 @@ export function JoinFlow({
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showHermesPrecheck, setShowHermesPrecheck] = useState(false);
+  // Tracks whether the operator has explicitly picked a harness in this
+  // session. Once true, the catalog-arrival effect below MUST NOT stomp
+  // their choice — that was the cause of issue #329, where SWE-rebench v2
+  // (whose catalog default is Hermes) re-overrode every Claude Code click.
+  const operatorPickedHarness = useRef(false);
+  const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
 
   // The catalog loads independently of the manifest — when it arrives, if
-  // the operator hasn't picked a harness yet (`form.harness` still equal to
-  // the seed default) and the catalog's first compatible option differs,
-  // shift to that. This is render-time-safe because we only call setForm
-  // when the values are unequal — React queues the re-render and bails out
-  // from infinite loops automatically.
+  // the operator hasn't picked a harness yet, shift the seed default to the
+  // catalog's first compatible option. Once-per-catalog-load via useEffect
+  // (NOT a render-time setState) so subsequent dropdown selections don't
+  // get reverted on every re-render.
   const catalogPreferredHarness = solverCompatibleHarnesses[0]?.name;
-  if (
-    catalogPreferredHarness &&
-    form.harness === DEFAULT_HARNESS &&
-    catalogPreferredHarness !== DEFAULT_HARNESS
-  ) {
-    setForm({
-      ...form,
+  useEffect(() => {
+    if (operatorPickedHarness.current) return;
+    if (!catalogPreferredHarness) return;
+    if (catalogPreferredHarness === form.harness) return;
+    setForm((prev) => ({
+      ...prev,
       harness: catalogPreferredHarness,
       model: defaultModelForHarness(catalogPreferredHarness),
-    });
-  }
+    }));
+    // form.harness intentionally omitted: we only react to the catalog
+    // value changing (initial load / contract switch). Including form.harness
+    // would re-fire this effect after the operator picks something and
+    // bounce them back to the catalog default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogPreferredHarness]);
   const modelOptions = modelOptionsForHarness(form.harness);
 
   const submitMutation = useMutation({
@@ -227,7 +237,19 @@ export function JoinFlow({
 
   const showSolverFields = form.roles.includes('solver');
   const showEvaluatorInfo = form.roles.includes('evaluator');
-  const canSubmit = form.roles.length > 0 && !submitMutation.isPending;
+
+  // Cost-protection surface (Issue #331). Only consulted when the solver
+  // role is selected — the evaluator role binds to a manifest-supplied
+  // implementation and bypasses operator harness choice entirely.
+  const costDecision = useCostSurfaceDecision(
+    showSolverFields ? form.harness : undefined,
+    showSolverFields ? form.model : undefined,
+  );
+  const requiresCostConfirmation = showSolverFields && costDecision.requiresConfirmation;
+  const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
+
+  const canSubmit =
+    form.roles.length > 0 && !submitMutation.isPending && !costGateBlocked;
 
   return (
     <main data-testid="join-flow" data-manifest-cid={cid} style={pageStyle}>
@@ -389,11 +411,16 @@ export function JoinFlow({
                 value={form.harness}
                 onChange={(e) => {
                   const harness = e.target.value;
+                  // Mark the choice as operator-driven so the catalog-arrival
+                  // effect above doesn't bounce them back to the catalog
+                  // default on the next render (issue #329).
+                  operatorPickedHarness.current = true;
                   setForm({
                     ...form,
                     harness,
                     model: defaultModelForHarness(harness),
                   });
+                  setHighCostAcknowledged(false);
                 }}
                 style={selectStyle}
               >
@@ -426,7 +453,10 @@ export function JoinFlow({
                 aria-label="Model"
                 data-testid="join-model-select"
                 value={form.model}
-                onChange={(e) => setForm({ ...form, model: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, model: e.target.value });
+                  setHighCostAcknowledged(false);
+                }}
                 style={selectStyle}
               >
                 {modelOptions.map((m) => (
@@ -448,6 +478,45 @@ export function JoinFlow({
               </select>
             </div>
           </div>
+
+          <CostEstimatePanel
+            harness={form.harness}
+            modelId={form.model}
+            testIdPrefix="join-flow-cost"
+          />
+
+          {requiresCostConfirmation && (
+            <label
+              data-testid="join-flow-cost-confirmation"
+              data-cost-confirmation-checked={highCostAcknowledged ? 'true' : 'false'}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px',
+                padding: '12px 14px',
+                border: '1px solid var(--break-red)',
+                borderRadius: 'var(--radius-2)',
+                background: 'var(--bg)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '12px',
+                color: 'var(--fg)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                data-testid="join-flow-cost-confirmation-checkbox"
+                checked={highCostAcknowledged}
+                onChange={(e) => setHighCostAcknowledged(e.target.checked)}
+                style={{ accentColor: 'var(--break-red)', marginTop: '2px', width: '14px', height: '14px' }}
+                aria-label="I understand the per-task cost and have a budget for this"
+              />
+              <span>
+                I understand — I have a budget for this. The selected model is estimated at more than $1
+                per task; I am responsible for the API spend on my own provider key.
+              </span>
+            </label>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <span style={fieldLabelStyle}>Plugins</span>

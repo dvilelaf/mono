@@ -38,6 +38,7 @@ import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
+import { requestDaemonRestart } from './restart-daemon.js';
 import { buildEnvelope, emitEnvelope, type ErrorCode, type ErrorEnvelope } from './errors/envelope.js';
 import {
   clearBootstrapError,
@@ -972,10 +973,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
       },
       admin: {
-        onRestartRequested: () => {
-          console.log('[main] Restart requested via operator MCP. Exiting...');
-          process.exit(0);
-        },
+        // jinn-mono #289: in interactive mode (the dashboard SPA case),
+        // spawn a detached replacement before exiting so the panel reconnects
+        // to a live daemon instead of seeing a 502 + terminal prompt. In
+        // headless mode (`JINN_NO_UI=1`), exit without respawning so the
+        // supervisor / systemd / docker entrypoint decides what to do.
+        onRestartRequested: () => requestDaemonRestart(),
       },
       harnessStatus: {
         getStatus: async () => {
@@ -1433,6 +1436,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         });
         console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
 
+        // hjex.5: Write a setup-halted pidfile so `jinn stop` can find this
+        // process even though it has not entered full running mode yet.
+        // The `mode` discriminator prevents `jinn run` from killing a
+        // halted-but-recoverable process before the operator has a chance to
+        // fund the wallet and click Retry.
+        const setupHaltedPidPath = join(config.earningDir, 'daemon.pid');
+        try {
+          mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
+          writeFileSyncMain(
+            setupHaltedPidPath,
+            JSON.stringify({ pid: process.pid, mode: 'setup-halted' }) + '\n',
+            'utf-8',
+          );
+          // Remove on process exit so a clean restart doesn't see a stale pidfile.
+          process.once('exit', () => {
+            try { unlinkSync(setupHaltedPidPath); } catch { /* ignore */ }
+          });
+        } catch (pidErr) {
+          console.warn(
+            `[main] Could not write setup-halted pidfile at ${setupHaltedPidPath}: ` +
+              (pidErr instanceof Error ? pidErr.message : String(pidErr)),
+          );
+        }
+
         // hjex.6: Auto-resume funding poller.
         // When the halt is a funding shortfall, poll the master EOA balance
         // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
@@ -1840,6 +1867,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
     hermesProvider: config.hermesProvider,
+    hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
   })) {
     implRegistry.register(impl);
   }

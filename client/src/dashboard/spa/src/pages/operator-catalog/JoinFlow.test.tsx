@@ -289,6 +289,56 @@ describe('JoinFlow — harness options', () => {
     );
   });
 
+  it('selecting Claude Code in the dropdown sticks even when the catalog default is Hermes (issue #329)', async () => {
+    // Issue #329 regression. Production SWE-rebench v2 catalog
+    // (`client/src/main.ts`) lists Hermes first; selecting Claude Code from
+    // the dropdown silently reverted to Hermes on every render because a
+    // render-time `setForm` was bouncing form.harness back to the catalog
+    // default whenever it equalled the seed `claude-code`. Cover the full
+    // sequence: catalog default Hermes -> operator picks Claude Code -> value
+    // sticks across re-renders -> submit carries claude-code.
+    apiMock.getSolverNets.mockResolvedValue({
+      ...baseCatalog,
+      nets: [
+        {
+          ...baseCatalog.nets[0]!,
+          compatibleHarnesses: [
+            { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+            { name: 'codex-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          ],
+        },
+      ],
+    });
+
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    // Catalog-arrival effect picks Hermes as the seed.
+    await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+
+    // Operator selects Claude Code.
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
+
+    // The pick must stick — not silently revert to Hermes on re-render.
+    await waitFor(() => expect(harnessSelect.value).toBe('claude-code'));
+    // Force several re-renders (toggle Evaluator on and off) to exercise the
+    // catalog-arrival effect's dependency tracking — Claude Code must remain.
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    fireEvent.click(screen.getByLabelText('Evaluator'));
+    expect(harnessSelect.value).toBe('claude-code');
+
+    // Submit carries the operator's choice.
+    fireEvent.click(screen.getByTestId('join-flow-submit'));
+    await waitFor(() => expect(apiMock.operatorJoin).toHaveBeenCalled());
+    expect(apiMock.operatorJoin).toHaveBeenCalledWith(
+      'bafybeiaaa',
+      expect.objectContaining({ harness: 'claude-code', roles: ['solver'] }),
+    );
+  });
+
   it('drops claude-code-learner from default plugins when Hermes Agent is selected', async () => {
     // Hermes owns its own learning loop (skill self-improvement, memory
     // curation, FTS5 session search — see harnesses/impls/hermes-agent/
@@ -625,6 +675,14 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
     // Select hermes-agent.
     fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
     await waitFor(() => expect(harnessSelect.value).toBe('hermes-agent'));
+
+    // Hermes default is Opus 4.7 — above the $1/task cost gate (Issue
+    // #331). Acknowledge it so the submit button isn't gated; these
+    // tests are exercising the precheck path, not the cost gate.
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId('join-flow-cost-confirmation-checkbox'));
   }
 
   it('shows the not-installed panel when hermesDoctor returns installed:false', async () => {
@@ -736,6 +794,9 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
     expect(screen.getByTestId('join-flow-solver-fields')).toBeTruthy();
   });
 
+  // Cost-protection P0 tests live in the following describe block, then the
+  // remaining Hermes precheck cases continue below.
+
   it('shows the network-error panel when hermesDoctor rejects (does NOT fall through to install)', async () => {
     apiMock.hermesDoctor.mockRejectedValue(new Error('Network error: failed to fetch /api/hermes/doctor'));
 
@@ -750,5 +811,132 @@ describe('JoinFlow — Hermes Agent precheck panel', () => {
     // reinstall a Hermes that is already there when the daemon is just down).
     expect(screen.queryByTestId('hermes-precheck-not-installed')).toBeNull();
     expect(apiMock.operatorJoin).not.toHaveBeenCalled();
+  });
+});
+
+describe('JoinFlow — cost surfacing + confirmation gate (Issue #331 P0)', () => {
+  /**
+   * Catalog with Hermes + Claude Code, both compatible. The default solver
+   * harness is the first compatible — Claude Code — so the cost surface
+   * for that path renders the subscription reassurance. Switching to
+   * Hermes + Opus 4.7 puts us in the high-cost band; switching to
+   * Hermes + DeepSeek V4 Flash stays under the $1 threshold.
+   */
+  const mixedHarnessCatalog = {
+    ...baseCatalog,
+    nets: [
+      {
+        ...baseCatalog.nets[0]!,
+        compatibleHarnesses: [
+          { name: 'claude-code-learner', version: '0.1.0', supportsRoles: ['solving' as const] },
+          { name: 'hermes-agent', version: '0.1.0', supportsRoles: ['solving' as const] },
+        ],
+      },
+    ],
+  };
+
+  async function setupSolverWithMixedHarnesses(): Promise<HTMLSelectElement> {
+    apiMock.getSolverNets.mockResolvedValue(mixedHarnessCatalog);
+    wrap(<JoinFlow />);
+    await waitFor(() => expect(screen.getByTestId('join-flow-summary')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Solver'));
+    const harnessSelect = screen.getByTestId('join-harness-select') as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(harnessSelect.options).some((o) => o.value === 'hermes-agent')).toBe(true),
+    );
+    return harnessSelect;
+  }
+
+  it('renders the subscription reassurance row and NO confirmation gate for Claude Code', async () => {
+    const harnessSelect = await setupSolverWithMixedHarnesses();
+    fireEvent.change(harnessSelect, { target: { value: 'claude-code' } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('join-flow-cost-subscription')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('join-flow-cost-subscription').textContent).toMatch(
+      /subscription/i,
+    );
+    // No confirmation gate, no high-cost panel.
+    expect(screen.queryByTestId('join-flow-cost-confirmation')).toBeNull();
+    expect(screen.queryByTestId('join-flow-cost-panel')).toBeNull();
+
+    // The submit button should remain enabled once a role is picked.
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+  });
+
+  it('shows the cost panel and the $1/task warning for Hermes + Opus 4.7', async () => {
+    const harnessSelect = await setupSolverWithMixedHarnesses();
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    // Hermes default is anthropic/claude-opus-4.7 — above the $1/task gate.
+    await waitFor(() => expect(screen.getByTestId('join-flow-cost-panel')).toBeTruthy());
+    const panel = screen.getByTestId('join-flow-cost-panel');
+    expect(panel.getAttribute('data-cost-high-cost')).toBe('true');
+    expect(panel.getAttribute('data-cost-mode')).toBe('paid-api');
+    expect(screen.getByTestId('join-flow-cost-amount').textContent).toMatch(/\$2\.25/);
+    expect(screen.getByTestId('join-flow-cost-warning')).toBeTruthy();
+    expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy();
+  });
+
+  it('disables the Save & Join button until the high-cost confirmation is checked', async () => {
+    const harnessSelect = await setupSolverWithMixedHarnesses();
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    await waitFor(() => expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy());
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    const checkbox = screen.getByTestId(
+      'join-flow-cost-confirmation-checkbox',
+    ) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+
+    await waitFor(() => expect(submit.disabled).toBe(false));
+  });
+
+  it('does NOT show the confirmation gate for Hermes + DeepSeek V4 Flash (sub-$1 model)', async () => {
+    const harnessSelect = await setupSolverWithMixedHarnesses();
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    // Switch to a low-cost model.
+    await waitFor(() => expect(screen.getByTestId('join-model-select')).toBeTruthy());
+    const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
+    fireEvent.change(modelSelect, { target: { value: 'deepseek/deepseek-v4-flash' } });
+
+    // Panel still shows, but the warning + confirmation are gone.
+    await waitFor(() => expect(screen.getByTestId('join-flow-cost-panel')).toBeTruthy());
+    expect(screen.getByTestId('join-flow-cost-panel').getAttribute('data-cost-high-cost')).toBe('false');
+    expect(screen.queryByTestId('join-flow-cost-warning')).toBeNull();
+    expect(screen.queryByTestId('join-flow-cost-confirmation')).toBeNull();
+
+    // And the submit button is enabled (no gate).
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+  });
+
+  it('resets the confirmation when the model is swapped back to a low-cost model', async () => {
+    const harnessSelect = await setupSolverWithMixedHarnesses();
+    fireEvent.change(harnessSelect, { target: { value: 'hermes-agent' } });
+
+    // Acknowledge Opus 4.7.
+    await waitFor(() => expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('join-flow-cost-confirmation-checkbox'));
+
+    // Switch to a cheap model — confirmation goes away.
+    const modelSelect = screen.getByTestId('join-model-select') as HTMLSelectElement;
+    fireEvent.change(modelSelect, { target: { value: 'deepseek/deepseek-v4-flash' } });
+    await waitFor(() => expect(screen.queryByTestId('join-flow-cost-confirmation')).toBeNull());
+
+    // Switch back to Opus — confirmation reappears and the prior tick must
+    // NOT have persisted (operator must re-confirm).
+    fireEvent.change(modelSelect, { target: { value: 'anthropic/claude-opus-4.7' } });
+    await waitFor(() => expect(screen.getByTestId('join-flow-cost-confirmation')).toBeTruthy());
+    const checkbox = screen.getByTestId('join-flow-cost-confirmation-checkbox') as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    const submit = screen.getByTestId('join-flow-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
   });
 });
