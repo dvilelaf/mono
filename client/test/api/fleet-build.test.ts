@@ -99,15 +99,17 @@ describe('assembleFleetV1', () => {
     expect(out.services[0]!.staking.evicted).toBe(false);
   });
 
-  it('populates staking.inactivitySeconds from inactivityByServiceIndex (jinn-mono-hjex.3)', () => {
-    const raw = makeRaw({ inactivityByServiceIndex: { 0: 7200 } });
+  it('emits attention.kind=evicted when evictedByServiceIndex is true (jinn-mono-hjex.3 review #3)', () => {
+    const raw = makeRaw({ evictedByServiceIndex: { 0: true } });
     const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.inactivitySeconds).toBe(7200);
+    expect(out.services[0]!.attention?.kind).toBe('evicted');
+    expect(out.services[0]!.attention?.hint).toMatch(/evicted/i);
+    expect(out.services[0]!.attention?.exampleCli).toBe('jinn bootstrap --json');
   });
 
-  it('defaults staking.inactivitySeconds to null when inactivityByServiceIndex absent (jinn-mono-hjex.3)', () => {
-    const raw = makeRaw();
+  it('does not set attention.kind=evicted when evictedByServiceIndex is false (jinn-mono-hjex.3)', () => {
+    const raw = makeRaw({ evictedByServiceIndex: { 0: false } });
     const out = assembleFleetV1(raw);
-    expect(out.services[0]!.staking.inactivitySeconds).toBeNull();
+    expect(out.services[0]!.attention).toBeNull();
   });
 });

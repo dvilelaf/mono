@@ -12,7 +12,7 @@ import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
-import { getChainConfig } from '../earning/contracts.js';
+import { getChainConfig, STAKING_ABI } from '../earning/contracts.js';
 import { JINN_STAKING_ABI } from '../earning/jinn-rewards.js';
 import type { FleetState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
@@ -70,6 +70,28 @@ function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['d
 
 const STANDARD_MASTER_BOOTSTRAP_MULTIPLIER = 2n;
 const predictionOperatorStatusCache = new WeakMap<JinnConfig, Map<string, Promise<PredictionOperatorStatus>>>();
+
+/**
+ * Eviction-state cache (jinn-mono-hjex.3 review fix #7).
+ *
+ * `/v1/status` is polled by the SPA every few seconds while the EvictionLoop
+ * also reads `getStakingState` on its own cadence. Without caching every
+ * status call hammers the RPC with one read per service. Cache by
+ * `${stakingProxy}:${serviceId}` with a 30s TTL — short enough that an
+ * operator-triggered restake reflects on the next poll, long enough that
+ * normal status polling is cheap.
+ */
+const EVICTION_STATE_TTL_MS = 30_000;
+const evictionStateCache = new Map<string, { evicted: boolean; fetchedAt: number }>();
+
+function evictionCacheKey(stakingProxy: string, serviceId: number): string {
+  return `${stakingProxy.toLowerCase()}:${serviceId}`;
+}
+
+/** Test-only: clear the eviction-state cache (used by gather-status tests). */
+export function clearEvictionStateCache(): void {
+  evictionStateCache.clear();
+}
 
 /**
  * Drop any cached prediction operator status for `config`.
@@ -636,47 +658,59 @@ export async function gatherGatheredStatusRaw(
       raw.pendingRewardsError = pr.error;
     }
 
-    // Eviction state + inactivity — best-effort; never blocks the rest of status assembly.
+    // Eviction state — best-effort; never blocks the rest of status assembly.
+    //
+    // Uses STAKING_ABI (the canonical OLAS-style ABI used everywhere else in
+    // this codebase). The Phase-1a Stolas proxy shares the same
+    // `getStakingState(uint256) -> uint8` selector as the legacy OLAS proxy,
+    // so this read works on both mainnet and testnet (jinn-mono-hjex.3 review #1).
+    //
+    // We intentionally do not call `getServiceInfo` to pull `inactivity`:
+    // the two proxies disagree on the return-tuple shape (`STAKING_ABI` has
+    // `[securityDeposit, multisig, nonces, tsStart]`, the Phase-1a contract
+    // returns a struct with an `inactivity` field) so a single ABI cannot
+    // decode both. The dashboard surfaces the binary `evicted` state — the
+    // numeric inactivity counter is not consumed by any user-facing surface
+    // today (jinn-mono-hjex.3 review #2).
+    //
+    // Results are cached for EVICTION_STATE_TTL_MS to keep `/v1/status`
+    // polling from hammering the RPC alongside the EvictionLoop (#7).
     try {
       const evictedByServiceIndex: Record<number, boolean> = {};
-      const inactivityByServiceIndex: Record<number, number> = {};
+      const nowMs = Date.now();
       await Promise.all(
         fleet.services.map(async (svc) => {
           const serviceId = svc.service_id;
           const stakingProxy = svc.staking_address;
           if (!serviceId || !stakingProxy) return;
           const di = displayFleetServiceIndex(svc);
+          const cacheKey = evictionCacheKey(stakingProxy, serviceId);
+          const cached = evictionStateCache.get(cacheKey);
+          if (cached && nowMs - cached.fetchedAt <= EVICTION_STATE_TTL_MS) {
+            evictedByServiceIndex[di] = cached.evicted;
+            return;
+          }
           try {
-            const [state, info] = await Promise.all([
-              client.readContract({
-                address: stakingProxy as `0x${string}`,
-                abi: JINN_STAKING_ABI,
-                functionName: 'getStakingState',
-                args: [BigInt(serviceId)],
-              }),
-              client.readContract({
-                address: stakingProxy as `0x${string}`,
-                abi: JINN_STAKING_ABI,
-                functionName: 'getServiceInfo',
-                args: [BigInt(serviceId)],
-              }).catch(() => null),
-            ]);
+            const state = await client.readContract({
+              address: stakingProxy as `0x${string}`,
+              abi: STAKING_ABI,
+              functionName: 'getStakingState',
+              args: [BigInt(serviceId)],
+            });
             // getStakingState returns uint8; 2 = Evicted enum value
-            evictedByServiceIndex[di] = Number(state) === 2;
-            // getServiceInfo returns a struct — inactivity is seconds of accumulated inactivity
-            if (info != null) {
-              const inactivity = (info as { inactivity: bigint }).inactivity;
-              if (typeof inactivity === 'bigint') {
-                inactivityByServiceIndex[di] = Number(inactivity);
-              }
-            }
+            const evicted = Number(state) === 2;
+            evictionStateCache.set(cacheKey, { evicted, fetchedAt: nowMs });
+            evictedByServiceIndex[di] = evicted;
           } catch {
-            // Transient RPC errors: skip silently; evicted defaults to false
+            // Transient RPC errors: skip silently; surface stale cached value
+            // if we have one, otherwise default to false (not-evicted).
+            if (cached) {
+              evictedByServiceIndex[di] = cached.evicted;
+            }
           }
         }),
       );
       raw.evictedByServiceIndex = evictedByServiceIndex;
-      raw.inactivityByServiceIndex = inactivityByServiceIndex;
     } catch {
       // Non-fatal: staking state reads should not prevent status from returning
     }

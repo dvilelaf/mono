@@ -21,12 +21,15 @@ function makeService(overrides: { serviceId?: number; stakingAddress?: string; s
   };
 }
 
-function mockStore(services: ReturnType<typeof makeService>[]) {
+function mockStore(
+  services: ReturnType<typeof makeService>[],
+  opts: { stakingMode?: string } = {},
+) {
   return {
     load: vi.fn(async () => ({
       master_address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
       services,
-      staking_mode: 'standard',
+      staking_mode: opts.stakingMode ?? 'standard',
     })),
   } as any;
 }
@@ -129,5 +132,70 @@ describe('EvictionLoop', () => {
 
     await expect(loop.run()).resolves.toBeUndefined();
     expect(store.load).not.toHaveBeenCalled();
+  });
+
+  it('terminates run() when stop() is called (jinn-mono-hjex.3 review #4)', async () => {
+    const readContract = vi.fn().mockResolvedValue(1n); // staked, not evicted
+    const recoverEvicted = vi.fn();
+    const store = mockStore([makeService()]);
+    const loop = new EvictionLoop({
+      intervalMs: 5, // short interval so the test stays fast
+      store,
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+    });
+
+    const runPromise = loop.run();
+    // Let at least one tick start.
+    await new Promise((r) => setTimeout(r, 1));
+    loop.stop();
+    await expect(runPromise).resolves.toBeUndefined();
+    expect(store.load).toHaveBeenCalled();
+  });
+
+  it('RPC error on one service does not abort the loop for siblings (jinn-mono-hjex.3 review #4)', async () => {
+    const services = [
+      makeService({ serviceId: 100 }),
+      makeService({ serviceId: 200 }),
+    ];
+    // First call rejects, second resolves as Evicted.
+    const readContract = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('RPC failure for svc 100'))
+      .mockResolvedValueOnce(2n);
+    const recoverEvicted = vi.fn().mockResolvedValue(undefined);
+    const loop = new EvictionLoop({
+      intervalMs: 60_000,
+      store: mockStore(services),
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+    });
+
+    await expect(loop.runOnce()).resolves.toBeUndefined();
+    expect(readContract).toHaveBeenCalledTimes(2);
+    // The healthy service still triggered recovery.
+    expect(recoverEvicted).toHaveBeenCalledTimes(1);
+    expect(recoverEvicted).toHaveBeenCalledWith(
+      expect.objectContaining({ service_id: 200 }),
+    );
+  });
+
+  it('skips entirely in self-bond mode (jinn-mono-hjex.3 review #6)', async () => {
+    const readContract = vi.fn().mockResolvedValue(2n);
+    const recoverEvicted = vi.fn();
+    const loop = new EvictionLoop({
+      intervalMs: 60_000,
+      store: mockStore([makeService()], { stakingMode: 'self_bond' }),
+      chain: 'base-sepolia',
+      readContract,
+      recoverEvictedService: recoverEvicted,
+    });
+
+    await loop.runOnce();
+    // No staking-state reads issued — self-bond does not use the distributor restake path.
+    expect(readContract).not.toHaveBeenCalled();
+    expect(recoverEvicted).not.toHaveBeenCalled();
   });
 });

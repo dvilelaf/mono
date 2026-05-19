@@ -26,7 +26,7 @@ export interface FleetV1Service {
     agent: { address: string; balances: Array<{ asset: string; amountWei: string }> };
     multisig: { address: string; balances: Array<{ asset: string; amountWei: string }> };
   };
-  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null; inactivitySeconds: number | null };
+  staking: { staked: boolean; evicted: boolean; sinceBlock: number | null };
   activity: { lastEventAt: string | null; counts: Record<string, number> };
   rewards: { pending: string; asset: 'reward' };
   attention: null | {
@@ -58,6 +58,7 @@ function computeAttention(
   svc: ServiceState,
   raw: GatheredStatusRaw,
   isFirstService: boolean,
+  displayIndex: number,
 ): FleetV1Service['attention'] {
   if (
     isFirstService &&
@@ -83,6 +84,16 @@ function computeAttention(
         : {}),
     };
   }
+  // Eviction takes precedence over the other operational signals: the dashboard
+  // needs an actionable "Re-stake now" affordance whenever the staking proxy
+  // reports state=Evicted (jinn-mono-hjex.3 review #3).
+  if (raw.evictedByServiceIndex?.[displayIndex] === true) {
+    return {
+      kind: 'evicted',
+      hint: 'Service evicted from staking — restoring liveness via re-stake.',
+      exampleCli: 'jinn bootstrap --json',
+    };
+  }
   if (svc.step === 'safe_binding_pending') {
     return {
       kind: 'identity_binding_pending',
@@ -93,7 +104,7 @@ function computeAttention(
   if (!isOperationalServiceStep(svc.step)) {
     return {
       kind: 'reconcile_needed',
-      hint: `Service ${displayFleetServiceIndex(svc)} is at step ${svc.step}. Run jinn bootstrap to advance.`,
+      hint: `Service ${displayIndex} is at step ${svc.step}. Run jinn bootstrap to advance.`,
       exampleCli: 'jinn bootstrap --json',
     };
   }
@@ -131,7 +142,6 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
       staked: isStakedLikeServiceStep(svc.step),
       evicted: raw.evictedByServiceIndex?.[di] ?? false,
       sinceBlock: null,
-      inactivitySeconds: raw.inactivityByServiceIndex?.[di] ?? null,
     },
     activity: {
       lastEventAt: per?.lastEventAt ?? null,
@@ -141,7 +151,7 @@ export function assembleFleetV1(raw: GatheredStatusRaw): FleetV1Response {
       pending: pendingByService[di] ?? '0',
       asset: 'reward' as const,
     },
-    attention: computeAttention(svc, raw, i === 0),
+    attention: computeAttention(svc, raw, i === 0, di),
   };
   });
 

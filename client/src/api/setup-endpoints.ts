@@ -85,6 +85,13 @@ export interface SetupRoutesConfig {
    * When set, POST /v1/setup/restake/:serviceId is enabled.
    * Calls the provided function to re-stake an evicted service on demand
    * (the "Re-stake now" dashboard CTA). jinn-mono-hjex.3
+   *
+   * Contract: `serviceId` is the on-chain OLAS service ID (positive integer
+   * minted by the service registry — *not* the display-index / row number).
+   * The SPA reads `fleet.services[].serviceId` from `/v1/status` and passes
+   * it back unchanged. main.ts resolves the matching `ServiceState` via
+   * `state.services.find(s => s.service_id === serviceId)` before invoking
+   * `recoverEvictedService`.
    */
   restake?: (serviceId: number) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -753,6 +760,11 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
   // POST /v1/setup/restake/:serviceId — operator-triggered re-stake for an
   // evicted service. Backs the "Re-stake now" dashboard CTA. jinn-mono-hjex.3
+  //
+  // The path parameter is the on-chain OLAS service ID (uint256, surfaced as
+  // `fleet.services[].serviceId` in `/v1/status`). It is **not** the
+  // display-index / row number. Resolving the service is the callback's
+  // responsibility (see `SetupRoutesConfig.restake` docstring).
   app.post('/v1/setup/restake/:serviceId', async (c) => {
     if (!config.restake) {
       return c.json({ error: 'restake_not_configured' }, 503);

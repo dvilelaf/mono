@@ -85,12 +85,6 @@ export interface GatheredStatusRaw {
    * `true` means the staking proxy reports state === 2 (Evicted).
    */
   evictedByServiceIndex?: Record<number, boolean>;
-  /**
-   * Per-service inactivity seconds keyed by display index.
-   * Populated by gather-status via on-chain getServiceInfo reads (jinn-mono-hjex.3).
-   * Value is the `inactivity` field from the ServiceInfo struct (seconds).
-   */
-  inactivityByServiceIndex?: Record<number, number>;
 }
 
 export interface StatusV1Response {

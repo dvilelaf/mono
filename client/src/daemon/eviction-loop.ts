@@ -56,6 +56,11 @@ export class EvictionLoop {
   async runOnce(): Promise<void> {
     const state = await this.config.store.load(this.config.chain);
 
+    // Self-bond services do not go through the distributor `reStake()` path
+    // that `recoverEvictedService` expects — mirror the standard-mode guard
+    // applied in `bootstrap.resumeService` (jinn-mono-hjex.3 review #6).
+    if (state.staking_mode !== 'standard') return;
+
     for (const svc of state.services) {
       if (!svc.service_id || !svc.staking_address) continue;
       if (!isStakedLikeServiceStep(svc.step)) continue;
