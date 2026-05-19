@@ -334,7 +334,13 @@ export function RegistryCatalog({
     );
   }
 
-  if (isError || joinedQuery.isError) {
+  // Fatal: show the full error panel only when no data has ever loaded.
+  // When data is present from a prior successful fetch, fall through and render
+  // the stale catalog with a low-severity indicator instead.
+  const showFatalError = (isError && data === undefined) || (joinedQuery.isError && joinedQuery.data === undefined);
+  const showStaleIndicator = (isError && data !== undefined) || (joinedQuery.isError && joinedQuery.data !== undefined);
+
+  if (showFatalError) {
     const visibleError = isError ? error : joinedQuery.error;
     const copy = registryErrorCopy(visibleError);
     return (
@@ -370,6 +376,7 @@ export function RegistryCatalog({
           type="button"
           onClick={() => {
             void refetch();
+            if (joinedQuery.isError) void joinedQuery.refetch();
           }}
           data-testid="registry-catalog-retry"
           style={{
@@ -415,6 +422,15 @@ export function RegistryCatalog({
           {summaries.length} discoverable · last refreshed{' '}
           {lastRefreshed ?? 'never'}
         </span>
+        {showStaleIndicator && !lastError && (
+          <span
+            data-testid="registry-catalog-warn"
+            title="Last refresh failed"
+            style={{ color: 'var(--wane)' }}
+          >
+            &#x26A0; stale
+          </span>
+        )}
         {lastError && (
           <span
             data-testid="registry-catalog-warn"

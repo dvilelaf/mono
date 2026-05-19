@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -353,6 +353,96 @@ describe('RegistryCatalog', () => {
       expect(screen.getByText(/daemon unreachable/i)).toBeTruthy(),
     );
     expect(screen.getByText(/jinn run.*still active/i)).toBeTruthy();
+  });
+
+  it('does not replace catalog with error panel when a refetch fails over stale data (jinn-mono-hjex.9)', async () => {
+    // First fetch succeeds — react-query caches the registry data.
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        {
+          manifestCid: 'bafybeiswe',
+          solverNetId: 'agent5474_swe-rebench-v2-v1_aaaaaaaa',
+          name: 'SWE-rebench v2',
+          network: 'base-sepolia',
+          launcherAgentId: '5474',
+          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+          status: 'launched',
+          statusUpdatedAt: '2026-05-05T00:00:00Z',
+          contractId: 'swe-rebench-v2',
+          contractVersion: 'v1',
+          solutionPriceWei: '10000000000',
+          verdictPriceWei: '5000000000',
+          openRoles: ['solver', 'evaluator'],
+          anchorBlock: 1,
+        },
+      ],
+      lastRefreshedAt: '2026-05-05T01:00:00Z',
+      lastError: null,
+    });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+    const { hook } = memoryLocation({ path: '/operator' });
+    render(
+      <QueryClientProvider client={qc}>
+        <Router hook={hook}>
+          <RegistryCatalog refetchIntervalMs={0} />
+        </Router>
+      </QueryClientProvider>,
+    );
+
+    // Wait for initial successful render.
+    await waitFor(() => expect(screen.getByText('SWE-rebench v2')).toBeTruthy());
+
+    // Simulate failed background refetch.
+    listRegistryMock.mockRejectedValue(new Error('network error'));
+    await act(async () => {
+      // refetchQueries resolves even when the query fails — the query state
+      // transitions to isError=true while retaining the previous data.
+      await qc.refetchQueries({ queryKey: ['solvernets', 'registry'] });
+    });
+
+    // Stale card data is still visible.
+    await waitFor(() => expect(screen.getByText('SWE-rebench v2')).toBeTruthy());
+
+    // The fatal error panel must NOT replace the catalog.
+    expect(screen.queryByTestId('registry-catalog-error')).toBeNull();
+
+    // A low-severity stale indicator must appear instead.
+    await waitFor(() => expect(screen.getByTitle(/last refresh failed/i)).toBeTruthy());
+  });
+
+  it('retry refetches BOTH registry and joined queries when joined-list fatal arm fires (jinn-mono-hjex.9)', async () => {
+    // Registry query succeeds; joined-list query has never succeeded. This is
+    // the second fatal arm — `joinedQuery.isError && joinedQuery.data === undefined`.
+    // The Retry button must refetch BOTH queries, not just `refetch` (registry),
+    // otherwise the user is stuck because the failing query (joined-list) is
+    // never re-triggered.
+    listRegistryMock.mockResolvedValue({
+      summaries: [],
+      lastRefreshedAt: '2026-05-05T01:00:00Z',
+      lastError: null,
+    });
+    listJoinedMock.mockRejectedValue(new Error('joined list network error'));
+
+    render(withProviders(<RegistryCatalog />));
+
+    // Fatal panel renders because joined-list has no data.
+    await waitFor(() =>
+      expect(screen.getByTestId('registry-catalog-error')).toBeTruthy(),
+    );
+    expect(screen.getByText(/joined list network error/i)).toBeTruthy();
+
+    // Baseline: each query was called once on mount.
+    expect(listRegistryMock).toHaveBeenCalledTimes(1);
+    expect(listJoinedMock).toHaveBeenCalledTimes(1);
+
+    // Click Retry; both queries must refetch.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('registry-catalog-retry'));
+    });
+
+    await waitFor(() => expect(listJoinedMock).toHaveBeenCalledTimes(2));
+    expect(listRegistryMock).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces lastRefreshedAt and lastError from the response envelope', async () => {
