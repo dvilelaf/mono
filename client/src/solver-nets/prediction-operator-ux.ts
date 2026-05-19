@@ -248,8 +248,20 @@ export async function buildPredictionOperatorStatus({
   daemonRunning = false,
 }: BuildPredictionOperatorStatusOptions): Promise<PredictionOperatorStatus> {
   const legacy = config.solverNets[name];
-  const hasJoined = Object.keys(config.joinedSolverNets ?? {}).length > 0;
-  if (!legacy && !hasJoined) {
+  const joinedEntries = Object.values(config.joinedSolverNets ?? {});
+  const firstJoined = joinedEntries[0];
+  // Only synthesize from joinedSolverNets when the first joined entry is a
+  // prediction.v1 SolverNet. A joined entry whose contract resolves to a
+  // different SolverType (e.g. swe-rebench-v2.v1) is not a prediction operator,
+  // so we fall through to missingSolverNetStatus instead of producing false
+  // prediction_solver_type_mismatch diagnostics. An entry with no `contract`
+  // field (older shape / test stub) is treated as prediction.v1 for backwards
+  // compatibility — production joined entries always carry the contract ref.
+  const firstJoinedIsPrediction =
+    firstJoined !== undefined &&
+    (firstJoined.contract === undefined ||
+      `${firstJoined.contract.id}.${firstJoined.contract.version}` === 'prediction.v1');
+  if (!legacy && !firstJoinedIsPrediction) {
     return missingSolverNetStatus(configPath, name, daemonRunning);
   }
   const net: SolverNetConfig = legacy ?? synthesizeFromJoined(config.joinedSolverNets!, 'prediction.v1');

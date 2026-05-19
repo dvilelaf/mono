@@ -268,7 +268,7 @@ Output flags:
         source: 'joined' as const,
         manifestCid: cid,
         enabled: true,
-        solverType: 'prediction.v1',
+        solverType: net.contract ? `${net.contract.id}.${net.contract.version}` : '(unknown)',
         harness: net.harness,
         pluginCount: (net.plugins ?? []).length,
         taskGeneratorEnabled: false,

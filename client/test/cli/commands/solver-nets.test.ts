@@ -762,5 +762,49 @@ describe('solver-nets command', () => {
       expect(raw).toContain('SWE-rebench v2');
       expect(raw).toContain('joined');
     });
+
+    it('derives solverType for joined entries from contract.id.contract.version (jinn-mono-hjex.2)', async () => {
+      // Regression: solverType was previously hardcoded to 'prediction.v1' for
+      // all joined entries, masking the actual SolverNet contract a joined
+      // operator has subscribed to.
+      const configPath = tempConfig({
+        solverNets: {},
+        joinedSolverNets: {
+          'bafkreipredictioncid000000000000000000000000000000000000000000': {
+            manifestCid: 'bafkreipredictioncid000000000000000000000000000000000000000000',
+            name: 'Prediction Net',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+          'bafkreiswerebenchv2cid000000000000000000000000000000000000000000': {
+            manifestCid: 'bafkreiswerebenchv2cid000000000000000000000000000000000000000000',
+            name: 'SWE-rebench v2',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver'],
+            harness: 'swe-rebench-v2-runner',
+            plugins: [],
+          },
+          'bafkreiunknowncontractcid00000000000000000000000000000000000000': {
+            manifestCid: 'bafkreiunknowncontractcid00000000000000000000000000000000000000',
+            name: 'Legacy join (no contract)',
+            roles: ['solver'],
+            harness: 'claude-code',
+            plugins: [],
+          },
+        },
+      });
+      const result = await runSolverNets(['list', '--config', configPath]);
+
+      expect(result.exits).toEqual([]);
+      const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
+      const byName = Object.fromEntries(nets.map((n) => [n['name'] as string, n]));
+      expect(byName['Prediction Net']?.['solverType']).toBe('prediction.v1');
+      expect(byName['SWE-rebench v2']?.['solverType']).toBe('swe-rebench-v2.v1');
+      // Joined entries without a `contract` field surface as '(unknown)' rather
+      // than masquerading as prediction.v1.
+      expect(byName['Legacy join (no contract)']?.['solverType']).toBe('(unknown)');
+    });
   });
 });

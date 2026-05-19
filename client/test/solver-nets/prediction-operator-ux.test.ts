@@ -88,4 +88,34 @@ describe('buildPredictionOperatorStatus — joinedSolverNets awareness (jinn-mon
     // the loop ran, which is what we're proving.
     expect(status.kind).toBe('prediction.v1.operatorStatus');
   });
+
+  it('does not emit prediction_solver_type_mismatch for a joined swe-rebench-v2.v1 SolverNet (jinn-mono-hjex.2)', async () => {
+    // Regression: previously synthesizeFromJoined hardcoded solverType to
+    // 'prediction.v1', which let a swe-rebench-v2.v1 joined entry pass through
+    // the prediction diagnostic loop and (depending on derivation strategy)
+    // emit a false prediction_solver_type_mismatch. With contract-aware
+    // gating, a non-prediction joined entry falls through to
+    // missingSolverNetStatus instead — no mismatch diagnostic is produced.
+    const status = await buildPredictionOperatorStatus({
+      config: minimalConfig({
+        solverNets: {},
+        joinedSolverNets: {
+          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
+            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
+            name: 'SWE-rebench v2',
+            contract: { id: 'swe-rebench-v2', version: 'v1' },
+            roles: ['solver'],
+            harness: 'swe-rebench-v2-runner',
+            plugins: [],
+          },
+        },
+      }),
+      configPath: '/tmp/config.json',
+      daemonRunning: true,
+      ...minimalDeps,
+    });
+
+    const codes = status.diagnostics.map((d) => d.code);
+    expect(codes).not.toContain('prediction_solver_type_mismatch');
+  });
 });
