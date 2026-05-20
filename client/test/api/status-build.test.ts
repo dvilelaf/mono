@@ -60,6 +60,15 @@ describe('assembleStatusV1', () => {
     expect(j.nextActions).toHaveLength(1);
     expect(j.nextActions[0]).toMatch(/npm run status/);
     expect(j.earnings.hint).toMatch(/omitted/);
+    expect(j.tJinn).toEqual({
+      state: 'pending',
+      chainId: 11155111,
+      tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+      safeBalanceWei: null,
+      safeCount: 0,
+      services: [],
+      error: null,
+    });
   });
 
   it('reports zero runway excess when balance is already below minimum', () => {
@@ -150,6 +159,42 @@ describe('assembleStatusV1', () => {
     const j = assembleStatusV1(raw);
     expect(j.rewards.claimedStakingRewardsWei).toBe('800');
     expect(j.rewards.totalStakingRewardsWei).toBe('1000');
+  });
+
+  it('passes tJINN status through separately from staking rewards', () => {
+    const raw: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      pendingStakingRewardsWei: '200',
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '500',
+        safeCount: 1,
+        services: [{
+          index: 0,
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          balanceWei: '500',
+          state: 'ready',
+          error: null,
+        }],
+        error: null,
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.rewards.pendingStakingRewardsWei).toBe('200');
+    expect(j.tJinn.safeBalanceWei).toBe('500');
+    expect(j.tJinn.tokenAddress).toBe('0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A');
   });
 
   it('passes prediction.v1 status through when present', () => {

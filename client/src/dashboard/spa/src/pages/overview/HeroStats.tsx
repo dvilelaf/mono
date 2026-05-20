@@ -8,7 +8,9 @@ import type { LiveNowState } from './LiveNowBand.js';
 
 export interface HeroStatsProps {
   tasksDelivered: number;
-  jinnClaimable: string;
+  tjinnEarned: string;
+  tjinnEarnedUnit?: string;
+  tjinnEarnedSub?: string;
   gasBalanceEth: string;
   gasRunwayDays: number | string;
   statusLabel: string;
@@ -26,7 +28,6 @@ export interface HeroStatsProps {
   evicted?: boolean;
   /** Service ID of the evicted service. Required when evicted=true to wire the Re-stake CTA. */
   evictedServiceId?: number | null;
-  onClaim: () => void;
   onTopUp: () => void;
   onRestart: () => void;
   /** Called when the operator clicks "Re-stake now". Should POST to /v1/setup/restake/:serviceId. */
@@ -290,7 +291,9 @@ function StatusStat({
 
 export function HeroStats({
   tasksDelivered,
-  jinnClaimable,
+  tjinnEarned,
+  tjinnEarnedUnit,
+  tjinnEarnedSub,
   gasBalanceEth,
   gasRunwayDays,
   statusLabel,
@@ -300,7 +303,6 @@ export function HeroStats({
   activeAction,
   evicted = false,
   evictedServiceId,
-  onClaim,
   onTopUp,
   onRestart,
   onRestake,
@@ -315,22 +317,11 @@ export function HeroStats({
     >
       <Stat label="Solutions delivered" value={tasksDelivered} />
       <Stat
-        label="JINN claimable"
-        value={jinnClaimable}
-        unit="JINN"
-        action={(
-          <>
-            <ActionButton
-              action="Claim JINN"
-              activeAction={activeAction}
-              onClick={onClaim}
-              forceDisabled={evicted}
-            >
-              Claim now
-            </ActionButton>
-            {evicted ? <EvictionNotice serviceId={evictedServiceId} onRestake={onRestake} /> : null}
-          </>
-        )}
+        label="tJINN earned"
+        value={tjinnEarned}
+        unit={tjinnEarnedUnit}
+        sub={tjinnEarnedSub}
+        action={evicted ? <EvictionNotice serviceId={evictedServiceId} onRestake={onRestake} /> : undefined}
       />
       <Stat
         label="Gas"

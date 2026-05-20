@@ -1208,6 +1208,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       status: {
         earningDir: config.earningDir,
         rpcUrl: config.rpcUrl,
+        ethereumRpcUrl: config.ethereumRpcUrl,
         network: config.network,
         pollIntervalMs: config.pollIntervalMs,
         masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
@@ -2335,6 +2336,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
+      ethereumRpcUrl: config.ethereumRpcUrl,
       network: config.network,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,

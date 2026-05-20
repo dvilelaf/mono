@@ -499,9 +499,70 @@ describe('OverviewPage empty-state gating', () => {
     expect(screen.queryByTestId('live-now-band')).toBeNull();
   });
 
-  it('wires dashboard card actions to their real actions', async () => {
+  it('shows tJINN pending copy instead of staking reward zero or claim action', async () => {
     getStatusMock.mockResolvedValue({
       rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+      tJinn: {
+        state: 'pending',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    expect(await screen.findByText(/tjinn earned/i)).toBeTruthy();
+    expect(await screen.findByText(/1 Safe found; waiting for Sepolia balance/i)).toBeTruthy();
+    expect(screen.getByText('Pending')).toBeTruthy();
+    expect(screen.queryByText('1.0000')).toBeNull();
+    expect(screen.queryByRole('button', { name: /claim now/i })).toBeNull();
+  });
+
+  it('shows tJINN error copy when the Sepolia balance read fails', async () => {
+    getStatusMock.mockResolvedValue({
+      tJinn: {
+        state: 'error',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        safeCount: 1,
+        services: [],
+        error: 'Sepolia RPC unavailable',
+      },
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    expect(await screen.findByText(/tjinn earned/i)).toBeTruthy();
+    expect(await screen.findByText('Unavailable')).toBeTruthy();
+    expect(screen.getByText('Sepolia RPC unavailable')).toBeTruthy();
+  });
+
+  it('wires dashboard card actions to their real actions', async () => {
+    getStatusMock.mockResolvedValue({
+      tJinn: {
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '1000000000000000000',
+        safeCount: 1,
+        services: [],
+        error: null,
+      },
       masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
       fleet: { services: [] },
       predictionV1: {
@@ -520,12 +581,10 @@ describe('OverviewPage empty-state gating', () => {
     });
     const { history } = renderOverviewWithMemory();
 
-    expect(await screen.findByText(/jinn claimable/i)).toBeTruthy();
+    expect(await screen.findByText(/tjinn earned/i)).toBeTruthy();
     expect(screen.queryByText(/quick actions/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /manage wallet/i })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /claim now/i }));
-    await waitFor(() => expect(claimRewardsMock).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('button', { name: /claim now/i })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /top up/i }));
     await waitFor(() => expect(triggerDripMock).toHaveBeenCalledOnce());
@@ -544,7 +603,15 @@ describe('OverviewPage empty-state gating', () => {
 // notice must disappear on its own.
 describe('OverviewPage restart notice', () => {
   const restartStatus = {
-    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    tJinn: {
+      state: 'ready',
+      chainId: 11155111,
+      tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+      safeBalanceWei: '1000000000000000000',
+      safeCount: 1,
+      services: [],
+      error: null,
+    },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
     fleet: { services: [] },
     predictionV1: {
@@ -595,7 +662,15 @@ describe('OverviewPage restart notice', () => {
 // request is in flight.
 describe('OverviewPage gas top-up', () => {
   const gasStatus = {
-    rewards: { pendingStakingRewardsWei: '1000000000000000000' },
+    tJinn: {
+      state: 'ready',
+      chainId: 11155111,
+      tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+      safeBalanceWei: '1000000000000000000',
+      safeCount: 1,
+      services: [],
+      error: null,
+    },
     masterGas: { balanceWei: '23000000000000000', runwayDaysExcess: 4 },
     fleet: { services: [] },
     predictionV1: {

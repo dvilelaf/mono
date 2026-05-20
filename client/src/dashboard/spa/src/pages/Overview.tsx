@@ -31,6 +31,21 @@ interface OverviewStatusV1 {
   rewards?: {
     pendingStakingRewardsWei?: string;
   };
+  tJinn?: {
+    state?: 'pending' | 'ready' | 'error';
+    chainId?: number;
+    tokenAddress?: string;
+    safeBalanceWei?: string | null;
+    safeCount?: number;
+    error?: string | null;
+    services?: Array<{
+      index: number;
+      safeAddress: string | null;
+      balanceWei: string | null;
+      state: 'pending' | 'ready' | 'error';
+      error: string | null;
+    }>;
+  };
   masterGas?: {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
@@ -101,6 +116,43 @@ function formatEth(wei?: string): string {
   } catch {
     return '—';
   }
+}
+
+function safeWord(count: number): string {
+  return count === 1 ? 'Safe' : 'Safes';
+}
+
+function formatTjinn(status?: OverviewStatusV1['tJinn']): {
+  value: string;
+  unit?: string;
+  sub: string;
+} {
+  if (!status) {
+    return { value: 'Pending', sub: 'Waiting for Sepolia balance.' };
+  }
+
+  const safeCount = status.safeCount ?? 0;
+  if (status.state === 'ready' && status.safeBalanceWei != null) {
+    return {
+      value: formatEth(status.safeBalanceWei),
+      unit: 'tJINN',
+      sub: `${safeCount} ${safeWord(safeCount)} on Sepolia`,
+    };
+  }
+
+  if (status.state === 'error') {
+    return {
+      value: 'Unavailable',
+      sub: status.error ?? 'Sepolia tJINN balance read failed.',
+    };
+  }
+
+  return {
+    value: 'Pending',
+    sub: safeCount > 0
+      ? `${safeCount} ${safeWord(safeCount)} found; waiting for Sepolia balance.`
+      : 'Waiting for Safe address.',
+  };
 }
 
 /**
@@ -200,7 +252,7 @@ export function OverviewPage(): JSX.Element {
   const evictedServiceId = firstEvictedService?.serviceId ?? null;
 
   const tasksDelivered = totals.solutions;
-  const jinnClaimable = formatEth(status?.rewards?.pendingStakingRewardsWei);
+  const tjinnEarned = formatTjinn(status?.tJinn);
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
   // Gate the LiveNow attention banner on the freshly-polled join map so a
@@ -258,7 +310,9 @@ export function OverviewPage(): JSX.Element {
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <HeroStats
         tasksDelivered={tasksDelivered}
-        jinnClaimable={jinnClaimable}
+        tjinnEarned={tjinnEarned.value}
+        tjinnEarnedUnit={tjinnEarned.unit}
+        tjinnEarnedSub={tjinnEarned.sub}
         gasBalanceEth={gasBalanceEth}
         gasRunwayDays={gasRunwayDays}
         statusLabel={LIVE_NOW_STATE_LABEL[liveNow.state]}
@@ -271,14 +325,6 @@ export function OverviewPage(): JSX.Element {
         activeAction={activeAction}
         evicted={isEvicted}
         evictedServiceId={evictedServiceId}
-        onClaim={() =>
-          runAction('Claim JINN', async () => {
-            const res = await api.claimRewards();
-            if (!res.ok) {
-              throw new Error(res.error ?? 'Reward claim failed.');
-            }
-            return { message: 'JINN claim command completed.' };
-          })}
         onTopUp={() =>
           runAction(
             'Top up gas',

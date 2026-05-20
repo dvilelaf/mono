@@ -16,6 +16,28 @@ import type { TaskRunsStatus } from './task-runs-build.js';
 const DEFAULT_MASTER_ETH_DAILY_WEI = 1_000_000_000_000_000n;
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
+export type TjinnStatusState = 'pending' | 'ready' | 'error';
+
+export const TJINN_CHAIN_ID = 11155111;
+export const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
+
+export interface TjinnServiceStatus {
+  index: number;
+  safeAddress: string | null;
+  balanceWei: string | null;
+  state: TjinnStatusState;
+  error: string | null;
+}
+
+export interface TjinnStatus {
+  state: TjinnStatusState;
+  chainId: number;
+  tokenAddress: string;
+  safeBalanceWei: string | null;
+  safeCount: number;
+  services: TjinnServiceStatus[];
+  error: string | null;
+}
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
@@ -57,6 +79,8 @@ export interface GatheredStatusRaw {
   };
   pendingStakingRewardsWei?: string;
   pendingRewardsError?: string;
+  /** Sepolia tJINN ERC-20 balances across fleet Safes. */
+  tJinn?: TjinnStatus;
   /** ISO timestamp when the staking contract will next accept a checkpoint. */
   nextCheckpointAt?: string;
   pollIntervalMs: number;
@@ -136,6 +160,7 @@ export interface StatusV1Response {
     totalStakingRewardsWei?: string;
     pendingRewardsError?: string;
   };
+  tJinn: TjinnStatus;
   masterGas: {
     address: string | null;
     balanceWei?: string;
@@ -190,23 +215,23 @@ function fleetSummary(
   const services = fleet.services.map(s => {
     const di = displayFleetServiceIndex(s);
     return {
-    index: di,
-    step: s.step,
-    serviceId: s.service_id,
-    safeAddress: s.safe_address,
-    mechAddress: s.mech_address,
-    stakingAddress: s.staking_address,
-    agentId: s.agent_id ?? null,
-    identityRegistryAddress: s.identity_registry_address ?? null,
-    safeBoundToAgent: s.safe_bound_to_agent === true,
-    identityBindingStatus: (
-      s.safe_bound_to_agent === true
-        ? 'bound'
-        : s.agent_id && s.safe_address
-          ? 'pending'
-          : 'not_applicable'
-    ) as 'bound' | 'pending' | 'not_applicable',
-    evicted: evictedByServiceIndex?.[di] ?? false,
+      index: di,
+      step: s.step,
+      serviceId: s.service_id,
+      safeAddress: s.safe_address,
+      mechAddress: s.mech_address,
+      stakingAddress: s.staking_address,
+      agentId: s.agent_id ?? null,
+      identityRegistryAddress: s.identity_registry_address ?? null,
+      safeBoundToAgent: s.safe_bound_to_agent === true,
+      identityBindingStatus: (
+        s.safe_bound_to_agent === true
+          ? 'bound'
+          : s.agent_id && s.safe_address
+            ? 'pending'
+            : 'not_applicable'
+      ) as 'bound' | 'pending' | 'not_applicable',
+      evicted: evictedByServiceIndex?.[di] ?? false,
     };
   });
   const stakedLikeCount = fleet.services.filter(s => isStakedLikeServiceStep(s.step)).length;
@@ -248,6 +273,18 @@ function sumClaimedRewardsWei(raw: GatheredStatusRaw): bigint {
     }
   }
   return total;
+}
+
+function defaultTjinnStatus(): TjinnStatus {
+  return {
+    state: 'pending',
+    chainId: TJINN_CHAIN_ID,
+    tokenAddress: TJINN_TOKEN_ADDRESS,
+    safeBalanceWei: null,
+    safeCount: 0,
+    services: [],
+    error: null,
+  };
 }
 
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
@@ -378,6 +415,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
+    tJinn: raw.tJinn ?? defaultTjinnStatus(),
     masterGas: {
       address: raw.master.address,
       balanceWei: raw.master.balanceWei,

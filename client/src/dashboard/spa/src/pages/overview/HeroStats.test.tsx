@@ -5,7 +5,9 @@ import { HeroStats } from './HeroStats.js';
 function defaultProps() {
   return {
     tasksDelivered: 42,
-    jinnClaimable: '123',
+    tjinnEarned: '123',
+    tjinnEarnedUnit: 'tJINN',
+    tjinnEarnedSub: '1 Safe on Sepolia',
     gasBalanceEth: '0.5000',
     gasRunwayDays: 4,
     statusLabel: 'WORKING',
@@ -14,7 +16,6 @@ function defaultProps() {
     statusReason: '1 task restoring',
     activeAction: null,
     evicted: false,
-    onClaim: () => undefined,
     onTopUp: () => undefined,
     onRestart: () => undefined,
   };
@@ -24,14 +25,15 @@ describe('HeroStats', () => {
   it('renders overview stats plus compact status', () => {
     render(<HeroStats {...defaultProps()} />);
     expect(screen.getByText(/solutions delivered/i)).toBeTruthy();
-    expect(screen.getByText(/jinn claimable/i)).toBeTruthy();
-    expect(screen.queryByText(/jinn earned/i)).toBeNull();
+    expect(screen.getByText(/tjinn earned/i)).toBeTruthy();
+    expect(screen.queryByText(/jinn claimable/i)).toBeNull();
     expect(screen.getByText('42')).toBeTruthy();
     expect(screen.getByText('123')).toBeTruthy();
+    expect(screen.getByText('1 Safe on Sepolia')).toBeTruthy();
     expect(screen.getByText('0.5000')).toBeTruthy();
     expect(screen.getByText(/4 days runway/i)).toBeTruthy();
     expect(screen.getByText('WORKING')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /claim now/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /claim now/i })).toBeNull();
     expect(screen.getByRole('button', { name: /top up/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /restart/i })).toBeTruthy();
     expect(screen.getByTestId('overview-status-stat').getAttribute('data-state')).toBe('working');
@@ -39,11 +41,9 @@ describe('HeroStats', () => {
     expect(screen.queryByText(/node status/i)).toBeNull();
   });
 
-  it('disables Claim now CTA when evicted=true and renders eviction notice (jinn-mono-hjex.3)', () => {
+  it('renders eviction notice without a claim CTA when evicted=true (jinn-mono-hjex.3)', () => {
     render(<HeroStats {...defaultProps()} evicted={true} />);
-    const claimBtn = screen.getByRole('button', { name: /claim now/i });
-    // Button must be disabled when service is evicted
-    expect(claimBtn).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: /claim now/i })).toBeNull();
     // Eviction explainer must be visible — no OLAS mention
     expect(screen.getByText(/service evicted/i)).toBeTruthy();
     expect(screen.queryByText(/OLAS/i)).toBeNull();

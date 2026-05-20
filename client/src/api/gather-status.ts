@@ -2,13 +2,13 @@
  * Best-effort status collection for GET /v1/status (RPC + earning store + SQLite).
  */
 
-import { createPublicClient, http, type PublicClient } from 'viem';
+import { createPublicClient, getAddress, http, type PublicClient } from 'viem';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { FleetStateStore } from '../earning/store.js';
@@ -22,6 +22,10 @@ import {
   type GatheredStatusRaw,
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
+  TJINN_CHAIN_ID,
+  TJINN_TOKEN_ADDRESS,
+  type TjinnServiceStatus,
+  type TjinnStatus,
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
@@ -89,6 +93,8 @@ export function invalidatePredictionOperatorStatusCache(config: JinnConfig): voi
 export interface StatusGatherConfig {
   earningDir: string;
   rpcUrl: string;
+  /** Sepolia RPC endpoint for reading the real tJINN ERC-20 balance. */
+  ethereumRpcUrl?: string;
   network: 'mainnet' | 'testnet';
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
@@ -331,6 +337,160 @@ async function sumPendingStakingRewards(
       : { sum: total.toString(), pendingByService };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function gatherTjinnStatus(
+  ethereumRpcUrl: string | undefined,
+  fleet: FleetState | null,
+): Promise<TjinnStatus> {
+  const baseStatus = {
+    chainId: TJINN_CHAIN_ID,
+    tokenAddress: TJINN_TOKEN_ADDRESS,
+  };
+  if (!fleet) {
+    return {
+      ...baseStatus,
+      state: 'pending',
+      safeBalanceWei: null,
+      safeCount: 0,
+      services: [],
+      error: null,
+    };
+  }
+
+  const services: TjinnServiceStatus[] = [];
+  const safeToAddress = new Map<string, `0x${string}`>();
+
+  for (const svc of fleet.services) {
+    const index = displayFleetServiceIndex(svc);
+    const safeAddress = svc.safe_address;
+    if (!safeAddress) {
+      services.push({
+        index,
+        safeAddress: null,
+        balanceWei: null,
+        state: 'pending',
+        error: null,
+      });
+      continue;
+    }
+    try {
+      const checksum = getAddress(safeAddress);
+      const key = checksum.toLowerCase();
+      services.push({
+        index,
+        safeAddress: checksum,
+        balanceWei: null,
+        state: 'pending',
+        error: null,
+      });
+      safeToAddress.set(key, checksum as `0x${string}`);
+    } catch {
+      services.push({
+        index,
+        safeAddress,
+        balanceWei: null,
+        state: 'error',
+        error: 'Invalid Safe address in fleet state.',
+      });
+    }
+  }
+
+  const safeCount = safeToAddress.size;
+  if (safeCount === 0) {
+    const invalid = services.find((svc) => svc.state === 'error')?.error;
+    return {
+      ...baseStatus,
+      state: invalid ? 'error' : 'pending',
+      safeBalanceWei: null,
+      safeCount,
+      services,
+      error: invalid ?? null,
+    };
+  }
+
+  if (!ethereumRpcUrl) {
+    return {
+      ...baseStatus,
+      state: 'pending',
+      safeBalanceWei: null,
+      safeCount,
+      services,
+      error: null,
+    };
+  }
+
+  const client = createPublicClient({
+    chain: sepolia,
+    transport: http(ethereumRpcUrl),
+  });
+
+  try {
+    const chainId = await client.getChainId();
+    if (chainId !== TJINN_CHAIN_ID) {
+      const error = `Expected Sepolia chain ${TJINN_CHAIN_ID}, got ${chainId}.`;
+      return {
+        ...baseStatus,
+        state: 'error',
+        chainId,
+        safeBalanceWei: null,
+        safeCount,
+        services: services.map((svc) =>
+          svc.safeAddress ? { ...svc, state: 'error', error } : svc,
+        ),
+        error,
+      };
+    }
+
+    const balances = new Map<string, string>();
+    await Promise.all(
+      [...safeToAddress.entries()].map(async ([key, safeAddress]) => {
+        const balance = await client.readContract({
+          address: TJINN_TOKEN_ADDRESS as `0x${string}`,
+          abi: ERC20_BALANCE_OF_ABI,
+          functionName: 'balanceOf',
+          args: [safeAddress],
+        });
+        balances.set(key, balance.toString());
+      }),
+    );
+
+    let total = 0n;
+    for (const balance of balances.values()) {
+      total += BigInt(balance);
+    }
+
+    const hasServiceError = services.some((svc) => svc.state === 'error');
+    return {
+      ...baseStatus,
+      state: hasServiceError ? 'error' : 'ready',
+      safeBalanceWei: hasServiceError ? null : total.toString(),
+      safeCount,
+      services: services.map((svc) => {
+        if (!svc.safeAddress) return svc;
+        if (svc.state === 'error') return svc;
+        const balance = balances.get(svc.safeAddress.toLowerCase());
+        return balance === undefined
+          ? { ...svc, state: 'error', error: 'tJINN balance unavailable.' }
+          : { ...svc, state: 'ready', balanceWei: balance, error: null };
+      }),
+      error: hasServiceError ? 'Could not read tJINN for every Safe.' : null,
+    };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    return {
+      ...baseStatus,
+      state: 'error',
+      safeBalanceWei: null,
+      safeCount,
+      services: services.map((svc) =>
+        svc.safeAddress && svc.state !== 'error'
+          ? { ...svc, state: 'error', error }
+          : svc,
+      ),
+      error,
+    };
   }
 }
 
@@ -602,6 +762,7 @@ export async function gatherGatheredStatusRaw(
     master: {
       address: fleet?.master_address ?? null,
     },
+    tJinn: await gatherTjinnStatus(status.ethereumRpcUrl ?? status.config?.ethereumRpcUrl, fleet),
     rewardClaimIntervalMs: status.rewardClaimIntervalMs,
   };
 

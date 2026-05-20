@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JinnConfig } from '../../src/config.js';
+import { FleetStateStore } from '../../src/earning/store.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import type { PredictionOperatorStatus } from '../../src/solver-nets/prediction-operator-ux.js';
 import { withTempStore } from '@test/store.js';
@@ -12,6 +13,103 @@ describe('gatherStatusForApi', () => {
     vi.doUnmock('viem');
     vi.doUnmock('../../src/solver-nets/prediction-operator-ux.js');
     vi.resetModules();
+  });
+
+  it('reads real tJINN balances on Sepolia and deduplicates shared Safe addresses', async () => {
+    const safeA = '0x3333333333333333333333333333333333333333';
+    const safeB = '0x4444444444444444444444444444444444444444';
+    const balanceReads: Array<{ token: string; safe: string; chainId: number }> = [];
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          readContract: async (req: {
+            address: string;
+            functionName: string;
+            args?: readonly [`0x${string}`];
+          }) => {
+            if (chain.id === 11155111 && req.functionName === 'balanceOf') {
+              const safe = req.args?.[0] ?? '0x';
+              balanceReads.push({ token: req.address, safe, chainId: chain.id });
+              return safe.toLowerCase() === safeA.toLowerCase() ? 10n : 20n;
+            }
+            return 0n;
+          },
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: safeA,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+          {
+            index: 2,
+            agent_address: '0x5555555555555555555555555555555555555555',
+            safe_address: safeA,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+          {
+            index: 3,
+            agent_address: '0x6666666666666666666666666666666666666666',
+            safe_address: safeB,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+        ],
+      });
+
+      const apiStatus = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        ethereumRpcUrl: 'http://sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      expect(apiStatus.tJinn).toMatchObject({
+        state: 'ready',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '30',
+        safeCount: 2,
+        error: null,
+      });
+      expect(apiStatus.tJinn.services.map((svc) => svc.balanceWei)).toEqual(['10', '10', '20']);
+    });
+
+    expect(balanceReads).toEqual([
+      { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeA, chainId: 11155111 },
+      { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeB, chainId: 11155111 },
+    ]);
   });
 
   function mockStatusRpc(): void {
