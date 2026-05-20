@@ -23,6 +23,9 @@ import {
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
   TJINN_CHAIN_ID,
+  TJINN_PUBLIC_INVALID_SAFE_ERROR,
+  TJINN_PUBLIC_PARTIAL_ERROR,
+  TJINN_PUBLIC_READ_ERROR,
   TJINN_TOKEN_ADDRESS,
   type TjinnServiceStatus,
   type TjinnStatus,
@@ -54,6 +57,20 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+const TJINN_BALANCE_CACHE_TTL_MS = 30_000;
+const TJINN_BALANCE_TIMEOUT_MS = 4_000;
+
+interface TjinnBalanceSnapshot {
+  chainId: number;
+  balances: Map<string, string>;
+  errors: Map<string, string>;
+}
+
+const tjinnBalanceCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<TjinnBalanceSnapshot> }
+>();
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -284,6 +301,111 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function tJinnBalanceCacheKey(
+  ethereumRpcUrl: string,
+  safeKeys: readonly string[],
+): string {
+  return `${ethereumRpcUrl}\0${[...safeKeys].sort().join(',')}`;
+}
+
+function timeoutError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'TimeoutError';
+  return error;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(timeoutError(message)), timeoutMs);
+    promise
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
+async function readTjinnBalances(
+  ethereumRpcUrl: string,
+  safeToAddress: Map<string, `0x${string}`>,
+): Promise<TjinnBalanceSnapshot> {
+  const safeEntries = [...safeToAddress.entries()];
+  const client = createPublicClient({
+    chain: sepolia,
+    transport: http(ethereumRpcUrl, { timeout: TJINN_BALANCE_TIMEOUT_MS }),
+  });
+  const chainId = await client.getChainId();
+  const balances = new Map<string, string>();
+  const errors = new Map<string, string>();
+
+  if (chainId !== TJINN_CHAIN_ID) {
+    for (const [key] of safeEntries) {
+      errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+    return { chainId, balances, errors };
+  }
+
+  const settled = await Promise.allSettled(
+    safeEntries.map(async ([key, safeAddress]) => {
+      const balance = await client.readContract({
+        address: TJINN_TOKEN_ADDRESS as `0x${string}`,
+        abi: ERC20_BALANCE_OF_ABI,
+        functionName: 'balanceOf',
+        args: [safeAddress],
+      });
+      return { key, balanceWei: balance.toString() };
+    }),
+  );
+
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i]!;
+    if (result.status === 'fulfilled') {
+      balances.set(result.value.key, result.value.balanceWei);
+    } else {
+      const key = safeEntries[i]?.[0];
+      if (key) errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+  }
+
+  return { chainId, balances, errors };
+}
+
+async function getCachedTjinnBalances(
+  ethereumRpcUrl: string,
+  safeToAddress: Map<string, `0x${string}`>,
+): Promise<TjinnBalanceSnapshot> {
+  const safeKeys = [...safeToAddress.keys()].sort();
+  const cacheKey = tJinnBalanceCacheKey(ethereumRpcUrl, safeKeys);
+  const now = Date.now();
+  const cached = tjinnBalanceCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
+  const promise = withTimeout(
+    readTjinnBalances(ethereumRpcUrl, safeToAddress),
+    TJINN_BALANCE_TIMEOUT_MS,
+    'tJINN balance collection timed out',
+  ).catch((): TjinnBalanceSnapshot => {
+    const errors = new Map<string, string>();
+    for (const key of safeKeys) {
+      errors.set(key, TJINN_PUBLIC_READ_ERROR);
+    }
+    return {
+      chainId: TJINN_CHAIN_ID,
+      balances: new Map<string, string>(),
+      errors,
+    };
+  });
+  tjinnBalanceCache.set(cacheKey, {
+    expiresAt: now + TJINN_BALANCE_CACHE_TTL_MS,
+    promise,
+  });
+  return promise;
+}
+
 async function sumPendingStakingRewards(
   rpcUrl: string,
   network: 'mainnet' | 'testnet',
@@ -392,7 +514,7 @@ async function gatherTjinnStatus(
         safeAddress,
         balanceWei: null,
         state: 'error',
-        error: 'Invalid Safe address in fleet state.',
+        error: TJINN_PUBLIC_INVALID_SAFE_ERROR,
       });
     }
   }
@@ -421,77 +543,45 @@ async function gatherTjinnStatus(
     };
   }
 
-  const client = createPublicClient({
-    chain: sepolia,
-    transport: http(ethereumRpcUrl),
-  });
-
-  try {
-    const chainId = await client.getChainId();
-    if (chainId !== TJINN_CHAIN_ID) {
-      const error = `Expected Sepolia chain ${TJINN_CHAIN_ID}, got ${chainId}.`;
-      return {
-        ...baseStatus,
-        state: 'error',
-        chainId,
-        safeBalanceWei: null,
-        safeCount,
-        services: services.map((svc) =>
-          svc.safeAddress ? { ...svc, state: 'error', error } : svc,
-        ),
-        error,
-      };
-    }
-
-    const balances = new Map<string, string>();
-    await Promise.all(
-      [...safeToAddress.entries()].map(async ([key, safeAddress]) => {
-        const balance = await client.readContract({
-          address: TJINN_TOKEN_ADDRESS as `0x${string}`,
-          abi: ERC20_BALANCE_OF_ABI,
-          functionName: 'balanceOf',
-          args: [safeAddress],
-        });
-        balances.set(key, balance.toString());
-      }),
-    );
-
-    let total = 0n;
-    for (const balance of balances.values()) {
-      total += BigInt(balance);
-    }
-
-    const hasServiceError = services.some((svc) => svc.state === 'error');
-    return {
-      ...baseStatus,
-      state: hasServiceError ? 'error' : 'ready',
-      safeBalanceWei: hasServiceError ? null : total.toString(),
-      safeCount,
-      services: services.map((svc) => {
-        if (!svc.safeAddress) return svc;
-        if (svc.state === 'error') return svc;
-        const balance = balances.get(svc.safeAddress.toLowerCase());
-        return balance === undefined
-          ? { ...svc, state: 'error', error: 'tJINN balance unavailable.' }
-          : { ...svc, state: 'ready', balanceWei: balance, error: null };
-      }),
-      error: hasServiceError ? 'Could not read tJINN for every Safe.' : null,
-    };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    return {
-      ...baseStatus,
-      state: 'error',
-      safeBalanceWei: null,
-      safeCount,
-      services: services.map((svc) =>
-        svc.safeAddress && svc.state !== 'error'
-          ? { ...svc, state: 'error', error }
-          : svc,
-      ),
-      error,
-    };
+  const snapshot = await getCachedTjinnBalances(ethereumRpcUrl, safeToAddress);
+  let total = 0n;
+  for (const balance of snapshot.balances.values()) {
+    total += BigInt(balance);
   }
+  const hasInvalidSafe = services.some((svc) => svc.error === TJINN_PUBLIC_INVALID_SAFE_ERROR);
+  const hasReadError = snapshot.errors.size > 0;
+  const hasAnyError = hasInvalidSafe || hasReadError;
+  const hasAnyBalance = snapshot.balances.size > 0;
+  const publicError = hasAnyError
+    ? hasAnyBalance
+      ? TJINN_PUBLIC_PARTIAL_ERROR
+      : hasInvalidSafe && !hasReadError
+        ? TJINN_PUBLIC_INVALID_SAFE_ERROR
+        : TJINN_PUBLIC_READ_ERROR
+    : null;
+
+  return {
+    ...baseStatus,
+    chainId: snapshot.chainId,
+    state: hasAnyError ? 'error' : 'ready',
+    safeBalanceWei: hasAnyBalance ? total.toString() : null,
+    safeCount,
+    services: services.map((svc) => {
+      if (!svc.safeAddress) return svc;
+      if (svc.state === 'error') return svc;
+      const key = svc.safeAddress.toLowerCase();
+      const balance = snapshot.balances.get(key);
+      if (balance !== undefined) {
+        return { ...svc, state: 'ready', balanceWei: balance, error: null };
+      }
+      return {
+        ...svc,
+        state: 'error',
+        error: snapshot.errors.get(key) ?? TJINN_PUBLIC_READ_ERROR,
+      };
+    }),
+    error: publicError,
+  };
 }
 
 function hasUsefulCacheValues(entry: BalanceCacheEntry, isAgentRole: boolean): boolean {

@@ -20,6 +20,15 @@ export type TjinnStatusState = 'pending' | 'ready' | 'error';
 
 export const TJINN_CHAIN_ID = 11155111;
 export const TJINN_TOKEN_ADDRESS = '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A';
+export const TJINN_PUBLIC_READ_ERROR = 'Sepolia tJINN balance temporarily unavailable.';
+export const TJINN_PUBLIC_PARTIAL_ERROR = 'Some Safe tJINN balances are temporarily unavailable.';
+export const TJINN_PUBLIC_INVALID_SAFE_ERROR = 'One or more Safe addresses are invalid.';
+
+const TJINN_PUBLIC_ERRORS = new Set([
+  TJINN_PUBLIC_READ_ERROR,
+  TJINN_PUBLIC_PARTIAL_ERROR,
+  TJINN_PUBLIC_INVALID_SAFE_ERROR,
+]);
 
 export interface TjinnServiceStatus {
   index: number;
@@ -287,6 +296,32 @@ function defaultTjinnStatus(): TjinnStatus {
   };
 }
 
+export function redactTjinnPublicError(
+  error: string | null | undefined,
+  fallback = TJINN_PUBLIC_READ_ERROR,
+): string | null {
+  if (!error) return null;
+  return TJINN_PUBLIC_ERRORS.has(error) ? error : fallback;
+}
+
+function publicServiceError(status: TjinnServiceStatus, fallback: string): string | null {
+  return redactTjinnPublicError(status.error, fallback);
+}
+
+function publicTjinnStatus(status: TjinnStatus): TjinnStatus {
+  const fallback = status.safeBalanceWei != null
+    ? TJINN_PUBLIC_PARTIAL_ERROR
+    : TJINN_PUBLIC_READ_ERROR;
+  return {
+    ...status,
+    error: redactTjinnPublicError(status.error, fallback),
+    services: status.services.map((svc) => ({
+      ...svc,
+      error: publicServiceError(svc, fallback),
+    })),
+  };
+}
+
 function buildEarningsHint(raw: GatheredStatusRaw, fleetSum: StatusV1Response['fleet']): string {
   if (raw.hintsScope === 'sqlite_only') {
     return 'Fleet and on-chain earnings hints omitted in API-only mode.';
@@ -415,7 +450,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
           : claimedRewardsWei.toString(),
       pendingRewardsError: raw.pendingRewardsError,
     },
-    tJinn: raw.tJinn ?? defaultTjinnStatus(),
+    tJinn: publicTjinnStatus(raw.tJinn ?? defaultTjinnStatus()),
     masterGas: {
       address: raw.master.address,
       balanceWei: raw.master.balanceWei,

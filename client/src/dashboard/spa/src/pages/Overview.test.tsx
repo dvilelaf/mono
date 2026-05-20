@@ -536,7 +536,7 @@ describe('OverviewPage empty-state gating', () => {
         safeBalanceWei: null,
         safeCount: 1,
         services: [],
-        error: 'Sepolia RPC unavailable',
+        error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
       },
       fleet: { services: [] },
       predictionV1: {
@@ -549,7 +549,37 @@ describe('OverviewPage empty-state gating', () => {
 
     expect(await screen.findByText(/tjinn earned/i)).toBeTruthy();
     expect(await screen.findByText('Unavailable')).toBeTruthy();
-    expect(screen.getByText('Sepolia RPC unavailable')).toBeTruthy();
+    expect(screen.getByText('Sepolia tJINN balance temporarily unavailable.')).toBeTruthy();
+    expect(screen.queryByText(/apikey=secret/i)).toBeNull();
+    expect(screen.queryByText(/rpc\.sepolia\.example/i)).toBeNull();
+  });
+
+  it('shows a partial tJINN total with generic error copy', async () => {
+    getStatusMock.mockResolvedValue({
+      tJinn: {
+        state: 'error',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: '1500000000000000000',
+        safeCount: 2,
+        services: [],
+        error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
+      },
+      fleet: { services: [] },
+      predictionV1: {
+        operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] },
+        totals: { observedTasks: 0, activeTaskRuns: 0, solutions: 0, verdicts: 0, failed: 0 },
+      },
+    });
+    getBootstrapMock.mockResolvedValue({});
+    render(withProviders(<OverviewPage />));
+
+    expect(await screen.findByText(/tjinn earned/i)).toBeTruthy();
+    expect(await screen.findByText('1.5000')).toBeTruthy();
+    expect(screen.getByText('tJINN')).toBeTruthy();
+    expect(screen.getByText('Some Safe balances are temporarily unavailable.')).toBeTruthy();
+    expect(screen.queryByText(/apikey=secret/i)).toBeNull();
+    expect(screen.queryByText(/rpc\.sepolia\.example/i)).toBeNull();
   });
 
   it('wires dashboard card actions to their real actions', async () => {

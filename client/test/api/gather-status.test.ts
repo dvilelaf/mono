@@ -10,6 +10,7 @@ import { withTempStore } from '@test/store.js';
 
 describe('gatherStatusForApi', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.doUnmock('viem');
     vi.doUnmock('../../src/solver-nets/prediction-operator-ux.js');
     vi.resetModules();
@@ -110,6 +111,154 @@ describe('gatherStatusForApi', () => {
       { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeA, chainId: 11155111 },
       { token: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A', safe: safeB, chainId: 11155111 },
     ]);
+  });
+
+  it('keeps successful tJINN balances when one Safe read fails and redacts public errors', async () => {
+    const safeA = '0x3333333333333333333333333333333333333333';
+    const safeB = '0x4444444444444444444444444444444444444444';
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          readContract: async (req: {
+            functionName: string;
+            args?: readonly [`0x${string}`];
+          }) => {
+            if (chain.id === 11155111 && req.functionName === 'balanceOf') {
+              const safe = req.args?.[0] ?? '0x';
+              if (safe.toLowerCase() === safeB.toLowerCase()) {
+                throw new Error('HTTP request failed for http://sepolia.example?apikey=secret');
+              }
+              return 10n;
+            }
+            return 0n;
+          },
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: safeA,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+          {
+            index: 2,
+            agent_address: '0x5555555555555555555555555555555555555555',
+            safe_address: safeB,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+        ],
+      });
+
+      const apiStatus = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        ethereumRpcUrl: 'http://sepolia.example',
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      expect(apiStatus.tJinn.state).toBe('error');
+      expect(apiStatus.tJinn.safeBalanceWei).toBe('10');
+      expect(apiStatus.tJinn.error).toBe('Some Safe tJINN balances are temporarily unavailable.');
+      expect(apiStatus.tJinn.services.map((svc) => svc.state)).toEqual(['ready', 'error']);
+      expect(apiStatus.tJinn.services.map((svc) => svc.balanceWei)).toEqual(['10', null]);
+      expect(JSON.stringify(apiStatus.tJinn)).not.toContain('apikey=secret');
+      expect(JSON.stringify(apiStatus.tJinn)).not.toContain('sepolia.example');
+    });
+  });
+
+  it('caches tJINN balance reads for a short TTL', async () => {
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const safeA = '0x3333333333333333333333333333333333333333';
+    const balanceReads: string[] = [];
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      return {
+        ...actual,
+        createPublicClient: ({ chain }: { chain: { id: number } }) => ({
+          getBlockNumber: async () => 123n,
+          getChainId: async () => chain.id,
+          getBalance: async () => 0n,
+          readContract: async (req: {
+            functionName: string;
+            args?: readonly [`0x${string}`];
+          }) => {
+            if (chain.id === 11155111 && req.functionName === 'balanceOf') {
+              balanceReads.push(req.args?.[0] ?? '0x');
+              return 10n;
+            }
+            return 0n;
+          },
+        }),
+        http: () => ({}),
+      };
+    });
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-status-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: safeA,
+            service_id: null,
+            mech_address: null,
+            staking_address: null,
+            step: 'awaiting_stake',
+            error: null,
+          },
+        ],
+      });
+      const status = {
+        earningDir,
+        rpcUrl: 'http://base-sepolia.example',
+        ethereumRpcUrl: 'http://sepolia.example',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      };
+
+      await gatherStatusForApi(store, status);
+      now += 5_000;
+      await gatherStatusForApi(store, status);
+      now += 31_000;
+      await gatherStatusForApi(store, status);
+    });
+
+    expect(balanceReads).toEqual([safeA, safeA]);
   });
 
   function mockStatusRpc(): void {

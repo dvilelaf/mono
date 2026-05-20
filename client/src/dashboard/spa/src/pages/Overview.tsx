@@ -141,9 +141,16 @@ function formatTjinn(status?: OverviewStatusV1['tJinn']): {
   }
 
   if (status.state === 'error') {
+    if (status.safeBalanceWei != null) {
+      return {
+        value: formatEth(status.safeBalanceWei),
+        unit: 'tJINN',
+        sub: 'Some Safe balances are temporarily unavailable.',
+      };
+    }
     return {
       value: 'Unavailable',
-      sub: status.error ?? 'Sepolia tJINN balance read failed.',
+      sub: 'Sepolia tJINN balance temporarily unavailable.',
     };
   }
 

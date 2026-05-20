@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleStatusV1,
   resolveMasterDailyEstimateWei,
+  TJINN_PUBLIC_READ_ERROR,
   type GatheredStatusRaw,
 } from '../../src/api/status-build.js';
 import type { FleetState } from '../../src/earning/types.js';
@@ -195,6 +196,42 @@ describe('assembleStatusV1', () => {
     expect(j.rewards.pendingStakingRewardsWei).toBe('200');
     expect(j.tJinn.safeBalanceWei).toBe('500');
     expect(j.tJinn.tokenAddress).toBe('0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A');
+  });
+
+  it('redacts raw tJINN read errors at the public status boundary', () => {
+    const raw: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: minimalFleet(),
+      rpc: { ok: true, chainId: 8453, blockNumber: '1' },
+      master: { address: '0x1111111111111111111111111111111111111111' },
+      tJinn: {
+        state: 'error',
+        chainId: 11155111,
+        tokenAddress: '0x0bc0B2f733bF4229FD58Baaac5ebFEf2AEc83C4A',
+        safeBalanceWei: null,
+        safeCount: 1,
+        services: [{
+          index: 0,
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          balanceWei: null,
+          state: 'error',
+          error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
+        }],
+        error: 'HTTP request failed for https://rpc.sepolia.example?apikey=secret',
+      },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.tJinn.error).toBe(TJINN_PUBLIC_READ_ERROR);
+    expect(j.tJinn.services[0]?.error).toBe(TJINN_PUBLIC_READ_ERROR);
+    expect(JSON.stringify(j.tJinn)).not.toContain('apikey=secret');
+    expect(JSON.stringify(j.tJinn)).not.toContain('rpc.sepolia.example');
   });
 
   it('passes prediction.v1 status through when present', () => {
