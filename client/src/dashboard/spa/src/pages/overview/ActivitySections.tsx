@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'wouter';
 import { api } from '../../api/client.js';
+import { eventKindMeta, eventKindColor } from '../../lib/event-kinds.js';
 
 /**
  * Live activity surface — the operator's view of what their daemon has been
@@ -13,8 +15,9 @@ import { api } from '../../api/client.js';
  * activity without navigating away (issue #219). Also reused by the dedicated
  * /overview/activity drilldown page.
  *
- * v1 limitations (see plan §"Out of scope"):
- *   • activity.recent is capped at 12 events. Pagination is a follow-up.
+ * The Recent section is a compact summary (~12 events from /v1/status). The
+ * full, paginated, filterable view lives on the dedicated /events page
+ * (issue #419) — linked from the "View all events" CTA below.
  */
 
 const TERMINAL_STATES = new Set(['COMPLETE', 'FAILED']);
@@ -77,10 +80,6 @@ function formatTimestamp(ts: string | null): string {
   return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
-function formatKind(kind: string): string {
-  return kind.replace(/_/g, ' ');
-}
-
 function truncateRequestId(requestId: string): string {
   if (requestId.length <= 14) return requestId;
   return `${requestId.slice(0, 8)}…${requestId.slice(-4)}`;
@@ -89,22 +88,6 @@ function truncateRequestId(requestId: string): string {
 function txDisplay(txHash: string | null | undefined): string {
   if (!txHash) return '—';
   return txHash.length > 12 ? `${txHash.slice(0, 6)}…${txHash.slice(-4)}` : txHash;
-}
-
-const KIND_TONE: Record<string, string> = {
-  task_posted: 'var(--accent-sky)',
-  request_claimed: 'var(--accent-sky)',
-  delivery_submitted: 'var(--vow-green)',
-  evaluation_submitted: 'var(--vow-green)',
-  reward_claimed: 'var(--accent-gold)',
-  tick_error: 'var(--break-red)',
-  intent_registry_failed: 'var(--break-red)',
-  error: 'var(--break-red)',
-};
-
-function kindColor(kind: string, outcome: string | null): string {
-  if (outcome === 'failed') return 'var(--break-red)';
-  return KIND_TONE[kind] ?? 'var(--accent-sky)';
 }
 
 export interface ActivitySectionsProps {
@@ -325,13 +308,13 @@ export function ActivitySections({
                 <span style={{ color: 'var(--fg-dim)' }}>{formatTimestamp(row.ts)}</span>
                 <span
                   style={{
-                    color: kindColor(row.kind, row.outcome),
+                    color: eventKindColor(row.kind, row.outcome),
                     textTransform: 'uppercase',
                     letterSpacing: '0.12em',
                     fontSize: '11px',
                   }}
                 >
-                  {formatKind(row.kind)}
+                  {eventKindMeta(row.kind).label}
                 </span>
                 <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {row.requestId ?? row.solverType ?? '—'}
@@ -348,16 +331,20 @@ export function ActivitySections({
             ))}
           </ul>
         )}
-        <p
+        <Link
+          href="/events"
+          data-testid="overview-activity-view-all"
           style={{
-            margin: 0,
-            color: 'var(--fg-dim)',
+            fontFamily: "'JetBrains Mono', monospace",
             fontSize: '11px',
-            fontStyle: 'italic',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--accent-sky)',
+            textDecoration: 'none',
           }}
         >
-          Older events: see on-chain via the operator's safe address. Pagination here is a follow-up.
-        </p>
+          View all events →
+        </Link>
       </section>
     </>
   );

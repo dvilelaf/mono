@@ -19,6 +19,8 @@ export const ROUTES: RouteSpec[] = [
     label: 'operator-join',
     params: { cid: 'bafkrei-mock-manifest-cid' },
   },
+  { path: '/events/:id', label: 'event-detail', params: { id: '1' } },
+  { path: '/events', label: 'events' },
   { path: '/operator/execution-data', label: 'operator-execution-data' },
   { path: '/operator', label: 'operator' },
   { path: '/captures', label: 'captures' },

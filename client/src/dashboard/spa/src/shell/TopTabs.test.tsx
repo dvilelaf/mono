@@ -45,6 +45,17 @@ describe('TopTabs', () => {
     expect(settings.getAttribute('data-active')).toBe('false');
   });
 
+  it('renders the Events tab and marks it active on /events routes', () => {
+    renderTabs('/events');
+    const events = screen.getByText('Events');
+    expect(events.getAttribute('data-active')).toBe('true');
+  });
+
+  it('marks the Events tab active on an event detail route', () => {
+    renderTabs('/events/42');
+    expect(screen.getByText('Events').getAttribute('data-active')).toBe('true');
+  });
+
   it('does not render the Leaderboard tab while the leaderboard surface is disabled', () => {
     renderTabs('/overview');
     expect(screen.queryByText('Leaderboard')).toBeNull();

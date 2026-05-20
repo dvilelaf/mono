@@ -14,6 +14,8 @@ import { RestartBanner } from './shell/RestartBanner.js';
 import { OfflineBanner } from './shell/OfflineBanner.js';
 import { OverviewPage } from './pages/Overview.js';
 import { OverviewActivityPage } from './pages/OverviewActivity.js';
+import { EventsPage } from './pages/Events.js';
+import { EventDetailPage } from './pages/EventDetail.js';
 import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
@@ -107,6 +109,8 @@ export default function App(): JSX.Element {
         <Switch>
           <Route path="/overview/activity"><OverviewActivityPage /></Route>
           <Route path="/overview" component={OverviewPage} />
+          <Route path="/events/:id"><EventDetailPage /></Route>
+          <Route path="/events"><EventsPage /></Route>
           <Route path="/operator/join/:cid"><JoinFlow /></Route>
           <Route path="/operator/execution-data"><CapturesTab /></Route>
           <Route path="/operator">

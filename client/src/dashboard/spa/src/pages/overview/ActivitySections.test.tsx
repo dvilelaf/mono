@@ -102,6 +102,22 @@ describe('<ActivitySections />', () => {
     expect(screen.getByText(/request claimed/i)).toBeTruthy();
   });
 
+  it('links to the dedicated Events page and drops the stale pagination note', async () => {
+    vi.mocked(api.getStatus).mockResolvedValue({
+      fleet: { services: [] },
+      activity: { recent: [] },
+      taskRuns: { inFlight: [] },
+    });
+    wrap(<ActivitySections pollIntervalMs={60_000} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('overview-activity-recent')).toBeTruthy(),
+    );
+    const viewAll = screen.getByTestId('overview-activity-view-all');
+    expect(viewAll.getAttribute('href')).toBe('/events');
+    // the misleading "Pagination here is a follow-up" footer is gone
+    expect(screen.queryByText(/pagination here is a follow-up/i)).toBeNull();
+  });
+
   it('shows an operable error state with a working retry', async () => {
     vi.mocked(api.getStatus).mockRejectedValueOnce(new Error('status unavailable'));
     wrap(<ActivitySections pollIntervalMs={60_000} />);

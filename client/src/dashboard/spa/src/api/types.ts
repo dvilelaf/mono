@@ -14,6 +14,30 @@ export interface StructuredEvent {
 
 export type DaemonMode = 'setup' | 'running' | 'uninitialized';
 
+// ── Activity events (issue #419 — the dedicated Events page) ─────────────────
+// Mirrors the daemon's `ActivityEventRow` (src/store/store.ts). Surfaced by the
+// paginated/filtered `/v1/activity-events` endpoint.
+
+export interface ActivityEventRow {
+  id: number;
+  ts: string | null;
+  kind: string;
+  requestId: string | null;
+  serviceIndex: number | null;
+  txHash: string | null;
+  solverType: string | null;
+  outcome: string | null;
+  detail: string | null;
+}
+
+export interface ActivityEventsResponse {
+  events: ActivityEventRow[];
+  /** id of the last (oldest) returned row when a full page came back, else null. */
+  nextCursor: number | null;
+  /** Per-kind totals across the whole table — drives filter facet counts. */
+  counts: Record<string, number>;
+}
+
 export interface BootstrapErrorEnvelope {
   schemaVersion: 1;
   generatedAt: string;

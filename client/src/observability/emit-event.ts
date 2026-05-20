@@ -1,20 +1,29 @@
 import type { Store } from '../store/store.js';
 
-export type LifecycleKind =
-  | 'task_posted'
-  | 'intent_registry_failed'
-  | 'request_claimed'
-  | 'delivery_submitted'
-  | 'evaluation_submitted'
-  | 'reward_claimed'
-  | 'balance_topup'
-  | 'jinn_claim_emitted'
-  | 'jinn_claim_submitted'
-  | 'jinn_claim_canonical_skip'
-  | 'engine_transition'
-  | 'tick_error'
-  | 'startup'
-  | 'shutdown';
+/**
+ * The complete set of lifecycle event kinds persisted to the `activity_events`
+ * table. Exported as a runtime array so HTTP route validation (and SPA parity
+ * tests) can reference a single source of truth — see
+ * `src/api/activity-events-endpoint.ts` and the SPA's `lib/event-kinds.ts`.
+ */
+export const ALLOWED_LIFECYCLE_KINDS = [
+  'task_posted',
+  'intent_registry_failed',
+  'request_claimed',
+  'delivery_submitted',
+  'evaluation_submitted',
+  'reward_claimed',
+  'balance_topup',
+  'jinn_claim_emitted',
+  'jinn_claim_submitted',
+  'jinn_claim_canonical_skip',
+  'engine_transition',
+  'tick_error',
+  'startup',
+  'shutdown',
+] as const;
+
+export type LifecycleKind = (typeof ALLOWED_LIFECYCLE_KINDS)[number];
 
 export interface LifecycleEvent {
   kind: LifecycleKind;

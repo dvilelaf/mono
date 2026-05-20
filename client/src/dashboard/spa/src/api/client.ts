@@ -28,6 +28,8 @@ import type {
   DiscoveryBuilderArtifactsResponse,
   DiscoveryPluginScoresResponse,
   HarnessReadinessEntry,
+  ActivityEventRow,
+  ActivityEventsResponse,
 } from './types.js';
 
 interface JsonErrorPayload {
@@ -81,6 +83,27 @@ export const api = {
     q.set('limit', String(limit));
     return jfetch<{ events: StructuredEvent[] }>(`/v1/events/recent?${q.toString()}`);
   },
+  /**
+   * Paginated, filtered lifecycle activity events for the dedicated Events
+   * page (issue #419). Distinct from `getRecentEvents` (the in-memory
+   * StructuredEvent ring buffer).
+   */
+  getActivityEvents: (opts?: {
+    kinds?: string[];
+    outcome?: string;
+    beforeId?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (opts?.kinds && opts.kinds.length > 0) q.set('kinds', opts.kinds.join(','));
+    if (opts?.outcome) q.set('outcome', opts.outcome);
+    if (opts?.beforeId !== undefined) q.set('beforeId', String(opts.beforeId));
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return jfetch<ActivityEventsResponse>(`/v1/activity-events${qs ? `?${qs}` : ''}`);
+  },
+  getActivityEvent: (id: number | string) =>
+    jfetch<ActivityEventRow>(`/v1/activity-events/${encodeURIComponent(String(id))}`),
   getClaudeAuth: () => jfetch<ClaudeAuthState>('/v1/auth/claude'),
   installClaudeCode: () =>
     jfetch<{

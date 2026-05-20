@@ -9,14 +9,28 @@ import { OperatorPage } from './pages/Operator.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
+import { EventsPage } from './pages/Events.js';
+import { EventDetailPage } from './pages/EventDetail.js';
 import { getFeatures } from './lib/features.js';
 
 // Operator + Overview + Launcher pages all useQuery for the daemon API;
 // mock so the routing tests don't depend on a live server.
 vi.mock('./api/client.js', () => ({
   api: {
-    getBootstrap: async () => ({}),
+    getBootstrap: async () => ({ chain: 'base' }),
     getStatus: async () => ({ activity: { counts: {}, recent: [] } }),
+    getActivityEvents: async () => ({ events: [], nextCursor: null, counts: {} }),
+    getActivityEvent: async () => ({
+      id: 1,
+      ts: '2026-05-01T00:00:00Z',
+      kind: 'task_posted',
+      requestId: null,
+      serviceIndex: null,
+      txHash: null,
+      solverType: null,
+      outcome: 'ok',
+      detail: null,
+    }),
     getSolverNets: async () => ({ schemaVersion: 1, generatedAt: '', nets: [] }),
     claimRewards: async () => ({ ok: true }),
     restartDaemon: async () => ({ ok: true }),
@@ -129,6 +143,38 @@ describe('App routes', () => {
       expect(screen.getByTestId('overview-activity')).toBeTruthy();
     });
     expect(screen.getByTestId('live-now-band')).toBeTruthy();
+  });
+
+  it('renders EventsPage on /events', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/events/:id"><EventDetailPage /></Route>
+          <Route path="/events"><EventsPage /></Route>
+          <Route path="/overview"><OverviewPage /></Route>
+        </Switch>,
+        '/events',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('events-page')).toBeTruthy();
+    });
+  });
+
+  it('renders EventDetailPage on /events/:id', async () => {
+    render(
+      withProviders(
+        <Switch>
+          <Route path="/events/:id"><EventDetailPage /></Route>
+          <Route path="/events"><EventsPage /></Route>
+          <Route path="/overview"><OverviewPage /></Route>
+        </Switch>,
+        '/events/1',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('event-detail')).toBeTruthy();
+    });
   });
 
   it('renders OperatorPage on /operator', async () => {

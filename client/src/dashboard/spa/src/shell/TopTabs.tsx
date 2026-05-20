@@ -8,6 +8,7 @@ import { getFeatures } from '../lib/features.js';
 // JINN_ENABLE_PLUGIN_BUILDER_UI=1.
 const BASE_TABS = [
   { path: '/overview', label: 'Dashboard' },
+  { path: '/events', label: 'Events' },
   { path: '/operator', label: 'Settings' },
 ] as const;
 
